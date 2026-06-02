@@ -23,7 +23,7 @@
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px; font-weight: 600;
   color: rgba(255,255,255,0.4);
-  white-space: nowrap; min-width: 58px;
+  white-space: nowrap; min-width: 120px;
 }
 .cal-event-item.is-now .cal-event-time { color: #7DD3FC; }
 .cal-event-dot {
@@ -43,6 +43,20 @@
   font-size: 13px; padding: 8px 10px;
   width: 100px; flex-shrink: 0;
   color-scheme: dark;
+}
+.cal-dur-input {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px; color: #FAFAFA;
+  font-size: 13px; padding: 8px 8px;
+  width: 54px; flex-shrink: 0; text-align: center;
+  -moz-appearance: textfield;
+}
+.cal-dur-input::-webkit-inner-spin-button,
+.cal-dur-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cal-dur-label {
+  font-size: 12px; color: rgba(255,255,255,0.4);
+  flex-shrink: 0; margin-left: -4px;
 }
 .cal-offline {
   font-size: 12px; color: #fbbf24; padding: 6px 2px 2px;
@@ -172,6 +186,8 @@
     <div class="gm-input-wrap">
       <input class="gm-input" id="calTaskInput" type="text" placeholder="Schedule a task…" autocomplete="off"/>
       <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
+      <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
+      <span class="cal-dur-label">min</span>
       <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
     </div>
     <div class="gm-status-line" id="calStatus"></div>
@@ -218,6 +234,19 @@
     return h + (m ? ':' + String(m).padStart(2, '0') : '') + ' ' + ampm;
   }
 
+  function fmtRange(startIso, endIso) {
+    const s = new Date(startIso), e = new Date(endIso);
+    const sAmpm = s.getHours() >= 12 ? 'PM' : 'AM';
+    const eAmpm = e.getHours() >= 12 ? 'PM' : 'AM';
+    function fmt(d, showAmpm) {
+      let h = d.getHours() % 12 || 12;
+      const m = d.getMinutes();
+      return h + (m ? ':' + String(m).padStart(2, '0') : '') + (showAmpm ? ' ' + (d.getHours() >= 12 ? 'PM' : 'AM') : '');
+    }
+    // Only show AM/PM on start if it differs from end, always show on end
+    return fmt(s, sAmpm !== eAmpm) + ' – ' + fmt(e, true);
+  }
+
   function fmtDateLabel() {
     const d = new Date();
     const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -246,7 +275,7 @@
     count.textContent = events.length + ' event' + (events.length !== 1 ? 's' : '');
     list.innerHTML = events.map(ev => {
       const cls   = eventClass(ev);
-      const time  = ev.allDay ? 'all day' : fmtTime(ev.start);
+      const time  = ev.allDay ? 'all day' : fmtRange(ev.start, ev.end);
       const notes = ev.notes
         ? `<span class="cal-event-notes">${ev.notes.split('\n')[0]}</span>`
         : '';
@@ -296,10 +325,12 @@
     const title    = titleEl.value.trim();
     if (!title) { titleEl.focus(); return; }
 
-    const [h, m] = timeEl.value.split(':').map(Number);
+    const durEl   = document.getElementById('calDurInput');
+    const dur     = Math.max(1, parseInt(durEl.value) || 15);
+    const [h, m]  = timeEl.value.split(':').map(Number);
     const startDt = new Date();
     startDt.setHours(h, m, 0, 0);
-    const endDt = new Date(startDt.getTime() + 60 * 60 * 1000);
+    const endDt = new Date(startDt.getTime() + dur * 60 * 1000);
 
     addBtn.disabled = true;
     statusEl.textContent = 'Scheduling…';
