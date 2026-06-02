@@ -1,278 +1,210 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Notion Proxy Server
+// Google Calendar Proxy Server
 //
 // WHY THIS EXISTS
-//   Browsers block direct calls to api.notion.com (CORS policy).
-//   This server runs locally on your machine, sits between your dashboard
-//   and Notion, and forwards the requests with your secret token attached.
+//   Browsers can't call the Google Calendar API directly from your HTML pages
+//   because OAuth tokens must stay secret (never exposed to the browser).
+//   This server holds your credentials, gets fresh access tokens automatically,
+//   and forwards the calendar data to your dashboard.
 //
-//   Browser (index.html)
+//   Browser (index.html / finance.html / …)
 //       │  HTTP request  (no token, goes to localhost)
 //       ▼
 //   This proxy  (localhost:3001)
-//       │  HTTP request  (attaches your Notion token, goes to notion.com)
+//       │  HTTP request  (attaches OAuth access token, goes to Google)
 //       ▼
-//   Notion API  (api.notion.com)
+//   Google Calendar API
 //       │  response
 //       ▼
 //   This proxy  →  Browser
 //
 // HOW TO RUN
-//   1. Copy .env.example to .env and fill in your values
+//   1. Copy .env.example to .env and fill in GOOGLE_CLIENT_ID,
+//      GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
+//      (run `node auth.js` once to get the refresh token)
 //   2. npm install
 //   3. npm start   (or "npm run dev" to auto-restart on changes)
 // ─────────────────────────────────────────────────────────────────────────────
 
 require('dotenv').config();
-const express = require('express');
-const axios   = require('axios');
-const cors    = require('cors');
+const express      = require('express');
+const cors         = require('cors');
+const { google }   = require('googleapis');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
-// ── Notion constants ──────────────────────────────────────────────────────────
-const NOTION_TOKEN    = process.env.NOTION_TOKEN    || '';
-const NOTION_DB_ID    = process.env.NOTION_DATABASE_ID || '';
-const NOTION_BASE_URL = 'https://api.notion.com/v1';
-const NOTION_VERSION  = '2022-06-28';
+// ── Google OAuth2 config ──────────────────────────────────────────────────────
+const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || '';
+const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN || '';
+const CALENDAR_ID   = process.env.GOOGLE_CALENDAR_ID   || 'primary';
+const TIMEZONE      = process.env.TIMEZONE             || 'UTC';
 
-// Guard: fail early if the token is missing
-if (!NOTION_TOKEN) {
-  console.error('ERROR: NOTION_TOKEN is not set in .env');
+if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
+  console.error('ERROR: Missing Google OAuth credentials in proxy/.env');
+  console.error('Run `node auth.js` to get your GOOGLE_REFRESH_TOKEN.');
   process.exit(1);
 }
 
+// Build an OAuth2 client that auto-refreshes the access token using the
+// stored refresh token — no manual re-auth needed after the first setup.
+const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, 'http://localhost:3002/callback');
+oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
+const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
 // ── Middleware ────────────────────────────────────────────────────────────────
-
-// Allow requests from any origin (your HTML file opened via Live Server or file://)
 app.use(cors());
-
-// Parse incoming JSON bodies (needed for POST/PATCH requests from the dashboard)
 app.use(express.json());
 
-// ── Notion request helper ─────────────────────────────────────────────────────
-//
-// Every call to Notion needs the same three headers:
-//   Authorization  – proves who you are
-//   Notion-Version – tells Notion which API version to use
-//   Content-Type   – tells Notion the body is JSON
-//
-async function notionRequest({ method, path, body }) {
-  try {
-    const response = await axios({
-      method,
-      url: `${NOTION_BASE_URL}${path}`,
-      headers: {
-        'Authorization':  `Bearer ${NOTION_TOKEN}`,
-        'Notion-Version': NOTION_VERSION,
-        'Content-Type':   'application/json',
-      },
-      data: body,
-    });
-    return { ok: true, data: response.data };
-  } catch (err) {
-    const status  = err.response?.status  || 500;
-    const message = err.response?.data?.message || err.message;
-    return { ok: false, status, message };
-  }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function dayBounds(dateStr) {
+  return {
+    timeMin: `${dateStr}T00:00:00`,
+    timeMax: `${dateStr}T23:59:59`,
+  };
+}
+
+function formatEvent(ev) {
+  const allDay = !ev.start?.dateTime;
+  return {
+    id:       ev.id,
+    title:    ev.summary    || '(no title)',
+    start:    ev.start?.dateTime || ev.start?.date || null,
+    end:      ev.end?.dateTime   || ev.end?.date   || null,
+    allDay,
+    notes:    ev.description || '',
+    location: ev.location   || '',
+    status:   ev.status,
+    url:      ev.htmlLink   || '',
+    color:    ev.colorId    || null,
+  };
+}
+
+async function listEvents({ timeMin, timeMax }) {
+  const res = await calendar.events.list({
+    calendarId:  CALENDAR_ID,
+    timeMin,
+    timeMax,
+    timeZone:    TIMEZONE,
+    singleEvents: true,
+    orderBy:     'startTime',
+    maxResults:  250,
+  });
+  return (res.data.items || []).map(formatEvent);
 }
 
 // ── ROUTES ────────────────────────────────────────────────────────────────────
 
-// Health check — open http://localhost:3001/health in your browser to verify
-// the proxy is running
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    notion_token_set: !!NOTION_TOKEN,
-    notion_database_id_set: !!NOTION_DB_ID,
-  });
+// Health check — open http://localhost:3001/health to verify the proxy is up
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', calendar_id: CALENDAR_ID, timezone: TIMEZONE });
 });
 
 
-// ── 1. GET /api/events ────────────────────────────────────────────────────────
-//
-// Fetches all entries from your Notion calendar database.
-// By default returns today's events; pass ?date=YYYY-MM-DD to get any day.
-//
-// How it works:
-//   POST to Notion's /databases/:id/query endpoint with a date filter.
-//   Notion returns a list of "pages" — each page is one calendar entry.
-//
+// ── 1. GET /api/events?date=YYYY-MM-DD ────────────────────────────────────────
+// Returns all events for a single day (defaults to today).
 app.get('/api/events', async (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-
-  const { ok, data, status, message } = await notionRequest({
-    method: 'POST',
-    path:   `/databases/${NOTION_DB_ID}/query`,
-    body: {
-      // Filter: only return pages whose Date property contains the requested day
-      filter: {
-        property: 'Date',        // <-- change this to match your column name
-        date: {
-          equals: date,
-        },
-      },
-      sorts: [
-        { property: 'Date', direction: 'ascending' },
-      ],
-    },
-  });
-
-  if (!ok) return res.status(status).json({ error: message });
-
-  // Transform raw Notion pages into a simpler shape for the dashboard
-  const events = data.results.map(page => formatPage(page));
-  res.json(events);
+  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  try {
+    res.json(await listEvents(dayBounds(date)));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
-// ── 2. GET /api/events/range ──────────────────────────────────────────────────
-//
-// Fetch events between two dates.
-// Usage: /api/events/range?start=2026-06-01&end=2026-06-07
-//
+// ── 2. GET /api/events/range?start=YYYY-MM-DD&end=YYYY-MM-DD ─────────────────
+// Returns all events between two dates (inclusive).
 app.get('/api/events/range', async (req, res) => {
   const { start, end } = req.query;
-  if (!start || !end) {
-    return res.status(400).json({ error: 'start and end query params are required' });
+  if (!start || !end) return res.status(400).json({ error: 'start and end are required' });
+  try {
+    res.json(await listEvents({
+      timeMin: `${start}T00:00:00`,
+      timeMax: `${end}T23:59:59`,
+    }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const { ok, data, status, message } = await notionRequest({
-    method: 'POST',
-    path:   `/databases/${NOTION_DB_ID}/query`,
-    body: {
-      filter: {
-        and: [
-          { property: 'Date', date: { on_or_after: start } },
-          { property: 'Date', date: { on_or_before: end  } },
-        ],
-      },
-      sorts: [{ property: 'Date', direction: 'ascending' }],
-    },
-  });
-
-  if (!ok) return res.status(status).json({ error: message });
-
-  res.json(data.results.map(page => formatPage(page)));
 });
 
 
 // ── 3. POST /api/events ───────────────────────────────────────────────────────
-//
-// Create a new event/task in your Notion database.
-// Body: { title, date, notes }
-//
+// Create a new event.
+// Body: { title, date, notes?, startTime?, endTime?, allDay? }
+//   allDay=true  (or no startTime/endTime) → all-day event
+//   startTime/endTime → timed event, must be full ISO strings
 app.post('/api/events', async (req, res) => {
-  const { title, date, notes } = req.body;
-  if (!title || !date) {
-    return res.status(400).json({ error: 'title and date are required' });
+  const { title, date, notes, startTime, endTime, allDay } = req.body;
+  if (!title || !date) return res.status(400).json({ error: 'title and date are required' });
+
+  const requestBody = {
+    summary:     title,
+    description: notes || '',
+  };
+
+  if (allDay || (!startTime && !endTime)) {
+    requestBody.start = { date };
+    requestBody.end   = { date };
+  } else {
+    requestBody.start = { dateTime: startTime || `${date}T09:00:00`, timeZone: TIMEZONE };
+    requestBody.end   = { dateTime: endTime   || `${date}T10:00:00`, timeZone: TIMEZONE };
   }
 
-  const { ok, data, status, message } = await notionRequest({
-    method: 'POST',
-    path:   '/pages',
-    body: {
-      parent: { database_id: NOTION_DB_ID },
-      properties: {
-        // "Name" and "Date" must match your actual Notion column names
-        'Name': {
-          title: [{ text: { content: title } }],
-        },
-        'Date': {
-          date: { start: date },
-        },
-        ...(notes && {
-          'Notes': {
-            rich_text: [{ text: { content: notes } }],
-          },
-        }),
-      },
-    },
-  });
-
-  if (!ok) return res.status(status).json({ error: message });
-
-  res.status(201).json(formatPage(data));
+  try {
+    const res2 = await calendar.events.insert({ calendarId: CALENDAR_ID, requestBody });
+    res.status(201).json(formatEvent(res2.data));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
 // ── 4. PATCH /api/events/:id ──────────────────────────────────────────────────
-//
-// Update an existing event — mark it done, rename it, change the date, etc.
-// Body can contain any of: { done, title, date, notes }
-//
+// Update an existing event. Send only the fields you want to change.
+// Body can include: { title?, notes?, date?, startTime?, endTime? }
 app.patch('/api/events/:id', async (req, res) => {
-  const { done, title, date, notes } = req.body;
+  const { title, notes, date, startTime, endTime } = req.body;
+  const requestBody = {};
+  if (title !== undefined) requestBody.summary     = title;
+  if (notes !== undefined) requestBody.description = notes;
+  if (date && !startTime && !endTime) {
+    requestBody.start = { date };
+    requestBody.end   = { date };
+  }
+  if (startTime) requestBody.start = { dateTime: startTime, timeZone: TIMEZONE };
+  if (endTime)   requestBody.end   = { dateTime: endTime,   timeZone: TIMEZONE };
 
-  // Build the properties object with only the fields that were sent
-  const properties = {};
-  if (typeof done  !== 'undefined') properties['Done']  = { checkbox: done };
-  if (title)                        properties['Name']  = { title: [{ text: { content: title } }] };
-  if (date)                         properties['Date']  = { date: { start: date } };
-  if (notes)                        properties['Notes'] = { rich_text: [{ text: { content: notes } }] };
-
-  const { ok, data, status, message } = await notionRequest({
-    method: 'PATCH',
-    path:   `/pages/${req.params.id}`,
-    body:   { properties },
-  });
-
-  if (!ok) return res.status(status).json({ error: message });
-
-  res.json(formatPage(data));
+  try {
+    const res2 = await calendar.events.patch({
+      calendarId: CALENDAR_ID,
+      eventId:    req.params.id,
+      requestBody,
+    });
+    res.json(formatEvent(res2.data));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 
 // ── 5. DELETE /api/events/:id ─────────────────────────────────────────────────
-//
-// Notion doesn't truly delete pages — it archives them (same as clicking
-// the trash icon). The page disappears from your database view.
-//
+// Permanently deletes the event from Google Calendar.
 app.delete('/api/events/:id', async (req, res) => {
-  const { ok, data, status, message } = await notionRequest({
-    method: 'PATCH',
-    path:   `/pages/${req.params.id}`,
-    body:   { archived: true },
-  });
-
-  if (!ok) return res.status(status).json({ error: message });
-
-  res.json({ success: true });
+  try {
+    await calendar.events.delete({ calendarId: CALENDAR_ID, eventId: req.params.id });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
-
-
-// ── Helper: format a raw Notion page into a clean object ──────────────────────
-//
-// Notion pages have a deeply nested structure. This function flattens them
-// into something simple that the dashboard can consume.
-//
-function formatPage(page) {
-  const props = page.properties || {};
-
-  return {
-    id:    page.id,
-    url:   page.url,
-    title: extractText(props['Name'] || props['Title'] || props['title']),
-    date:  props['Date']?.date?.start  || null,
-    done:  props['Done']?.checkbox     || false,
-    notes: extractText(props['Notes']) || '',
-  };
-}
-
-// Pulls plain text out of Notion's rich_text / title arrays
-function extractText(prop) {
-  if (!prop) return '';
-  const arr = prop.title || prop.rich_text || [];
-  return arr.map(t => t.plain_text || '').join('');
-}
 
 
 // ── Start server ──────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log('');
-  console.log('  Notion proxy is running');
+  console.log('  Google Calendar proxy is running');
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  Health:  http://localhost:${PORT}/health`);
   console.log('');

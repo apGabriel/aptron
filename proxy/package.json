@@ -1,16 +1,17 @@
 {
-  "name": "notion-proxy",
+  "name": "gcal-proxy",
   "version": "1.0.0",
-  "description": "Local proxy server that forwards requests from the dashboard to the Notion API",
+  "description": "Local proxy server that forwards requests from the dashboard to the Google Calendar API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "auth": "node auth.js"
   },
   "dependencies": {
-    "axios": "^1.7.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "googleapis": "^144.0.0"
   }
 }
