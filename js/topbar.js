@@ -248,7 +248,7 @@ body.topbar-modal-open {
 
   function getWaterProgress() {
     let state = null;
-    try { state = JSON.parse(localStorage.getItem('po_water_v1')); } catch (e) {}
+    try { state = JSON.parse(localStorage.getItem('po_water')); } catch (e) {}
     if (!state) return { done: 0, total: 0 };
     const todayKey = calendarDateKey();
     const done = (state.logs || {})[todayKey] || 0;
