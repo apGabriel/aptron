@@ -5,6 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Dashboard</title>
 <link rel="stylesheet" href="css/styles.css">
+<style>
+/* ── Today's Schedule card ───────────────────────────────────────────────── */
+.cal-event-list {
+  list-style: none; margin: 0 0 10px; padding: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.cal-event-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 6px;
+  border-radius: 8px;
+  transition: background 0.15s, opacity 0.2s;
+}
+.cal-event-item.is-past { opacity: 0.38; }
+.cal-event-item.is-now  { background: rgba(125, 211, 252, 0.07); }
+.cal-event-time {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; font-weight: 600;
+  color: rgba(255,255,255,0.4);
+  white-space: nowrap; min-width: 58px;
+}
+.cal-event-item.is-now .cal-event-time { color: #7DD3FC; }
+.cal-event-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(255,255,255,0.2); flex-shrink: 0;
+}
+.cal-event-item.is-now .cal-event-dot { background: #7DD3FC; }
+.cal-event-title { font-size: 14px; color: #FAFAFA; flex: 1; min-width: 0; }
+.cal-event-notes {
+  font-size: 11px; color: rgba(255,255,255,0.3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px;
+}
+.cal-time-input {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px; color: #FAFAFA;
+  font-size: 13px; padding: 8px 10px;
+  width: 100px; flex-shrink: 0;
+  color-scheme: dark;
+}
+.cal-offline {
+  font-size: 12px; color: #fbbf24; padding: 6px 2px 2px;
+}
+.cal-offline code {
+  background: rgba(255,255,255,0.08); border-radius: 4px;
+  padding: 1px 5px; font-size: 11px;
+}
+.cal-empty {
+  padding: 10px 4px; color: rgba(255,255,255,0.3); font-size: 13px;
+}
+.cal-refresh-btn {
+  background: none; border: none; color: rgba(255,255,255,0.35);
+  font-size: 17px; cursor: pointer; padding: 2px 6px;
+  border-radius: 7px; line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+.cal-refresh-btn:hover { color: #FAFAFA; background: rgba(255,255,255,0.08); }
+.cal-refresh-btn.spinning { animation: cal-spin 0.7s linear; }
+@keyframes cal-spin { to { transform: rotate(360deg); } }
+</style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="sync.js" defer></script>
 </head>
@@ -95,6 +154,29 @@
     <div class="gm-status-line" id="polishStatus"></div>
   </div>
 
+  <!-- TODAY'S SCHEDULE card -->
+  <div class="gm-card" id="calCard">
+    <div class="gm-header-row">
+      <div class="gm-header-left">
+        <div class="gm-eyebrow" id="calDateLabel">Today</div>
+        <div class="gm-progress-row">
+          <span class="gm-progress-label" id="calEventCount">Loading…</span>
+        </div>
+      </div>
+      <button class="cal-refresh-btn" id="calRefreshBtn" title="Refresh" aria-label="Refresh calendar">↻</button>
+    </div>
+    <div id="calOfflineMsg" class="cal-offline" style="display:none">
+      ⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.
+    </div>
+    <ul id="calEventList" class="cal-event-list"></ul>
+    <div class="gm-input-wrap">
+      <input class="gm-input" id="calTaskInput" type="text" placeholder="Schedule a task…" autocomplete="off"/>
+      <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
+      <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
+    </div>
+    <div class="gm-status-line" id="calStatus"></div>
+  </div>
+
   <!-- PLAN TOMORROW card -->
   <div class="gm-card gm-card-tomorrow" id="tomorrowCard">
     <div class="gm-header-row">
@@ -116,6 +198,149 @@
 </div>
 
 <script src="js/script.js"></script>
+<script>
+// ── Google Calendar integration ───────────────────────────────────────────────
+(function () {
+  const PROXY = 'http://localhost:3001';
+
+  function todayStr() {
+    const d = new Date();
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
+  function fmtTime(isoStr) {
+    const d = new Date(isoStr);
+    let h = d.getHours(), m = d.getMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return h + (m ? ':' + String(m).padStart(2, '0') : '') + ' ' + ampm;
+  }
+
+  function fmtDateLabel() {
+    const d = new Date();
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate();
+  }
+
+  function eventClass(ev) {
+    if (ev.allDay) return '';
+    const now = new Date();
+    const start = new Date(ev.start);
+    const end   = new Date(ev.end);
+    if (end   < now) return 'is-past';
+    if (start <= now) return 'is-now';
+    return '';
+  }
+
+  function renderEvents(events) {
+    const list  = document.getElementById('calEventList');
+    const count = document.getElementById('calEventCount');
+    if (!events.length) {
+      list.innerHTML = '<li class="cal-empty">No events today</li>';
+      count.textContent = 'nothing scheduled';
+      return;
+    }
+    count.textContent = events.length + ' event' + (events.length !== 1 ? 's' : '');
+    list.innerHTML = events.map(ev => {
+      const cls   = eventClass(ev);
+      const time  = ev.allDay ? 'all day' : fmtTime(ev.start);
+      const notes = ev.notes
+        ? `<span class="cal-event-notes">${ev.notes.split('\n')[0]}</span>`
+        : '';
+      return `<li class="cal-event-item ${cls}">
+        <span class="cal-event-time">${time}</span>
+        <span class="cal-event-dot"></span>
+        <span class="cal-event-title">${ev.title}</span>
+        ${notes}
+      </li>`;
+    }).join('');
+  }
+
+  async function loadEvents() {
+    const offlineEl = document.getElementById('calOfflineMsg');
+    const countEl   = document.getElementById('calEventCount');
+    const refreshBtn = document.getElementById('calRefreshBtn');
+    refreshBtn.classList.add('spinning');
+    setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
+    try {
+      const res = await fetch(PROXY + '/api/events?date=' + todayStr(), { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const events = await res.json();
+      offlineEl.style.display = 'none';
+      renderEvents(events);
+    } catch {
+      offlineEl.style.display = 'block';
+      countEl.textContent = 'proxy offline';
+      document.getElementById('calEventList').innerHTML = '';
+    }
+  }
+
+  function toLocalISO(dt) {
+    const p = n => String(n).padStart(2, '0');
+    const off = -dt.getTimezoneOffset();
+    const sign = off >= 0 ? '+' : '-';
+    const abs  = Math.abs(off);
+    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate()) +
+      'T' + p(dt.getHours()) + ':' + p(dt.getMinutes()) + ':00' +
+      sign + p(Math.floor(abs / 60)) + ':' + p(abs % 60);
+  }
+
+  async function addEvent() {
+    const titleEl  = document.getElementById('calTaskInput');
+    const timeEl   = document.getElementById('calTimeInput');
+    const statusEl = document.getElementById('calStatus');
+    const addBtn   = document.getElementById('calAddBtn');
+    const title    = titleEl.value.trim();
+    if (!title) { titleEl.focus(); return; }
+
+    const [h, m] = timeEl.value.split(':').map(Number);
+    const startDt = new Date();
+    startDt.setHours(h, m, 0, 0);
+    const endDt = new Date(startDt.getTime() + 60 * 60 * 1000);
+
+    addBtn.disabled = true;
+    statusEl.textContent = 'Scheduling…';
+    statusEl.classList.remove('is-error');
+
+    try {
+      const res = await fetch(PROXY + '/api/events', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          date:      todayStr(),
+          startTime: toLocalISO(startDt),
+          endTime:   toLocalISO(endDt),
+        }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      titleEl.value = '';
+      statusEl.textContent = '✓ Added to Google Calendar';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      loadEvents();
+    } catch {
+      statusEl.textContent = 'Failed — is the proxy running?';
+      statusEl.classList.add('is-error');
+      setTimeout(() => { statusEl.textContent = ''; statusEl.classList.remove('is-error'); }, 4000);
+    }
+    addBtn.disabled = false;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('calDateLabel').textContent = fmtDateLabel();
+    document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);
+    document.getElementById('calAddBtn').addEventListener('click', addEvent);
+    document.getElementById('calTaskInput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') addEvent();
+    });
+    loadEvents();
+    setInterval(loadEvents, 5 * 60 * 1000);
+  });
+})();
+</script>
 <script src="js/topbar.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {

@@ -60,8 +60,8 @@ app.use(express.json());
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function dayBounds(dateStr) {
   return {
-    timeMin: `${dateStr}T00:00:00`,
-    timeMax: `${dateStr}T23:59:59`,
+    timeMin: `${dateStr}T00:00:00Z`,
+    timeMax: `${dateStr}T23:59:59Z`,
   };
 }
 
@@ -121,8 +121,8 @@ app.get('/api/events/range', async (req, res) => {
   if (!start || !end) return res.status(400).json({ error: 'start and end are required' });
   try {
     res.json(await listEvents({
-      timeMin: `${start}T00:00:00`,
-      timeMax: `${end}T23:59:59`,
+      timeMin: `${start}T00:00:00Z`,
+      timeMax: `${end}T23:59:59Z`,
     }));
   } catch (err) {
     res.status(500).json({ error: err.message });
