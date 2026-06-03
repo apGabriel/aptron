@@ -207,8 +207,6 @@ function buildGoalRow(g, idx, goals, key, readOnly, reload) {
   if (readOnly) qBtn.disabled = true;
   qBtn.addEventListener('click', () => {
     goals[idx].queued = !goals[idx].queued;
-    // Re-sort: queued+undone → top, undone → middle, done → bottom.
-    // Stable sort: preserve relative order within each group.
     const rank = g => g.done ? 2 : (g.queued ? 0 : 1);
     goals.sort((a, b) => rank(a) - rank(b));
     storeSet(key, goals);
@@ -240,7 +238,6 @@ function makeInlineEdit(textEl, goals, idx, key, reload) {
   textEl.addEventListener('click', () => {
     textEl.contentEditable = 'true';
     textEl.focus();
-    // place caret at end
     const range = document.createRange();
     range.selectNodeContents(textEl);
     range.collapse(false);
@@ -334,7 +331,6 @@ function renderListInto(goals, listEl, emptyEl, key, readOnly, reload) {
     }
   }
 
-  // Update headers
   if (key.startsWith('goals:') && !readOnly) {
     renderTodayHeader();
   } else if (readOnly) {
@@ -566,7 +562,6 @@ function tick(isFirst) {
 
   meta.textContent = `${done}/${total}`;
 
-  // Build new row
   const newRow = document.createElement('div');
   newRow.className = 'goal-ticker-row';
 
@@ -607,6 +602,155 @@ window.addEventListener('goals-changed', () => {
   tickerCycleIdx = 0;
   tick(false);
 });
+
+// ── GOOGLE CALENDAR INTEGRATION ───────────────────────────────────────────────
+(function () {
+  const PROXY = 'https://aptron.onrender.com';
+
+  function todayStr() {
+    const d = new Date();
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
+  function fmtRange(startIso, endIso) {
+    const s = new Date(startIso), e = new Date(endIso);
+    const sAmpm = s.getHours() >= 12 ? 'PM' : 'AM';
+    const eAmpm = e.getHours() >= 12 ? 'PM' : 'AM';
+    function fmt(d, showAmpm) {
+      let h = d.getHours() % 12 || 12;
+      const m = d.getMinutes();
+      return h + (m ? ':' + String(m).padStart(2, '0') : '') + (showAmpm ? ' ' + (d.getHours() >= 12 ? 'PM' : 'AM') : '');
+    }
+    return fmt(s, sAmpm !== eAmpm) + ' – ' + fmt(e, true);
+  }
+
+  function fmtDateLabel() {
+    const d = new Date();
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate();
+  }
+
+  function eventClass(ev) {
+    if (ev.allDay) return '';
+    const now = new Date();
+    const start = new Date(ev.start);
+    const end   = new Date(ev.end);
+    if (end   < now) return 'is-past';
+    if (start <= now) return 'is-now';
+    return '';
+  }
+
+  function renderEvents(events) {
+    const list  = document.getElementById('calEventList');
+    const count = document.getElementById('calEventCount');
+    if (!events.length) {
+      list.innerHTML = '<li class="cal-empty">No events today</li>';
+      count.textContent = 'nothing scheduled';
+      return;
+    }
+    count.textContent = events.length + ' event' + (events.length !== 1 ? 's' : '');
+    list.innerHTML = events.map(ev => {
+      const cls   = eventClass(ev);
+      const time  = ev.allDay ? 'all day' : fmtRange(ev.start, ev.end);
+      const notes = ev.notes
+        ? `<span class="cal-event-notes">${ev.notes.split('\n')[0]}</span>`
+        : '';
+      return `<li class="cal-event-item ${cls}">
+        <span class="cal-event-time">${time}</span>
+        <span class="cal-event-dot"></span>
+        <span class="cal-event-title">${ev.title}</span>
+        ${notes}
+      </li>`;
+    }).join('');
+  }
+
+  async function loadEvents() {
+    const offlineEl  = document.getElementById('calOfflineMsg');
+    const countEl    = document.getElementById('calEventCount');
+    const refreshBtn = document.getElementById('calRefreshBtn');
+    refreshBtn.classList.add('spinning');
+    setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
+    try {
+      const res = await fetch(PROXY + '/api/events?date=' + todayStr(), { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const events = await res.json();
+      offlineEl.style.display = 'none';
+      renderEvents(events);
+    } catch {
+      offlineEl.style.display = 'block';
+      countEl.textContent = 'proxy offline';
+      document.getElementById('calEventList').innerHTML = '';
+    }
+  }
+
+  function toLocalISO(dt) {
+    const p = n => String(n).padStart(2, '0');
+    const off = -dt.getTimezoneOffset();
+    const sign = off >= 0 ? '+' : '-';
+    const abs  = Math.abs(off);
+    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate()) +
+      'T' + p(dt.getHours()) + ':' + p(dt.getMinutes()) + ':00' +
+      sign + p(Math.floor(abs / 60)) + ':' + p(abs % 60);
+  }
+
+  async function addEvent() {
+    const titleEl  = document.getElementById('calTaskInput');
+    const descEl   = document.getElementById('calDescInput');
+    const timeEl   = document.getElementById('calTimeInput');
+    const statusEl = document.getElementById('calStatus');
+    const addBtn   = document.getElementById('calAddBtn');
+    const title    = titleEl.value.trim();
+    if (!title) { titleEl.focus(); return; }
+
+    const durEl   = document.getElementById('calDurInput');
+    const dur     = Math.max(1, parseInt(durEl.value) || 15);
+    const [h, m]  = timeEl.value.split(':').map(Number);
+    const startDt = new Date();
+    startDt.setHours(h, m, 0, 0);
+    const endDt = new Date(startDt.getTime() + dur * 60 * 1000);
+
+    addBtn.disabled = true;
+    statusEl.textContent = 'Scheduling…';
+    statusEl.classList.remove('is-error');
+
+    try {
+      const res = await fetch(PROXY + '/api/events', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          notes:     descEl.value.trim() || undefined,
+          date:      todayStr(),
+          startTime: toLocalISO(startDt),
+          endTime:   toLocalISO(endDt),
+        }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      titleEl.value = '';
+      descEl.value  = '';
+      statusEl.textContent = '✓ Added to Google Calendar';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      loadEvents();
+    } catch {
+      statusEl.textContent = 'Failed — is the proxy running?';
+      statusEl.classList.add('is-error');
+      setTimeout(() => { statusEl.textContent = ''; statusEl.classList.remove('is-error'); }, 4000);
+    }
+    addBtn.disabled = false;
+  }
+
+  document.getElementById('calDateLabel').textContent = fmtDateLabel();
+  document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);
+  document.getElementById('calAddBtn').addEventListener('click', addEvent);
+  document.getElementById('calTaskInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') addEvent();
+  });
+  loadEvents();
+  setInterval(loadEvents, 5 * 60 * 1000);
+})();
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 runRollover();
