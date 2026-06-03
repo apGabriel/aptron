@@ -566,20 +566,12 @@ html, body {
         <label>Show water as</label>
         <div class="seg" id="setUnit">
           <button data-u="bottle">Bottles</button>
-          <button data-u="glass">Glasses</button>
-          <button data-u="oz">oz</button>
           <button data-u="ml">ml</button>
         </div>
       </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Bottle size (ml)</label>
-          <input type="number" id="setBottleMl" min="100" max="2000" step="50">
-        </div>
-        <div class="field">
-          <label>Glass size (ml)</label>
-          <input type="number" id="setGlassMl" min="100" max="500" step="10">
-        </div>
+      <div class="field">
+        <label>Bottle size (ml)</label>
+        <input type="number" id="setBottleMl" min="100" max="2000" step="50">
       </div>
     </div>
 
@@ -751,20 +743,14 @@ html, body {
 
   function unitVolMl() {
     if (state.unit === 'bottle') return state.bottleMl || 500;
-    if (state.unit === 'glass')  return state.glassMl  || 250;
-    if (state.unit === 'oz')     return 30;     // 1 fl oz ≈ 29.57 ml
-    return 1;                                   // ml
+    return 1; // ml
   }
   function unitLabelPlural() {
     if (state.unit === 'bottle') return 'bottles';
-    if (state.unit === 'glass')  return 'glasses';
-    if (state.unit === 'oz')     return 'oz';
     return 'ml';
   }
   function unitLabelSingular() {
     if (state.unit === 'bottle') return 'bottle';
-    if (state.unit === 'glass')  return 'glass';
-    if (state.unit === 'oz')     return 'oz';
     return 'ml';
   }
   function fmtMl(ml) {
@@ -926,7 +912,6 @@ html, body {
     $('setActivity').value = state.profile.activityHrsPerWeek;
     $('setCaffeine').value = state.caffeineMgPerDay;
     $('setBottleMl').value = state.bottleMl;
-    $('setGlassMl').value = state.glassMl;
 
     setSegActive('setUnit', state.unit);
     setSegActive('setWeightUnit', state.weightUnit);
@@ -954,7 +939,7 @@ html, body {
   bindSeg('setWeightUnit', 'u', (v) => { state.weightUnit = v; saveState(); renderWater(); });
   bindSeg('setSex', 's', (v) => { state.profile.sex = v; saveState(); renderWater(); });
 
-  ['setWeight','setAge','setActivity','setCaffeine','setBottleMl','setGlassMl'].forEach(id => {
+  ['setWeight','setAge','setActivity','setCaffeine','setBottleMl'].forEach(id => {
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value);
       if (id === 'setWeight') state.profile.weightKg = v || 0;
@@ -962,7 +947,6 @@ html, body {
       else if (id === 'setActivity') state.profile.activityHrsPerWeek = v || 0;
       else if (id === 'setCaffeine') state.caffeineMgPerDay = v || 0;
       else if (id === 'setBottleMl') state.bottleMl = v || 500;
-      else if (id === 'setGlassMl') state.glassMl = v || 250;
       saveState(); renderWater();
     });
   });
