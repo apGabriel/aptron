@@ -77,6 +77,19 @@
 .cal-refresh-btn:hover { color: #FAFAFA; background: rgba(255,255,255,0.08); }
 .cal-refresh-btn.spinning { animation: cal-spin 0.7s linear; }
 @keyframes cal-spin { to { transform: rotate(360deg); } }
+.cal-add-wrap { flex-wrap: wrap; }
+.cal-fields-row { display: flex; gap: 8px; width: 100%; }
+.cal-title-input { flex: 1.5; min-width: 0; }
+.cal-desc-input {
+  flex: 1; min-width: 0;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px; color: #FAFAFA;
+  font-size: 13px; padding: 8px 12px;
+  transition: border-color 0.2s;
+}
+.cal-desc-input::placeholder { color: rgba(255,255,255,0.25); }
+.cal-desc-input:focus { outline: none; border-color: rgba(255,255,255,0.35); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="sync.js" defer></script>
@@ -183,8 +196,11 @@
       ⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.
     </div>
     <ul id="calEventList" class="cal-event-list"></ul>
-    <div class="gm-input-wrap">
-      <input class="gm-input" id="calTaskInput" type="text" placeholder="Schedule a task…" autocomplete="off"/>
+    <div class="gm-input-wrap cal-add-wrap">
+      <div class="cal-fields-row">
+        <input class="gm-input cal-title-input" id="calTaskInput" type="text" placeholder="Schedule a task…" autocomplete="off"/>
+        <input class="cal-desc-input" id="calDescInput" type="text" placeholder="Description (optional)…" autocomplete="off"/>
+      </div>
       <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
       <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
       <span class="cal-dur-label">min</span>
@@ -319,6 +335,7 @@
 
   async function addEvent() {
     const titleEl  = document.getElementById('calTaskInput');
+    const descEl   = document.getElementById('calDescInput');
     const timeEl   = document.getElementById('calTimeInput');
     const statusEl = document.getElementById('calStatus');
     const addBtn   = document.getElementById('calAddBtn');
@@ -342,6 +359,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title,
+          notes:     descEl.value.trim() || undefined,
           date:      todayStr(),
           startTime: toLocalISO(startDt),
           endTime:   toLocalISO(endDt),
@@ -349,6 +367,7 @@
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       titleEl.value = '';
+      descEl.value  = '';
       statusEl.textContent = '✓ Added to Google Calendar';
       setTimeout(() => { statusEl.textContent = ''; }, 3000);
       loadEvents();
