@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "proxy/server.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/health",      "dest": "/proxy/server.js" },
+    { "src": "/api/(.*)",    "dest": "/proxy/server.js" },
+    { "handle": "filesystem" }
+  ]
+}
