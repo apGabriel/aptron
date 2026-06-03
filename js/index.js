@@ -605,7 +605,7 @@ window.addEventListener('goals-changed', () => {
 
 // ── GOOGLE CALENDAR INTEGRATION ───────────────────────────────────────────────
 (function () {
-  const PROXY = 'https://aptron.onrender.com';
+  const PROXY = 'https://aptron-chi.vercel.app';
 
   function todayStr() {
     const d = new Date();

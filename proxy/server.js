@@ -42,9 +42,7 @@ const CALENDAR_ID   = process.env.GOOGLE_CALENDAR_ID   || 'primary';
 const TIMEZONE      = process.env.TIMEZONE             || 'UTC';
 
 if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
-  console.error('ERROR: Missing Google OAuth credentials in proxy/.env');
-  console.error('Run `node auth.js` to get your GOOGLE_REFRESH_TOKEN.');
-  process.exit(1);
+  console.error('ERROR: Missing Google OAuth credentials in environment variables.');
 }
 
 // Build an OAuth2 client that auto-refreshes the access token using the
@@ -201,11 +199,15 @@ app.delete('/api/events/:id', async (req, res) => {
 });
 
 
-// ── Start server ──────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log('');
-  console.log('  Google Calendar proxy is running');
-  console.log(`  Local:   http://localhost:${PORT}`);
-  console.log(`  Health:  http://localhost:${PORT}/health`);
-  console.log('');
-});
+// ── Start server (local dev only) ─────────────────────────────────────────────
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log('');
+    console.log('  Google Calendar proxy is running');
+    console.log(`  Local:   http://localhost:${PORT}`);
+    console.log(`  Health:  http://localhost:${PORT}/health`);
+    console.log('');
+  });
+}
+
+module.exports = app;
