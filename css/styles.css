@@ -953,3 +953,31 @@ body > * { position: relative; z-index: 1; }
 }
 .cal-desc-input::placeholder { color: rgba(255,255,255,0.25); }
 .cal-desc-input:focus { outline: none; border-color: rgba(255,255,255,0.35); }
+
+/* Centered scheduling controls (time · duration · button) */
+.cal-controls-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  margin-top: 2px;
+}
+.cal-controls-wrapper .cal-time-input:focus,
+.cal-controls-wrapper .cal-dur-input:focus {
+  outline: none; border-color: rgba(125,211,252,0.45);
+}
+/* Schedule button adopts the panel's blue accent instead of the gold CTA */
+.cal-controls-wrapper .gm-add-btn {
+  background: rgba(125,211,252,0.12);
+  color: #7DD3FC;
+  border: 1px solid rgba(125,211,252,0.35);
+  box-shadow: none;
+}
+.cal-controls-wrapper .gm-add-btn:hover {
+  background: rgba(125,211,252,0.20);
+  border-color: #7DD3FC;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(125,211,252,0.18);
+}

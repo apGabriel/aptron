@@ -113,10 +113,12 @@
         <input class="gm-input cal-title-input" id="calTaskInput" type="text" placeholder="Schedule a task…" autocomplete="off"/>
         <input class="cal-desc-input" id="calDescInput" type="text" placeholder="Description (optional)…" autocomplete="off"/>
       </div>
-      <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
-      <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
-      <span class="cal-dur-label">min</span>
-      <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
+      <div class="cal-controls-wrapper">
+        <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
+        <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
+        <span class="cal-dur-label">min</span>
+        <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
+      </div>
     </div>
     <div class="gm-status-line" id="calStatus"></div>
   </div>
