@@ -1348,10 +1348,11 @@ img, video, canvas, svg { max-width: 100%; }
 
 .rb-routine-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .rb-row {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start;
+  display: flex; flex-direction: column; gap: 12px;
   padding: 10px; border: 1px solid var(--border);
   background: rgba(255,255,255,0.025); border-radius: 12px;
 }
+.rb-row-head { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; }
 .rb-row-thumb {
   width: 46px; height: 46px; border-radius: 8px; object-fit: cover;
   background: rgba(255,255,255,0.05); cursor: zoom-in;
@@ -1359,16 +1360,6 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-row-main { min-width: 0; }
 .rb-row-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rb-row-muscle { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
-.rb-row-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.rb-field { display: flex; flex-direction: column; gap: 3px; }
-.rb-field label { font-size: 9px; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
-.rb-field input {
-  width: 54px; padding: 6px 4px; border: 1px solid var(--border);
-  background: rgba(0,0,0,0.28); color: var(--text-1); border-radius: 7px;
-  font-family: inherit; font-size: 13px; font-weight: 700; text-align: center;
-  font-variant-numeric: tabular-nums; -moz-appearance: textfield;
-}
-.rb-field input::-webkit-outer-spin-button, .rb-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .rb-row-controls { display: flex; flex-direction: column; gap: 4px; }
 .rb-mini {
   background: transparent; border: 1px solid var(--border); color: var(--text-3);
@@ -1379,6 +1370,41 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-mini:hover { color: var(--text-1); background: rgba(255,255,255,0.06); }
 .rb-mini:disabled { opacity: 0.3; cursor: not-allowed; }
 .rb-mini.rb-del:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
+
+/* ----- Set-by-set logger (active exercise card) ----- */
+.rb-sets-wrap { display: flex; flex-direction: column; gap: 6px; }
+.rb-set-head, .rb-set-row {
+  display: grid; grid-template-columns: 30px 1fr 1fr 28px; gap: 8px; align-items: center;
+}
+.rb-set-head { padding: 0 2px; }
+.rb-set-head span {
+  font-size: 9px; color: var(--text-4); text-transform: uppercase;
+  letter-spacing: 0.08em; font-weight: 700; text-align: center;
+}
+.rb-set-head span:first-child { text-align: left; }
+.rb-sets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rb-set-label {
+  font-size: 12px; font-weight: 700; color: var(--text-3);
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.rb-set-row input {
+  width: 100%; padding: 7px 6px; border: 1px solid var(--border);
+  background: rgba(0,0,0,0.28); color: var(--text-1); border-radius: 7px;
+  font-family: inherit; font-size: 13px; font-weight: 700; text-align: center;
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+}
+.rb-set-row input:focus { outline: none; border-color: rgba(255,255,255,0.35); }
+.rb-set-row input::-webkit-outer-spin-button, .rb-set-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rb-ex-actions { display: flex; gap: 8px; }
+.rb-ex-actions button {
+  flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  background: rgba(255,255,255,0.04); color: var(--text-2);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.rb-ex-actions .rb-add-set:hover { color: var(--text-1); background: rgba(255,255,255,0.08); }
+.rb-ex-actions .rb-remove-ex:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
 
 .rb-routine-actions { display: flex; gap: 8px; }
 .rb-routine-actions .po-btn-primary { flex: 2; }
@@ -1965,7 +1991,14 @@ img, video, canvas, svg { max-width: 100%; }
     rs.forEach(r => (r.exercises || []).forEach(it => {
       const id = 'rt_' + it.exId;
       if (!byId[id]) {
-        const reps = parseInt(it.reps, 10) || 10;
+        // Target reps for the coach's range = the highest planned set reps
+        // (falls back to the legacy scalar `reps`, then 10).
+        let reps = 10;
+        if (Array.isArray(it.sets) && it.sets.length) {
+          reps = Math.max.apply(null, it.sets.map(s => parseInt(s.reps, 10) || 0)) || 10;
+        } else if (it.reps != null) {
+          reps = parseInt(it.reps, 10) || 10;
+        }
         const ex = {
           id, name: it.name, gym: 'both', day: '__routine__',
           bw: false, startWeight: 0,
@@ -3881,10 +3914,30 @@ img, video, canvas, svg { max-width: 100%; }
     if (current.exercises.some(x => x.exId === exId)) return; // no duplicates
     current.exercises.push({
       exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl,
-      sets: DEFAULTS.sets, reps: DEFAULTS.reps, rest: DEFAULTS.rest,
+      // Set-by-set log: seed with a few blank sets the user can fill in.
+      sets: Array.from({ length: DEFAULTS.sets }, () => blankSet()),
     });
     renderRoutine();
     renderGrid();
+  }
+
+  // A fresh set row. New sets copy the previous set's weight/reps (the Hevy/
+  // Strong convention) so the user only tweaks what changed; the very first
+  // set falls back to the default rep target.
+  function blankSet(prev) {
+    return prev
+      ? { weight: prev.weight, reps: prev.reps }
+      : { weight: 0, reps: DEFAULTS.reps };
+  }
+
+  // Normalize a legacy exercise ({ sets: <number>, reps, rest }) into the new
+  // set-array shape, preserving the old set count + rep target where possible.
+  function normalizeSets(it) {
+    if (Array.isArray(it.sets)) return;
+    const count = Math.max(1, parseInt(it.sets, 10) || DEFAULTS.sets);
+    const reps  = parseInt(it.reps, 10) || DEFAULTS.reps;
+    it.sets = Array.from({ length: count }, () => ({ weight: 0, reps }));
+    delete it.reps; delete it.rest;
   }
 
   function renderRoutine() {
@@ -3895,20 +3948,22 @@ img, video, canvas, svg { max-width: 100%; }
     if ($('rbRoutineName').value !== current.name) $('rbRoutineName').value = current.name;
   }
 
-  function numField(label, value, onChange, opts) {
+  // A single numeric set input (weight or reps) with graceful clamping.
+  // opts: { min, max, float } — float allows decimals (weight); integers
+  // otherwise (reps). Out-of-range / empty values snap to the nearest bound
+  // on commit and the sanitized value is written back into the box.
+  function setInput(value, opts, onChange) {
     opts = opts || {};
     const min = (opts.min != null) ? opts.min : 0;
     const max = (opts.max != null) ? opts.max : null;
-    const f = document.createElement('div'); f.className = 'rb-field';
-    const l = document.createElement('label'); l.textContent = label;
+    const parse = opts.float ? parseFloat : (v => parseInt(v, 10));
     const i = document.createElement('input');
-    i.type = 'number'; i.min = String(min); i.value = value; i.inputMode = 'numeric';
-    if (max != null) i.max = String(max);
-    // Clamp + sanitize on commit: empty/NaN falls back to min, out-of-range
-    // snaps to the nearest bound, and the corrected value is written back so
-    // the box never shows an invalid number.
+    i.type = 'number'; i.value = value;
+    i.min = String(min); if (max != null) i.max = String(max);
+    i.inputMode = opts.float ? 'decimal' : 'numeric';
+    if (opts.float) i.step = '0.5';
     const clamp = () => {
-      let n = parseInt(i.value, 10);
+      let n = parse(i.value);
       if (isNaN(n)) n = min;
       if (n < min) n = min;
       if (max != null && n > max) n = max;
@@ -3919,11 +3974,10 @@ img, video, canvas, svg { max-width: 100%; }
     // Stop an over-the-max value from lingering while the user is still typing.
     if (max != null) {
       i.addEventListener('input', () => {
-        if (i.value !== '' && parseInt(i.value, 10) > max) i.value = String(max);
+        if (i.value !== '' && parse(i.value) > max) i.value = String(max);
       });
     }
-    f.append(l, i);
-    return f;
+    return i;
   }
 
   function mini(label, fn, cls) {
@@ -3943,8 +3997,33 @@ img, video, canvas, svg { max-width: 100%; }
     renderRoutine();
   }
 
+  // One set row: [ Set # ] [ Weight ] [ Reps ] [ × ]
+  function setRow(it, sIdx) {
+    const s = it.sets[sIdx];
+    const row = document.createElement('div'); row.className = 'rb-set-row';
+
+    const lbl = document.createElement('div'); lbl.className = 'rb-set-label'; lbl.textContent = String(sIdx + 1);
+    const w = setInput(s.weight, { min: 0, float: true }, v => s.weight = v);
+    const r = setInput(s.reps,   { min: 1, max: 36 },     v => s.reps = v);
+
+    const del = mini('×', () => {
+      it.sets.splice(sIdx, 1);
+      renderRoutine();
+    }, 'rb-del');
+    del.title = 'Remove set';
+    del.disabled = it.sets.length <= 1; // keep at least one set; use Remove Exercise to clear
+
+    row.append(lbl, w, r, del);
+    return row;
+  }
+
   function routineRow(it, idx) {
+    normalizeSets(it); // migrate any legacy single-value exercises in place
+
     const li = document.createElement('li'); li.className = 'rb-row';
+
+    // ── Header: thumbnail, name/muscle, reorder controls ──
+    const head = document.createElement('div'); head.className = 'rb-row-head';
 
     const thumb = document.createElement('img');
     thumb.className = 'rb-row-thumb'; thumb.loading = 'lazy'; thumb.src = it.gifUrl;
@@ -3954,23 +4033,44 @@ img, video, canvas, svg { max-width: 100%; }
     const main = document.createElement('div'); main.className = 'rb-row-main';
     const nm = document.createElement('div'); nm.className = 'rb-row-name'; nm.textContent = it.name;
     const mus = document.createElement('div'); mus.className = 'rb-row-muscle'; mus.textContent = it.muscleGroup;
-    const fields = document.createElement('div'); fields.className = 'rb-row-fields';
-    fields.append(
-      numField('Sets',   it.sets, v => it.sets = v),
-      numField('Reps',   it.reps, v => it.reps = v, { min: 1, max: 36 }),
-      numField('Rest s', it.rest, v => it.rest = v),
-    );
-    main.append(nm, mus, fields);
+    main.append(nm, mus);
 
     const ctr = document.createElement('div'); ctr.className = 'rb-row-controls';
     const up   = mini('↑', () => move(idx, -1));
     const down = mini('↓', () => move(idx,  1));
-    const del  = mini('×', () => { current.exercises.splice(idx, 1); renderRoutine(); renderGrid(); }, 'rb-del');
     up.disabled   = idx === 0;
     down.disabled = idx === current.exercises.length - 1;
-    ctr.append(up, down, del);
+    ctr.append(up, down);
 
-    li.append(thumb, main, ctr);
+    head.append(thumb, main, ctr);
+
+    // ── Set table: header + one row per set ──
+    const setsWrap = document.createElement('div'); setsWrap.className = 'rb-sets-wrap';
+    const colHead = document.createElement('div'); colHead.className = 'rb-set-head';
+    ['Set', 'Weight', 'Reps', ''].forEach(t => {
+      const sp = document.createElement('span'); sp.textContent = t; colHead.appendChild(sp);
+    });
+    const setList = document.createElement('div'); setList.className = 'rb-sets';
+    it.sets.forEach((s, sIdx) => setList.appendChild(setRow(it, sIdx)));
+    setsWrap.append(colHead, setList);
+
+    // ── Manage buttons: add a set / remove the whole exercise ──
+    const actions = document.createElement('div'); actions.className = 'rb-ex-actions';
+    const addSet = document.createElement('button');
+    addSet.type = 'button'; addSet.className = 'rb-add-set'; addSet.textContent = '+ Add Set';
+    addSet.addEventListener('click', () => {
+      it.sets.push(blankSet(it.sets[it.sets.length - 1]));
+      renderRoutine();
+    });
+    const removeEx = document.createElement('button');
+    removeEx.type = 'button'; removeEx.className = 'rb-remove-ex'; removeEx.textContent = 'Remove Exercise';
+    removeEx.addEventListener('click', () => {
+      current.exercises.splice(idx, 1);
+      renderRoutine(); renderGrid();
+    });
+    actions.append(addSet, removeEx);
+
+    li.append(head, setsWrap, actions);
     return li;
   }
 
@@ -3987,7 +4087,7 @@ img, video, canvas, svg { max-width: 100%; }
       const info = document.createElement('div'); info.className = 'rb-saved-info';
       const nm = document.createElement('div'); nm.className = 'rb-saved-name'; nm.textContent = r.name;
       const meta = document.createElement('div'); meta.className = 'rb-saved-meta';
-      const totalSets = r.exercises.reduce((s, e) => s + (Number(e.sets) || 0), 0);
+      const totalSets = r.exercises.reduce((s, e) => s + (Array.isArray(e.sets) ? e.sets.length : (Number(e.sets) || 0)), 0);
       meta.textContent = r.exercises.length + ' exercise' + (r.exercises.length !== 1 ? 's' : '') + ' · ' + totalSets + ' sets';
       info.append(nm, meta);
 
@@ -4051,6 +4151,8 @@ img, video, canvas, svg { max-width: 100%; }
       routines.push(clone(current));
     }
     saveRoutines(routines);
+    // clone() above deep-copies each exercise's `sets` array (weight + reps
+    // per set) into the saved routine. Now wipe the workspace to free it up.
     current = { id: null, name: '', exercises: [] };
     renderRoutine(); renderGrid(); renderSaved();
   });
