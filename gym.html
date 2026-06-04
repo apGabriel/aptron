@@ -257,10 +257,14 @@ img, video, canvas, svg { max-width: 100%; }
   min-width: 36px;
 }
 .po-seg-control {
-  display: flex; flex: 1;
+  display: flex; flex: 1; flex-wrap: wrap;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
   border-radius: 12px; padding: 4px; gap: 3px;
+}
+.po-seg-empty {
+  flex: 1; padding: 9px 10px; font-size: 12px; line-height: 1.4;
+  color: var(--text-3);
 }
 .po-seg-btn {
   flex: 1; padding: 10px 8px; border: none; background: transparent;
@@ -1577,7 +1581,7 @@ img, video, canvas, svg { max-width: 100%; }
         <div class="po-seg-control" id="gymSeg"></div>
       </div>
       <div class="po-seg-row">
-        <span class="po-seg-label">Day</span>
+        <span class="po-seg-label">Routine</span>
         <div class="po-seg-control" id="daySeg"></div>
       </div>
     </div>
@@ -1760,11 +1764,11 @@ img, video, canvas, svg { max-width: 100%; }
       <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Name</label>
       <input type="text" id="exName" placeholder="e.g. Incline DB press">
     </div>
-    <div class="po-field">
+    <div class="po-field" id="exGymField">
       <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Gym</label>
       <div class="po-modal-seg" id="exGymSeg"></div>
     </div>
-    <div class="po-field">
+    <div class="po-field" id="exDayField">
       <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Day</label>
       <div class="po-modal-seg" id="exDaySeg"></div>
     </div>
@@ -1886,6 +1890,8 @@ img, video, canvas, svg { max-width: 100%; }
     s.logs = (s.logs && typeof s.logs === 'object') ? s.logs : {};
     s.filterGym = s.filterGym || s.gyms[0].id;
     s.filterDay = s.filterDay || s.days[0].id;
+    // Selected routine (id from the Routine Builder). Validated at render time.
+    if (typeof s.filterRoutine === 'undefined') s.filterRoutine = null;
     // Split rotation lives in state so the user can edit it via the pill modal.
     // Stored as a plain array of names (e.g. ["Push", "Pull", "Legs", "Rest"]).
     if (!Array.isArray(s.splitRotation) || !s.splitRotation.length) {
@@ -1928,9 +1934,65 @@ img, video, canvas, svg { max-width: 100%; }
   function dayName(id) { const d = state.days.find(x => x.id === id); return d ? d.name : id; }
   function estimate1RM(w, r) { if (r < 2) return w; return w * (1 + r / 30); }
   function roundToStep(v, s) { return Math.round(v / s) * s; }
+  // ── Routines bridge ──────────────────────────────────────────
+  // The exercise list is now driven by the user's saved routines from
+  // the Routine Builder (localStorage 'rb_routines_v1'). Each routine
+  // exercise is mirrored into state.exercises (id = 'rt_' + exId) so the
+  // whole logging / prescription / stats engine keeps working unchanged.
+  // Logs key off that stable id, so the same movement shares one history
+  // across every routine it appears in.
+  const RB_ROUTINES_KEY = 'rb_routines_v1';
+  function getRoutines() {
+    try { return JSON.parse(localStorage.getItem(RB_ROUTINES_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  function getCurrentRoutine() {
+    const rs = getRoutines();
+    if (!rs.length) return null;
+    let r = rs.find(x => x.id === state.filterRoutine);
+    if (!r) { r = rs[0]; state.filterRoutine = r.id; }
+    return r;
+  }
+  // Make sure every exercise referenced by any routine exists as a coach
+  // exercise. Created lazily with sensible defaults derived from the
+  // routine's target reps; the user can fine-tune (weight / step / bodyweight)
+  // via the edit (pencil) button afterwards.
+  function ensureRoutineExercises() {
+    const rs = getRoutines();
+    const byId = {};
+    state.exercises.forEach(e => { byId[e.id] = e; });
+    let changed = false;
+    rs.forEach(r => (r.exercises || []).forEach(it => {
+      const id = 'rt_' + it.exId;
+      if (!byId[id]) {
+        const reps = parseInt(it.reps, 10) || 10;
+        const ex = {
+          id, name: it.name, gym: 'both', day: '__routine__',
+          bw: false, startWeight: 0,
+          repMin: Math.max(1, reps - 2), repMax: Math.max(reps, 1),
+          step: 2.5, gifUrl: it.gifUrl, muscleGroup: it.muscleGroup,
+          fromRoutine: true
+        };
+        state.exercises.push(ex);
+        byId[id] = ex;
+        changed = true;
+      } else if (byId[id].name !== it.name) {
+        byId[id].name = it.name;        // keep the label in sync with the builder
+        changed = true;
+      }
+    }));
+    if (changed) saveState();
+  }
+  // Exercises of the currently selected routine, in routine order.
   function getFiltered() {
-    return state.exercises.filter(e =>
-      (e.gym === state.filterGym || e.gym === 'both') && e.day === state.filterDay);
+    const r = getCurrentRoutine();
+    if (!r) return [];
+    const byId = {};
+    state.exercises.forEach(e => { byId[e.id] = e; });
+    return (r.exercises || [])
+      .map(it => byId['rt_' + it.exId])
+      .filter(Boolean)
+      .filter(e => e.gym === state.filterGym || e.gym === 'both');
   }
   function getCurrentEx() {
     const f = getFiltered();
@@ -1977,20 +2039,32 @@ img, video, canvas, svg { max-width: 100%; }
     $('gymSeg').innerHTML = state.gyms.map(g =>
       '<button class="po-seg-btn ' + (g.id === state.filterGym ? 'active' : '') + '" data-gym="' + g.id + '">' + escape(g.name) + '</button>'
     ).join('');
-    $('daySeg').innerHTML = state.days.map(d =>
-      '<button class="po-seg-btn ' + (d.id === state.filterDay ? 'active' : '') + '" data-day="' + d.id + '">' + escape(d.name) + '</button>'
-    ).join('');
+    // Routine segment — replaces the old Push/Pull/Legs day filter. Lists
+    // the user's saved routines; selecting one drives the exercise flow.
+    const routines = getRoutines();
+    const daySeg = $('daySeg');
+    if (!routines.length) {
+      daySeg.innerHTML = '<span class="po-seg-empty">No routines yet — build one in the <strong>Routine Builder</strong> below to start logging.</span>';
+    } else {
+      const cur = getCurrentRoutine();
+      daySeg.innerHTML = routines.map(r =>
+        '<button class="po-seg-btn ' + (cur && r.id === cur.id ? 'active' : '') + '" data-routine="' + r.id + '">' + escape(r.name) + '</button>'
+      ).join('');
+      daySeg.querySelectorAll('.po-seg-btn').forEach(b => {
+        b.addEventListener('click', () => {
+          state.filterRoutine = b.dataset.routine;
+          state.currentEx = null;
+          // User has now manually picked a routine — stop auto-overriding to today's split.
+          state._userPickedDay = true;
+          saveState(); renderAll();
+        });
+      });
+    }
+    // Adding bespoke exercises now happens in the Routine Builder, so the
+    // inline "+" no longer fits the routine-driven model.
+    $('addExBtn').style.display = 'none';
     $('gymSeg').querySelectorAll('.po-seg-btn').forEach(b => {
       b.addEventListener('click', () => { state.filterGym = b.dataset.gym; state.currentEx = null; saveState(); renderAll(); });
-    });
-    $('daySeg').querySelectorAll('.po-seg-btn').forEach(b => {
-      b.addEventListener('click', () => {
-        state.filterDay = b.dataset.day;
-        state.currentEx = null;
-        // User has now manually picked a day — stop auto-overriding to today's split.
-        state._userPickedDay = true;
-        saveState(); renderAll();
-      });
     });
   }
   function renderSelect() {
@@ -2002,6 +2076,9 @@ img, video, canvas, svg { max-width: 100%; }
     if (!f.length) {
       sel.innerHTML = '<option>—</option>';
       sel.disabled = true; editBtn.disabled = true; logBtn.disabled = true;
+      noMsg.innerHTML = getRoutines().length
+        ? 'This routine has no exercises yet.'
+        : 'No routines yet. Create one in the <strong>Routine Builder</strong> below, then pick it above.';
       noMsg.style.display = 'block'; state.currentEx = null;
       return;
     }
@@ -2052,7 +2129,7 @@ img, video, canvas, svg { max-width: 100%; }
   function renderRx() {
     const wrap = $('rxWrap');
     const ex = getCurrentEx();
-    if (!ex) { wrap.innerHTML = '<div class="po-rx-empty">Pick a gym and day above.</div>'; return; }
+    if (!ex) { wrap.innerHTML = '<div class="po-rx-empty">' + (getRoutines().length ? 'Pick a routine above.' : 'Create a routine in the Routine Builder below to get started.') + '</div>'; return; }
     const logs = getLogs();
     const rx = getRx(ex, logs);
     if (!rx) {
@@ -2226,6 +2303,7 @@ img, video, canvas, svg { max-width: 100%; }
   }
 
   function renderAll() {
+    ensureRoutineExercises();
     renderDayPill();
     renderFilters(); renderSelect(); renderForm(); renderLastSet();
     renderRepsRow();
@@ -2406,15 +2484,20 @@ img, video, canvas, svg { max-width: 100%; }
   // this is the only action — the day filter still auto-snaps on load.
   $('dayPill').addEventListener('click', () => openRotationModal());
 
-  // First-load nicety: if today's split matches one of the day filters
-  // by name (case-insensitive) and the user hasn't manually picked one,
-  // pre-select that day.
-  (function autoSelectTodaySplit() {
+  // First-load nicety: if today's split name appears in one of the saved
+  // routine names (case-insensitive) and the user hasn't manually picked
+  // one, pre-select that routine.
+  (function autoSelectTodayRoutine() {
     const s = todaySplit();
     if (!s.name || isRestName(s.name) || state._userPickedDay) return;
-    const match = state.days.find(d => d.name.toLowerCase() === s.name.toLowerCase());
-    if (match) state.filterDay = match.id;
+    const routines = getRoutines();
+    const match = routines.find(r => (r.name || '').toLowerCase().includes(s.name.toLowerCase()));
+    if (match) state.filterRoutine = match.id;
   })();
+
+  // Keep the routine selector live: when the Routine Builder saves / edits /
+  // deletes a routine, re-render so the segment control reflects it instantly.
+  window.addEventListener('rb:routines-changed', () => { saveState(); renderAll(); });
 
   $('exSelect').addEventListener('change', e => {
     state.currentEx = e.target.value; saveState(); renderAll();
@@ -2499,6 +2582,10 @@ img, video, canvas, svg { max-width: 100%; }
       $('exRepMin').value = ex.repMin;
       $('exRepMax').value = ex.repMax;
       $('exStep').value = ex.step;
+      // Routine-backed exercises are gym-agnostic and owned by the Routine
+      // Builder — only their coach params (weight / reps / step / bodyweight)
+      // are tunable here.
+      if (ex.fromRoutine) { modalGym = 'both'; modalDay = ex.day; }
     } else {
       $('exName').value = '';
       modalGym = state.filterGym;
@@ -2509,6 +2596,11 @@ img, video, canvas, svg { max-width: 100%; }
       $('exRepMax').value = 8;
       $('exStep').value = 2.5;
     }
+    const routineEx = mode === 'edit' && ex && ex.fromRoutine;
+    $('exGymField').style.display = routineEx ? 'none' : '';
+    $('exDayField').style.display = routineEx ? 'none' : '';
+    // Removing a routine exercise is done from the Routine Builder, not here.
+    $('exDelete').style.display = (mode === 'edit' && !routineEx) ? 'block' : 'none';
     renderModalSegs();
     toggleBwFields();
     $('exModalBg').classList.add('show');
@@ -3703,6 +3795,8 @@ img, video, canvas, svg { max-width: 100%; }
   }
   function saveRoutines(arr) {
     try { localStorage.setItem(RB_KEY, JSON.stringify(arr)); } catch (e) {}
+    // Let the coach (separate script) refresh its routine selector live.
+    try { window.dispatchEvent(new CustomEvent('rb:routines-changed')); } catch (e) {}
   }
   const clone = obj => JSON.parse(JSON.stringify(obj));
 
