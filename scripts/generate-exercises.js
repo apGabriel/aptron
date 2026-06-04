@@ -44,17 +44,66 @@ const path = require('path');
 
 // ── Body-part → muscle group mapping ──────────────────────────────────────────
 // Keys are normalized to lower-case (so "Upper-Arms", "upper-arms" both match).
+// Includes the messy real-world variants found across the 745 source files:
+// plural/singular, "-FIX"/"-SFIX"/"-AFIX" suffixes, and typos (e.g. "Wiast").
 const MUSCLE_MAP = {
-  'back':        'Back',
-  'chest':       'Chest',
-  'shoulders':   'Shoulders',
-  'upper-arms':  'Arms',
-  'lower-arms':  'Arms',
-  'upper-legs':  'Legs',
-  'lower-legs':  'Legs',
-  'waist':       'Core/Abs',
-  'neck':        'Neck',
-  'cardio':      'Cardio',
+  // Back
+  'back':           'Back',
+  'back-fix':       'Back',
+
+  // Chest
+  'chest':          'Chest',
+
+  // Shoulders
+  'shoulders':      'Shoulders',
+  'shoulder':       'Shoulders',
+  'shoulder-afix':  'Shoulders',
+
+  // Arms (upper + lower arms, forearms, triceps)
+  'upper-arms':     'Arms',
+  'upper-arms-fix': 'Arms',
+  'lower-arms':     'Arms',
+  'forearm':        'Arms',
+  'forearms':       'Arms',
+  'forearm-sfix':   'Arms',
+  'triceps':        'Arms',
+  'triceps-sfix':   'Arms',
+
+  // Legs (upper + lower legs, calves, thighs, hips)
+  'upper-legs':     'Legs',
+  'lower-legs':     'Legs',
+  'calf':           'Legs',
+  'calves':         'Legs',
+  'thighs':         'Legs',
+  'thighs-fix':     'Legs',
+  'hip':            'Legs',
+  'hips':           'Legs',
+  'hips-fix':       'Legs',
+
+  // Core / Abs
+  'waist':          'Core/Abs',
+  'waist-fix':      'Core/Abs',
+  'wiast':          'Core/Abs',   // common typo in source set
+
+  // Neck
+  'neck':           'Neck',
+
+  // Cardio
+  'cardio':         'Cardio',
+  'cardio-fix':     'Cardio',
+  'plyometric':     'Cardio',
+
+  // Other / catch-all
+  'hands':          'Other',
+  'fix':            'Other',
+};
+
+// A few source files are missing the body-part segment entirely
+// ({id}-{Name}_{res}.gif). Force their muscle group by exact filename.
+const FORCED_BY_FILENAME = {
+  '12231301-Underhand-Grip-Inverted-Back-Row_720.gif': 'Back',
+  '32901301-Weighted-One-Hand-Pull-up_720.gif':        'Back',
+  '34481301-Dumbbell-Side-Lunge-VERSION-3_720.gif':    'Legs',
 };
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
@@ -102,18 +151,28 @@ function collectFilenames() {
 
 // ── Parse one filename into a catalog entry ───────────────────────────────────
 function parseFilename(filename) {
-  const base = filename.replace(/\.gif$/i, '');
+  const forced = FORCED_BY_FILENAME[filename];
+  const base   = filename.replace(/\.gif$/i, '');
 
   // Segments are underscore-delimited: <id-and-name>_<bodyPart>_<resolution>
   // The body part itself may contain hyphens ("Upper-Arms") but never an
   // underscore, so splitting on "_" is safe. Resolution is the last segment.
   const segments = base.split('_');
-  if (segments.length < 3) {
-    return { error: `unexpected name shape (need id_bodypart_res): ${filename}` };
+
+  let bodyPart, namePart;
+  if (forced) {
+    // These files omit the body-part segment: {id}-{Name}_{resolution}.gif
+    segments.pop();                    // drop resolution (e.g. "720")
+    namePart = segments.join('_');
+    bodyPart = null;                   // muscle comes from the forced override
+  } else {
+    if (segments.length < 3) {
+      return { error: `unexpected name shape (need id_bodypart_res): ${filename}` };
+    }
+    segments.pop();                    // drop resolution (e.g. "720")
+    bodyPart = segments.pop();         // e.g. "back" / "Upper-Arms"
+    namePart = segments.join('_');     // e.g. "00071301-Alternate-Lateral-Pulldown"
   }
-  segments.pop();                      // drop resolution (e.g. "720")
-  const bodyPart = segments.pop();     // e.g. "back" / "Upper-Arms"
-  const namePart = segments.join('_'); // e.g. "00071301-Alternate-Lateral-Pulldown"
 
   // namePart = "{numericId}-{Word-Word-Word}". First hyphen segment is the id.
   const hyphenParts = namePart.split('-');
@@ -127,17 +186,22 @@ function parseFilename(filename) {
   const name = words.join(' ');
   const id   = words.join('_').toLowerCase().replace(/[^a-z0-9_]/g, '');
 
-  const muscleKey   = bodyPart.toLowerCase();
-  const muscleGroup = MUSCLE_MAP[muscleKey];
+  let muscleGroup, unmappedMuscle = null;
+  if (forced) {
+    muscleGroup = forced;
+  } else {
+    muscleGroup = MUSCLE_MAP[bodyPart.toLowerCase()];
+    if (!muscleGroup) { unmappedMuscle = bodyPart; muscleGroup = titleCase(bodyPart); }
+  }
 
   return {
     entry: {
       id,
       name,
-      muscleGroup: muscleGroup || titleCase(bodyPart),
+      muscleGroup,
       gifUrl: PUBLIC_BASE + encodeURIComponent(filename),
     },
-    unmappedMuscle: muscleGroup ? null : bodyPart,
+    unmappedMuscle,
     numericId,
   };
 }
