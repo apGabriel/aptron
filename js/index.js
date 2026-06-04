@@ -1,5 +1,4 @@
 // ── CONFIG ──────────────────────────────────────────────────────────────────
-const ANTHROPIC_API_KEY = '';
 const WAKE_HOUR  = 6.5;
 const SLEEP_HOUR = 24;
 
@@ -355,14 +354,8 @@ function loadTomorrow() {
   renderListInto(goals, listEl, emptyEl, key, true, loadTomorrow);
 }
 
-// ── ADD + POLISH HANDLERS ─────────────────────────────────────────────────────
-function showStatus(el, msg, isError, duration) {
-  el.textContent = msg;
-  el.classList.toggle('is-error', !!isError);
-  if (duration) setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, duration);
-}
-
-function makeAddHandlers(input, addBtn, polishBtn, key, statusEl, reload) {
+// ── ADD HANDLERS ──────────────────────────────────────────────────────────────
+function makeAddHandlers(input, addBtn, key, reload) {
   function doAdd() {
     const text = input.value.trim();
     if (!text) return;
@@ -373,61 +366,7 @@ function makeAddHandlers(input, addBtn, polishBtn, key, statusEl, reload) {
     reload();
   }
 
-  async function doPolish() {
-    const text = input.value.trim();
-    if (!text) return;
-    if (!ANTHROPIC_API_KEY) {
-      const goals = storeGet(key) || [];
-      goals.push({ text, done: false });
-      storeSet(key, goals);
-      input.value = '';
-      reload();
-      showStatus(statusEl, 'Polish needs an Anthropic API key — added as-typed.', false, 3500);
-      return;
-    }
-    showStatus(statusEl, 'Polishing…', false, 0);
-    polishBtn.disabled = true;
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: `Clean up and improve this goal as a clear, actionable task. Return ONLY a one-element JSON array of strings with no preamble or markdown fences. Goal: "${text}"`
-          }]
-        })
-      });
-      const data = await res.json();
-      const raw = data.content[0].text.trim();
-      const arr = JSON.parse(raw);
-      const polished = arr[0];
-      const goals = storeGet(key) || [];
-      goals.push({ text: polished, done: false });
-      storeSet(key, goals);
-      input.value = '';
-      reload();
-      showStatus(statusEl, '', false, 0);
-    } catch(err) {
-      const goals = storeGet(key) || [];
-      goals.push({ text, done: false });
-      storeSet(key, goals);
-      input.value = '';
-      reload();
-      showStatus(statusEl, 'Polish failed — added as-typed.', true, 3500);
-    }
-    polishBtn.disabled = false;
-  }
-
   addBtn.addEventListener('click', doAdd);
-  polishBtn.addEventListener('click', doPolish);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
 }
 
@@ -777,8 +716,10 @@ window.addEventListener('goals-changed', () => {
         const newStart = isoWithTime(ev.start, startIn.value);
         const newEnd   = isoWithTime(ev.end,   endIn.value);
         ev.start = newStart; ev.end = newEnd;
-        el.textContent = fmtRange(newStart, newEnd);
-        patchEvent(ev, { startTime: newStart, endTime: newEnd }, el);
+        // Re-sort + re-render instantly so the row jumps to its new slot.
+        sortEvents();
+        renderEvents(currentEvents);
+        patchEvent(ev, { startTime: newStart, endTime: newEnd }, null);
       });
       cancel.addEventListener('click', e => { e.stopPropagation(); close(); });
       wrap.addEventListener('keydown', e => {
@@ -845,6 +786,10 @@ window.addEventListener('goals-changed', () => {
     const doneCount = currentEvents.filter(ev => doneSet.has(ev.id)).length;
     count.textContent = currentEvents.length + ' event' + (currentEvents.length !== 1 ? 's' : '') +
       (doneCount ? ' · ' + doneCount + ' done' : '');
+  }
+
+  function sortEvents() {
+    currentEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
   }
 
   function renderEvents(events) {
@@ -952,18 +897,14 @@ runStreakCheck();
 makeAddHandlers(
   document.getElementById('goalInput'),
   document.getElementById('goalAddBtn'),
-  document.getElementById('goalPolishBtn'),
   'goals:' + getActiveDateString(),
-  document.getElementById('polishStatus'),
   loadToday
 );
 
 makeAddHandlers(
   document.getElementById('tomorrowInput'),
   document.getElementById('tomorrowAddBtn'),
-  document.getElementById('tomorrowPolishBtn'),
   'goals:' + getTomorrowDateString(),
-  document.getElementById('tomorrowStatus'),
   loadTomorrow
 );
 

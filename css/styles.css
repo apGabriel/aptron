@@ -737,21 +737,6 @@ body > * { position: relative; z-index: 1; }
   box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px rgba(0,0,0,0.40);
 }
 
-.gm-polish-btn {
-  background: rgba(0,0,0,0.22);
-  color: var(--text-primary);
-  border: 1px solid rgba(210,188,138,0.18);
-  border-radius: 12px;
-  padding: 11px 20px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, transform 0.15s;
-}
-
-.gm-polish-btn:hover { background: rgba(0,0,0,0.34); transform: translateY(-1px); }
 
 .gm-status-line {
   font-size: 11px;
@@ -810,12 +795,9 @@ body > * { position: relative; z-index: 1; }
 }
 .cal-event-item.is-past { opacity: 0.38; }
 .cal-event-item.is-now  { background: rgba(125, 211, 252, 0.07); }
-.cal-event-item.is-done { opacity: 0.5; }
-.cal-event-item.is-done .cal-event-title,
-.cal-event-item.is-done .cal-event-notes {
-  text-decoration: line-through;
-  text-decoration-color: rgba(255,255,255,0.4);
-}
+.cal-event-item.is-done { opacity: 0.55; }
+.cal-event-item.is-done .cal-event-title { color: #4ade80; }
+.cal-event-item.is-done .cal-event-time  { color: rgba(74,222,128,0.6); }
 .cal-event-time {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px; font-weight: 600;
