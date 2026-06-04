@@ -414,6 +414,14 @@ body > * { position: relative; z-index: 1; }
 
 .gm-all-done .gm-progress-label { color: var(--success); }
 
+/* Calendar summary header — clean "X/Y Events Completed" (no uppercase) */
+.cal-count-label {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-weight: 600;
+  font-size: 12px;
+}
+
 /* Streak pill */
 .gm-streak {
   display: inline-flex;
@@ -786,6 +794,7 @@ body > * { position: relative; z-index: 1; }
   display: flex; flex-direction: column; gap: 1px;
 }
 .cal-event-item {
+  position: relative;
   display: grid;
   grid-template-columns: 132px minmax(0, 1.3fr) minmax(0, 1.5fr) 24px;
   align-items: center; gap: 10px;
@@ -835,18 +844,30 @@ body > * { position: relative; z-index: 1; }
   color-scheme: dark; box-sizing: border-box;
 }
 .cal-edit-input:focus, .cal-edit-time:focus { outline: none; border-color: #7DD3FC; }
-.cal-dur-edit { display: flex; align-items: center; gap: 3px; }
+.cal-dur-edit { display: flex; align-items: center; gap: 2px; }
 .cal-dur-edit .cal-edit-time {
-  width: auto; font-size: 11px; padding: 2px 3px;
+  width: 56px; font-size: 10.5px; padding: 2px 2px; flex-shrink: 0;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
-.cal-mini-btn {
-  border: none; border-radius: 5px; cursor: pointer;
-  line-height: 1; font-size: 12px; padding: 3px 5px; flex-shrink: 0;
+
+/* Save / cancel actions — far right of the row, near the checkbox, so the
+   time and text columns never shift when entering edit mode. */
+.cal-event-item.is-editing .cal-event-check { visibility: hidden; }
+.cal-row-actions {
+  position: absolute; top: 50%; right: 4px;
+  transform: translateY(-50%);
+  display: flex; gap: 4px; z-index: 2;
 }
-.cal-mini-save   { background: rgba(74,222,128,0.20); color: #4ade80; }
-.cal-mini-cancel { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.55); }
-.cal-mini-btn:hover { filter: brightness(1.3); }
+.cal-mini-btn {
+  border: none; border-radius: 6px; cursor: pointer;
+  line-height: 1; font-size: 13px; font-weight: 700;
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: filter 0.12s, transform 0.12s;
+}
+.cal-mini-save   { background: rgba(74,222,128,0.22); color: #4ade80; }
+.cal-mini-cancel { background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.6); }
+.cal-mini-btn:hover { filter: brightness(1.3); transform: scale(1.08); }
 
 /* Completion checkbox (column 4) */
 .cal-event-check {

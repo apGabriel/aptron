@@ -695,28 +695,43 @@ window.addEventListener('goals-changed', () => {
     return b;
   }
 
-  function makeDurationEdit(el, ev) {
+  function makeDurationEdit(el, ev, li) {
     el.classList.add('cal-editable');
     el.addEventListener('click', () => {
-      if (el.querySelector('.cal-dur-edit')) return;
+      if (li.classList.contains('is-editing')) return;
+      li.classList.add('is-editing');
+
       const startIn = timeInput(new Date(ev.start));
       const endIn   = timeInput(new Date(ev.end));
-      const ok      = microBtn('✓', 'cal-mini-save');
-      const cancel  = microBtn('×', 'cal-mini-cancel');
       const wrap = document.createElement('span');
       wrap.className = 'cal-dur-edit';
-      wrap.append(startIn, document.createTextNode('–'), endIn, ok, cancel);
+      wrap.append(startIn, document.createTextNode('–'), endIn);
       el.textContent = '';
       el.appendChild(wrap);
+
+      // Action buttons live at the far right of the row (not the time column),
+      // so the layout stays balanced and text columns don't shift.
+      const ok      = microBtn('✓', 'cal-mini-save');
+      const cancel  = microBtn('×', 'cal-mini-cancel');
+      const actions = document.createElement('span');
+      actions.className = 'cal-row-actions';
+      actions.append(ok, cancel);
+      li.appendChild(actions);
+
       startIn.focus();
 
-      const close = () => { el.textContent = fmtRange(ev.start, ev.end); };
+      const cleanup = () => {
+        li.classList.remove('is-editing');
+        if (actions.parentNode) actions.parentNode.removeChild(actions);
+      };
+      const close = () => { cleanup(); el.textContent = fmtRange(ev.start, ev.end); };
       ok.addEventListener('click', e => {
         e.stopPropagation();
         const newStart = isoWithTime(ev.start, startIn.value);
         const newEnd   = isoWithTime(ev.end,   endIn.value);
         ev.start = newStart; ev.end = newEnd;
         // Re-sort + re-render instantly so the row jumps to its new slot.
+        cleanup();
         sortEvents();
         renderEvents(currentEvents);
         patchEvent(ev, { startTime: newStart, endTime: newEnd }, null);
@@ -740,7 +755,7 @@ window.addEventListener('goals-changed', () => {
     const dur = document.createElement('div');
     dur.className = 'cal-event-time';
     dur.textContent = ev.allDay ? 'all day' : fmtRange(ev.start, ev.end);
-    if (!ev.allDay) makeDurationEdit(dur, ev);
+    if (!ev.allDay) makeDurationEdit(dur, ev, li);
     li.appendChild(dur);
 
     // Column 2 — Event name
@@ -781,11 +796,11 @@ window.addEventListener('goals-changed', () => {
 
   function updateCount() {
     const count = document.getElementById('calEventCount');
-    if (!currentEvents.length) { count.textContent = 'nothing scheduled'; return; }
+    const total = currentEvents.length;
+    if (!total) { count.textContent = 'Nothing scheduled'; return; }
     const doneSet = getDoneSet();
     const doneCount = currentEvents.filter(ev => doneSet.has(ev.id)).length;
-    count.textContent = currentEvents.length + ' event' + (currentEvents.length !== 1 ? 's' : '') +
-      (doneCount ? ' · ' + doneCount + ' done' : '');
+    count.textContent = doneCount + '/' + total + ' Events Completed';
   }
 
   function sortEvents() {
