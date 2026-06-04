@@ -3895,15 +3895,33 @@ img, video, canvas, svg { max-width: 100%; }
     if ($('rbRoutineName').value !== current.name) $('rbRoutineName').value = current.name;
   }
 
-  function numField(label, value, onChange) {
+  function numField(label, value, onChange, opts) {
+    opts = opts || {};
+    const min = (opts.min != null) ? opts.min : 0;
+    const max = (opts.max != null) ? opts.max : null;
     const f = document.createElement('div'); f.className = 'rb-field';
     const l = document.createElement('label'); l.textContent = label;
     const i = document.createElement('input');
-    i.type = 'number'; i.min = '0'; i.value = value; i.inputMode = 'numeric';
-    i.addEventListener('change', () => {
-      const n = parseInt(i.value, 10);
-      onChange(isNaN(n) || n < 0 ? 0 : n);
-    });
+    i.type = 'number'; i.min = String(min); i.value = value; i.inputMode = 'numeric';
+    if (max != null) i.max = String(max);
+    // Clamp + sanitize on commit: empty/NaN falls back to min, out-of-range
+    // snaps to the nearest bound, and the corrected value is written back so
+    // the box never shows an invalid number.
+    const clamp = () => {
+      let n = parseInt(i.value, 10);
+      if (isNaN(n)) n = min;
+      if (n < min) n = min;
+      if (max != null && n > max) n = max;
+      i.value = String(n);
+      onChange(n);
+    };
+    i.addEventListener('change', clamp);
+    // Stop an over-the-max value from lingering while the user is still typing.
+    if (max != null) {
+      i.addEventListener('input', () => {
+        if (i.value !== '' && parseInt(i.value, 10) > max) i.value = String(max);
+      });
+    }
     f.append(l, i);
     return f;
   }
@@ -3939,7 +3957,7 @@ img, video, canvas, svg { max-width: 100%; }
     const fields = document.createElement('div'); fields.className = 'rb-row-fields';
     fields.append(
       numField('Sets',   it.sets, v => it.sets = v),
-      numField('Reps',   it.reps, v => it.reps = v),
+      numField('Reps',   it.reps, v => it.reps = v, { min: 1, max: 36 }),
       numField('Rest s', it.rest, v => it.rest = v),
     );
     main.append(nm, mus, fields);
