@@ -606,6 +606,7 @@ window.addEventListener('goals-changed', () => {
 // ── GOOGLE CALENDAR INTEGRATION ───────────────────────────────────────────────
 (function () {
   const PROXY = '';
+  let currentEvents = [];
 
   function todayStr() {
     const d = new Date();
@@ -643,28 +644,220 @@ window.addEventListener('goals-changed', () => {
     return '';
   }
 
-  function renderEvents(events) {
-    const list  = document.getElementById('calEventList');
+  // ── Completion state (stored locally — Google Calendar has no "done" flag) ────
+  function doneKey() { return 'cal_done:' + todayStr(); }
+  function getDoneSet() {
+    try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); }
+    catch { return new Set(); }
+  }
+  function setDone(id, done) {
+    const s = getDoneSet();
+    if (done) s.add(id); else s.delete(id);
+    localStorage.setItem(doneKey(), JSON.stringify([...s]));
+  }
+
+  // ── Status line helper ────────────────────────────────────────────────────────
+  function showCalStatus(msg, isError) {
+    const el = document.getElementById('calStatus');
+    el.textContent = msg;
+    el.classList.toggle('is-error', !!isError);
+    setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 4000);
+  }
+
+  function flashSaved(el) {
+    if (!el) return;
+    el.classList.add('cal-saved-flash');
+    setTimeout(() => el.classList.remove('cal-saved-flash'), 600);
+  }
+
+  // ── PATCH an event through the proxy, with optimistic local update ────────────
+  async function patchEvent(ev, body, el) {
+    if (el) el.classList.add('cal-saving');
+    try {
+      const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const updated = await res.json();
+      Object.assign(ev, updated);
+      flashSaved(el);
+    } catch {
+      showCalStatus('Update failed — is the proxy running?', true);
+      loadEvents(); // fall back to server truth
+    } finally {
+      if (el) el.classList.remove('cal-saving');
+    }
+  }
+
+  // ── Inline text edit (title / notes) ──────────────────────────────────────────
+  function restoreField(el, ev, field) {
+    if (field === 'notes') el.textContent = ev.notes ? ev.notes.split('\n')[0] : '';
+    else                   el.textContent = ev.title;
+  }
+
+  function makeFieldEdit(el, ev, field) {
+    el.classList.add('cal-editable');
+    el.addEventListener('click', () => {
+      if (el.querySelector('input')) return;
+      const current = (field === 'notes' ? ev.notes : ev.title) || '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'cal-edit-input';
+      input.value = current;
+      el.textContent = '';
+      el.appendChild(input);
+      input.focus();
+      input.select();
+
+      let done = false;
+      const commit = (save) => {
+        if (done) return;
+        done = true;
+        const val = input.value.trim();
+        if (save && val !== current.trim()) {
+          ev[field] = val;
+          restoreField(el, ev, field);
+          patchEvent(ev, field === 'title' ? { title: val } : { notes: val }, el);
+        } else {
+          restoreField(el, ev, field);
+        }
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit(true); }
+        if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+      });
+      input.addEventListener('blur', () => commit(true));
+    });
+  }
+
+  // ── Inline duration edit (start / end time inputs) ────────────────────────────
+  function isoWithTime(originalIso, hhmm) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const d = new Date(originalIso);
+    d.setHours(h, m, 0, 0);
+    return toLocalISO(d);
+  }
+
+  function timeInput(d) {
+    const i = document.createElement('input');
+    i.type  = 'time';
+    i.className = 'cal-edit-time';
+    i.value = padZ(d.getHours()) + ':' + padZ(d.getMinutes());
+    return i;
+  }
+
+  function microBtn(label, cls) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cal-mini-btn ' + cls;
+    b.textContent = label;
+    return b;
+  }
+
+  function makeDurationEdit(el, ev) {
+    el.classList.add('cal-editable');
+    el.addEventListener('click', () => {
+      if (el.querySelector('.cal-dur-edit')) return;
+      const startIn = timeInput(new Date(ev.start));
+      const endIn   = timeInput(new Date(ev.end));
+      const ok      = microBtn('✓', 'cal-mini-save');
+      const cancel  = microBtn('×', 'cal-mini-cancel');
+      const wrap = document.createElement('span');
+      wrap.className = 'cal-dur-edit';
+      wrap.append(startIn, document.createTextNode('–'), endIn, ok, cancel);
+      el.textContent = '';
+      el.appendChild(wrap);
+      startIn.focus();
+
+      const close = () => { el.textContent = fmtRange(ev.start, ev.end); };
+      ok.addEventListener('click', e => {
+        e.stopPropagation();
+        const newStart = isoWithTime(ev.start, startIn.value);
+        const newEnd   = isoWithTime(ev.end,   endIn.value);
+        ev.start = newStart; ev.end = newEnd;
+        el.textContent = fmtRange(newStart, newEnd);
+        patchEvent(ev, { startTime: newStart, endTime: newEnd }, el);
+      });
+      cancel.addEventListener('click', e => { e.stopPropagation(); close(); });
+      wrap.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); ok.click(); }
+        if (e.key === 'Escape') { e.preventDefault(); close(); }
+      });
+    });
+  }
+
+  // ── Build one interactive event row (4 columns) ───────────────────────────────
+  function buildEventRow(ev) {
+    const isDone = getDoneSet().has(ev.id);
+    const li = document.createElement('li');
+    li.className = 'cal-event-item ' + eventClass(ev) + (isDone ? ' is-done' : '');
+    li.dataset.id = ev.id;
+
+    // Column 1 — Duration
+    const dur = document.createElement('div');
+    dur.className = 'cal-event-time';
+    dur.textContent = ev.allDay ? 'all day' : fmtRange(ev.start, ev.end);
+    if (!ev.allDay) makeDurationEdit(dur, ev);
+    li.appendChild(dur);
+
+    // Column 2 — Event name
+    const title = document.createElement('div');
+    title.className = 'cal-event-title';
+    title.textContent = ev.title;
+    makeFieldEdit(title, ev, 'title');
+    li.appendChild(title);
+
+    // Column 3 — Description
+    const notes = document.createElement('div');
+    notes.className = 'cal-event-notes';
+    notes.dataset.placeholder = 'Add note…';
+    notes.textContent = ev.notes ? ev.notes.split('\n')[0] : '';
+    makeFieldEdit(notes, ev, 'notes');
+    li.appendChild(notes);
+
+    // Column 4 — Completion check
+    const cbWrap = document.createElement('label');
+    cbWrap.className = 'cal-event-check';
+    cbWrap.title = 'Mark complete';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = isDone;
+    const cbCustom = document.createElement('span');
+    cbCustom.className = 'cal-check-custom';
+    cb.addEventListener('change', () => {
+      setDone(ev.id, cb.checked);
+      li.classList.toggle('is-done', cb.checked);
+      updateCount();
+    });
+    cbWrap.appendChild(cb);
+    cbWrap.appendChild(cbCustom);
+    li.appendChild(cbWrap);
+
+    return li;
+  }
+
+  function updateCount() {
     const count = document.getElementById('calEventCount');
+    if (!currentEvents.length) { count.textContent = 'nothing scheduled'; return; }
+    const doneSet = getDoneSet();
+    const doneCount = currentEvents.filter(ev => doneSet.has(ev.id)).length;
+    count.textContent = currentEvents.length + ' event' + (currentEvents.length !== 1 ? 's' : '') +
+      (doneCount ? ' · ' + doneCount + ' done' : '');
+  }
+
+  function renderEvents(events) {
+    currentEvents = events;
+    const list = document.getElementById('calEventList');
+    list.innerHTML = '';
     if (!events.length) {
       list.innerHTML = '<li class="cal-empty">No events today</li>';
-      count.textContent = 'nothing scheduled';
+      updateCount();
       return;
     }
-    count.textContent = events.length + ' event' + (events.length !== 1 ? 's' : '');
-    list.innerHTML = events.map(ev => {
-      const cls   = eventClass(ev);
-      const time  = ev.allDay ? 'all day' : fmtRange(ev.start, ev.end);
-      const notes = ev.notes
-        ? `<span class="cal-event-notes">${ev.notes.split('\n')[0]}</span>`
-        : '';
-      return `<li class="cal-event-item ${cls}">
-        <span class="cal-event-time">${time}</span>
-        <span class="cal-event-dot"></span>
-        <span class="cal-event-title">${ev.title}</span>
-        ${notes}
-      </li>`;
-    }).join('');
+    events.forEach(ev => list.appendChild(buildEventRow(ev)));
+    updateCount();
   }
 
   async function loadEvents() {
