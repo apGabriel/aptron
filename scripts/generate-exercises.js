@@ -200,7 +200,7 @@ function parseFilename(filename) {
       id,
       name,
       muscleGroup,
-      gifUrl: PUBLIC_BASE + encodeURIComponent(filename),
+      gifUrl: PUBLIC_BASE + encodeFilename(filename),
     },
     unmappedMuscle,
     numericId,
@@ -209,6 +209,23 @@ function parseFilename(filename) {
 
 function titleCase(s) {
   return s.split(/[-\s]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// Build a single, correctly percent-encoded path segment for the storage URL.
+// The source file list is messy: some names arrive raw (with real "°" or
+// spaces) while others are ALREADY percent-encoded (e.g. "%C2%B0"). Calling
+// encodeURIComponent() straight on a pre-encoded name double-encodes the "%"
+// into "%25" (→ "%25C2%25B0"), which 404s in the browser. So decode first
+// (idempotent for raw names), then encode exactly once. Malformed "%" runs
+// that can't be decoded are left untouched before encoding.
+function encodeFilename(filename) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(filename);
+  } catch (_) {
+    decoded = filename; // not valid percent-encoding — treat as a literal name
+  }
+  return encodeURIComponent(decoded);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
