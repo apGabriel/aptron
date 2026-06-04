@@ -53,6 +53,7 @@ const MUSCLE_MAP = {
 
   // Chest
   'chest':          'Chest',
+  'chest-fix':      'Chest',
 
   // Shoulders
   'shoulders':      'Shoulders',
