@@ -1262,6 +1262,136 @@ img, video, canvas, svg { max-width: 100%; }
 }
 
 .hidden { display: none !important; }
+
+/* ============================================================
+   ROUTINE BUILDER — exercise library + routine composer
+   ============================================================ */
+.rb-search {
+  width: 100%; padding: 12px 14px;
+  border: 1px solid var(--border); background: rgba(0,0,0,0.28);
+  color: var(--text-1); border-radius: 12px;
+  font-family: inherit; font-size: 14px; margin-bottom: 12px;
+}
+.rb-search:focus { outline: none; border-color: rgba(255,255,255,0.40); box-shadow: 0 0 0 3px rgba(255,255,255,0.06); }
+.rb-search::placeholder { color: var(--text-4); }
+
+.rb-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.rb-chip {
+  padding: 7px 12px; border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04); color: var(--text-3);
+  border-radius: 999px; font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.rb-chip:hover { color: var(--text-1); background: rgba(255,255,255,0.08); }
+.rb-chip.active {
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  color: #0a0a0b; border-color: transparent;
+}
+
+.rb-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+.rb-ex-card {
+  border: 1px solid var(--border); background: rgba(255,255,255,0.025);
+  border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
+}
+.rb-ex-thumb-wrap { position: relative; }
+.rb-ex-thumb {
+  width: 100%; aspect-ratio: 1 / 1; display: block; object-fit: cover;
+  background: rgba(255,255,255,0.04); cursor: zoom-in; border: none;
+}
+.rb-ex-muscle-tag {
+  position: absolute; top: 6px; left: 6px; padding: 3px 7px;
+  border-radius: 999px; font-size: 9px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  background: rgba(0,0,0,0.55); color: var(--text-2);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+.rb-ex-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.rb-ex-name { font-size: 12.5px; font-weight: 600; line-height: 1.3; color: var(--text-1); }
+.rb-ex-add {
+  margin-top: auto; padding: 7px; border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04); color: var(--text-1);
+  border-radius: 8px; font-family: inherit; font-size: 11.5px; font-weight: 700;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.rb-ex-add:hover { background: rgba(255,255,255,0.10); }
+.rb-ex-add.added {
+  background: rgba(110,231,183,0.14); color: var(--good);
+  border-color: rgba(110,231,183,0.25);
+}
+
+.rb-more {
+  width: 100%; margin-top: 12px; padding: 11px;
+  background: rgba(255,255,255,0.025); border: 1px dashed var(--border);
+  color: var(--text-2); border-radius: 10px; cursor: pointer;
+  font-family: inherit; font-size: 12px; -webkit-tap-highlight-color: transparent;
+}
+.rb-more:hover { background: rgba(255,255,255,0.05); color: var(--text-1); }
+.rb-lib-empty, .rb-routine-empty, .rb-saved-empty {
+  font-size: 13px; color: var(--text-3); padding: 14px 4px; text-align: center; line-height: 1.5;
+}
+
+.rb-name-input {
+  width: 100%; padding: 12px 14px; border: 1px solid var(--border);
+  background: rgba(0,0,0,0.28); color: var(--text-1); border-radius: 12px;
+  font-family: inherit; font-size: 15px; font-weight: 600; margin-bottom: 10px;
+}
+.rb-name-input:focus { outline: none; border-color: rgba(255,255,255,0.40); box-shadow: 0 0 0 3px rgba(255,255,255,0.06); }
+.rb-name-input::placeholder { color: var(--text-4); font-weight: 500; }
+
+.rb-routine-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rb-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start;
+  padding: 10px; border: 1px solid var(--border);
+  background: rgba(255,255,255,0.025); border-radius: 12px;
+}
+.rb-row-thumb {
+  width: 46px; height: 46px; border-radius: 8px; object-fit: cover;
+  background: rgba(255,255,255,0.05); cursor: zoom-in;
+}
+.rb-row-main { min-width: 0; }
+.rb-row-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rb-row-muscle { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+.rb-row-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rb-field { display: flex; flex-direction: column; gap: 3px; }
+.rb-field label { font-size: 9px; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+.rb-field input {
+  width: 54px; padding: 6px 4px; border: 1px solid var(--border);
+  background: rgba(0,0,0,0.28); color: var(--text-1); border-radius: 7px;
+  font-family: inherit; font-size: 13px; font-weight: 700; text-align: center;
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+}
+.rb-field input::-webkit-outer-spin-button, .rb-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rb-row-controls { display: flex; flex-direction: column; gap: 4px; }
+.rb-mini {
+  background: transparent; border: 1px solid var(--border); color: var(--text-3);
+  border-radius: 6px; cursor: pointer; width: 28px; height: 22px; font-size: 12px;
+  font-family: inherit; -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.rb-mini:hover { color: var(--text-1); background: rgba(255,255,255,0.06); }
+.rb-mini:disabled { opacity: 0.3; cursor: not-allowed; }
+.rb-mini.rb-del:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
+
+.rb-routine-actions { display: flex; gap: 8px; }
+.rb-routine-actions .po-btn-primary { flex: 2; }
+.rb-routine-actions .po-btn-secondary { flex: 1; }
+
+.rb-saved-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rb-saved-row {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.025); border-radius: 12px;
+}
+.rb-saved-info { flex: 1; min-width: 0; }
+.rb-saved-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rb-saved-meta { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+.rb-saved-edit { padding: 8px 14px; font-size: 12px; }
+
+.rb-gif-muscle { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin: -8px 0 12px; }
+.rb-gif-img { width: 100%; border-radius: 12px; background: rgba(255,255,255,0.04); display: block; margin-bottom: 4px; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -1580,6 +1710,44 @@ img, video, canvas, svg { max-width: 100%; }
         <span class="po-tw-past-arrow" id="poTwPastArrow">▾</span>
       </button>
       <div class="po-tw-past-body" id="poTwPastBody" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- ROUTINE BUILDER — browse the exercise library, compose & save routines -->
+  <div class="card" id="rbCard">
+    <div class="po-sub-title">Routine Builder</div>
+
+    <input type="text" id="rbSearch" class="rb-search" placeholder="Search exercises…" autocomplete="off">
+    <div class="rb-filters" id="rbFilters"></div>
+
+    <div class="rb-grid" id="rbGrid"></div>
+    <div class="rb-lib-empty" id="rbLibEmpty" style="display:none"></div>
+    <button class="rb-more" id="rbMore" type="button" style="display:none">Show more</button>
+
+    <div class="po-sub-title" style="margin-top:26px">Your routine</div>
+    <input type="text" id="rbRoutineName" class="rb-name-input" placeholder="Routine name (e.g. Push Day A)" autocomplete="off">
+    <ul class="rb-routine-list" id="rbRoutineList"></ul>
+    <div class="rb-routine-empty" id="rbRoutineEmpty">No exercises yet — add some from the library above.</div>
+    <div class="rb-routine-actions">
+      <button class="po-btn-secondary" id="rbClearBtn" type="button">Clear</button>
+      <button class="po-btn-primary" id="rbSaveBtn" type="button">Save routine</button>
+    </div>
+
+    <div class="po-sub-title" style="margin-top:26px">Saved routines</div>
+    <ul class="rb-saved-list" id="rbSavedList"></ul>
+    <div class="rb-saved-empty" id="rbSavedEmpty">No saved routines yet.</div>
+  </div>
+</div>
+
+<!-- Exercise GIF preview modal -->
+<div class="po-modal-bg" id="rbGifModalBg">
+  <div class="po-modal">
+    <h3 id="rbGifTitle">Exercise</h3>
+    <div class="rb-gif-muscle" id="rbGifMuscle"></div>
+    <img id="rbGifImg" class="rb-gif-img" alt="">
+    <div class="po-modal-actions">
+      <button class="po-btn-secondary" id="rbGifClose" type="button">Close</button>
+      <button class="po-btn-primary" id="rbGifAdd" type="button">Add to routine</button>
     </div>
   </div>
 </div>
@@ -3507,6 +3675,293 @@ img, video, canvas, svg { max-width: 100%; }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pcFlushPushOnUnload();
   });
+})();
+</script>
+
+<!-- ============================================================
+     ROUTINE BUILDER — self-contained. Reads the exercise catalog
+     from js/exercises-data.json (generated by scripts/generate-
+     exercises.js) and persists routines to localStorage.
+     ============================================================ -->
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const RB_KEY = 'rb_routines_v1';
+  const PAGE   = 24;                 // exercises rendered per "page"
+  const DEFAULTS = { sets: 3, reps: 10, rest: 90 };
+
+  let catalog      = [];             // full library from JSON
+  let filtered     = [];             // after muscle + search filter
+  let visible      = PAGE;
+  let activeMuscle = 'All';
+  let search       = '';
+  let current      = { id: null, name: '', exercises: [] }; // routine being built
+
+  // ── Persistence ───────────────────────────────────────────────
+  function loadRoutines() {
+    try { return JSON.parse(localStorage.getItem(RB_KEY)) || []; } catch { return []; }
+  }
+  function saveRoutines(arr) {
+    try { localStorage.setItem(RB_KEY, JSON.stringify(arr)); } catch (e) {}
+  }
+  const clone = obj => JSON.parse(JSON.stringify(obj));
+
+  // ── Library filtering ─────────────────────────────────────────
+  function buildFilters() {
+    const groups = ['All', ...Array.from(new Set(catalog.map(e => e.muscleGroup))).sort()];
+    const wrap = $('rbFilters');
+    wrap.innerHTML = '';
+    groups.forEach(g => {
+      const b = document.createElement('button');
+      b.className = 'rb-chip' + (g === activeMuscle ? ' active' : '');
+      b.textContent = g;
+      b.addEventListener('click', () => {
+        activeMuscle = g; visible = PAGE;
+        buildFilters(); applyFilter();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function applyFilter() {
+    const q = search.trim().toLowerCase();
+    filtered = catalog.filter(e =>
+      (activeMuscle === 'All' || e.muscleGroup === activeMuscle) &&
+      (!q || e.name.toLowerCase().includes(q)));
+    renderGrid();
+  }
+
+  function renderGrid() {
+    const grid = $('rbGrid');
+    grid.innerHTML = '';
+    const inRoutine = new Set(current.exercises.map(x => x.exId));
+    filtered.slice(0, visible).forEach(e => grid.appendChild(exCard(e, inRoutine.has(e.id))));
+
+    const empty = $('rbLibEmpty');
+    if (!catalog.length) {
+      empty.style.display = 'block';
+      empty.textContent = 'Exercise catalog not found. Run scripts/generate-exercises.js and commit js/exercises-data.json, then refresh.';
+    } else if (!filtered.length) {
+      empty.style.display = 'block';
+      empty.textContent = 'No exercises match your search.';
+    } else {
+      empty.style.display = 'none';
+    }
+
+    const more = $('rbMore');
+    if (filtered.length > visible) {
+      more.style.display = 'block';
+      more.textContent = 'Show more (' + (filtered.length - visible) + ')';
+    } else {
+      more.style.display = 'none';
+    }
+  }
+
+  function exCard(e, added) {
+    const card = document.createElement('div'); card.className = 'rb-ex-card';
+
+    const tw = document.createElement('div'); tw.className = 'rb-ex-thumb-wrap';
+    const img = document.createElement('img');
+    img.className = 'rb-ex-thumb'; img.loading = 'lazy'; img.src = e.gifUrl;
+    img.alt = e.name; img.title = 'Preview';
+    img.addEventListener('click', () => openGif(e));
+    const tag = document.createElement('span'); tag.className = 'rb-ex-muscle-tag'; tag.textContent = e.muscleGroup;
+    tw.append(img, tag);
+
+    const body = document.createElement('div'); body.className = 'rb-ex-body';
+    const nm = document.createElement('div'); nm.className = 'rb-ex-name'; nm.textContent = e.name;
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'rb-ex-add' + (added ? ' added' : '');
+    add.textContent = added ? '✓ Added' : '+ Add';
+    add.addEventListener('click', () => addToRoutine(e));
+    body.append(nm, add);
+
+    card.append(tw, body);
+    return card;
+  }
+
+  // ── Current routine ───────────────────────────────────────────
+  function addToRoutine(e) {
+    const exId = e.exId || e.id;
+    if (current.exercises.some(x => x.exId === exId)) return; // no duplicates
+    current.exercises.push({
+      exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl,
+      sets: DEFAULTS.sets, reps: DEFAULTS.reps, rest: DEFAULTS.rest,
+    });
+    renderRoutine();
+    renderGrid();
+  }
+
+  function renderRoutine() {
+    const list = $('rbRoutineList');
+    list.innerHTML = '';
+    $('rbRoutineEmpty').style.display = current.exercises.length ? 'none' : 'block';
+    current.exercises.forEach((it, idx) => list.appendChild(routineRow(it, idx)));
+    if ($('rbRoutineName').value !== current.name) $('rbRoutineName').value = current.name;
+  }
+
+  function numField(label, value, onChange) {
+    const f = document.createElement('div'); f.className = 'rb-field';
+    const l = document.createElement('label'); l.textContent = label;
+    const i = document.createElement('input');
+    i.type = 'number'; i.min = '0'; i.value = value; i.inputMode = 'numeric';
+    i.addEventListener('change', () => {
+      const n = parseInt(i.value, 10);
+      onChange(isNaN(n) || n < 0 ? 0 : n);
+    });
+    f.append(l, i);
+    return f;
+  }
+
+  function mini(label, fn, cls) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rb-mini' + (cls ? ' ' + cls : '');
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function move(idx, dir) {
+    const j = idx + dir;
+    if (j < 0 || j >= current.exercises.length) return;
+    const a = current.exercises;
+    [a[idx], a[j]] = [a[j], a[idx]];
+    renderRoutine();
+  }
+
+  function routineRow(it, idx) {
+    const li = document.createElement('li'); li.className = 'rb-row';
+
+    const thumb = document.createElement('img');
+    thumb.className = 'rb-row-thumb'; thumb.loading = 'lazy'; thumb.src = it.gifUrl;
+    thumb.alt = it.name; thumb.title = 'Preview';
+    thumb.addEventListener('click', () => openGif(it));
+
+    const main = document.createElement('div'); main.className = 'rb-row-main';
+    const nm = document.createElement('div'); nm.className = 'rb-row-name'; nm.textContent = it.name;
+    const mus = document.createElement('div'); mus.className = 'rb-row-muscle'; mus.textContent = it.muscleGroup;
+    const fields = document.createElement('div'); fields.className = 'rb-row-fields';
+    fields.append(
+      numField('Sets',   it.sets, v => it.sets = v),
+      numField('Reps',   it.reps, v => it.reps = v),
+      numField('Rest s', it.rest, v => it.rest = v),
+    );
+    main.append(nm, mus, fields);
+
+    const ctr = document.createElement('div'); ctr.className = 'rb-row-controls';
+    const up   = mini('↑', () => move(idx, -1));
+    const down = mini('↓', () => move(idx,  1));
+    const del  = mini('×', () => { current.exercises.splice(idx, 1); renderRoutine(); renderGrid(); }, 'rb-del');
+    up.disabled   = idx === 0;
+    down.disabled = idx === current.exercises.length - 1;
+    ctr.append(up, down, del);
+
+    li.append(thumb, main, ctr);
+    return li;
+  }
+
+  // ── Saved routines ────────────────────────────────────────────
+  function renderSaved() {
+    const routines = loadRoutines();
+    const list = $('rbSavedList');
+    list.innerHTML = '';
+    $('rbSavedEmpty').style.display = routines.length ? 'none' : 'block';
+
+    routines.forEach(r => {
+      const li = document.createElement('li'); li.className = 'rb-saved-row';
+
+      const info = document.createElement('div'); info.className = 'rb-saved-info';
+      const nm = document.createElement('div'); nm.className = 'rb-saved-name'; nm.textContent = r.name;
+      const meta = document.createElement('div'); meta.className = 'rb-saved-meta';
+      const totalSets = r.exercises.reduce((s, e) => s + (Number(e.sets) || 0), 0);
+      meta.textContent = r.exercises.length + ' exercise' + (r.exercises.length !== 1 ? 's' : '') + ' · ' + totalSets + ' sets';
+      info.append(nm, meta);
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button'; editBtn.className = 'po-btn-secondary rb-saved-edit'; editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => {
+        current = clone(r);
+        renderRoutine(); renderGrid();
+        $('rbCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+
+      const delBtn = mini('×', () => {
+        if (!confirm('Delete routine "' + r.name + '"?')) return;
+        saveRoutines(loadRoutines().filter(x => x.id !== r.id));
+        if (current.id === r.id) { current = { id: null, name: '', exercises: [] }; renderRoutine(); renderGrid(); }
+        renderSaved();
+      }, 'rb-del');
+
+      li.append(info, editBtn, delBtn);
+      list.appendChild(li);
+    });
+  }
+
+  // ── GIF preview modal ─────────────────────────────────────────
+  function openGif(e) {
+    const exId = e.exId || e.id;
+    $('rbGifTitle').textContent = e.name;
+    $('rbGifMuscle').textContent = e.muscleGroup;
+    const img = $('rbGifImg'); img.src = e.gifUrl; img.alt = e.name;
+    const addBtn = $('rbGifAdd');
+    const inRoutine = current.exercises.some(x => x.exId === exId);
+    addBtn.textContent = inRoutine ? '✓ In routine' : 'Add to routine';
+    addBtn.disabled = inRoutine;
+    addBtn.onclick = () => {
+      addToRoutine({ id: exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl });
+      $('rbGifModalBg').classList.remove('show');
+    };
+    $('rbGifModalBg').classList.add('show');
+  }
+
+  // ── Wire up controls ──────────────────────────────────────────
+  $('rbSearch').addEventListener('input', () => { search = $('rbSearch').value; visible = PAGE; applyFilter(); });
+  $('rbMore').addEventListener('click', () => { visible += PAGE; renderGrid(); });
+  $('rbRoutineName').addEventListener('input', () => { current.name = $('rbRoutineName').value; });
+
+  $('rbClearBtn').addEventListener('click', () => {
+    if (current.exercises.length && !confirm('Clear the current routine?')) return;
+    current = { id: null, name: '', exercises: [] };
+    renderRoutine(); renderGrid();
+  });
+
+  $('rbSaveBtn').addEventListener('click', () => {
+    if (!current.exercises.length) { alert('Add at least one exercise before saving.'); return; }
+    current.name = ($('rbRoutineName').value || '').trim() || 'Routine ' + new Date().toLocaleDateString();
+    const routines = loadRoutines();
+    if (current.id) {
+      const i = routines.findIndex(r => r.id === current.id);
+      if (i >= 0) routines[i] = clone(current); else routines.push(clone(current));
+    } else {
+      current.id = 'r_' + Date.now();
+      routines.push(clone(current));
+    }
+    saveRoutines(routines);
+    current = { id: null, name: '', exercises: [] };
+    renderRoutine(); renderGrid(); renderSaved();
+  });
+
+  $('rbGifClose').addEventListener('click', () => $('rbGifModalBg').classList.remove('show'));
+  $('rbGifModalBg').addEventListener('click', e => { if (e.target === $('rbGifModalBg')) $('rbGifModalBg').classList.remove('show'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $('rbGifModalBg').classList.remove('show'); });
+
+  // ── Init ──────────────────────────────────────────────────────
+  async function init() {
+    try {
+      const res = await fetch('js/exercises-data.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      catalog = await res.json();
+    } catch {
+      catalog = [];
+    }
+    buildFilters();
+    applyFilter();
+    renderRoutine();
+    renderSaved();
+  }
+  init();
 })();
 </script>
 
