@@ -1148,6 +1148,12 @@ img, video, canvas, svg { max-width: 100%; }
   background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
   color: #0a0a0b; border-color: transparent;
 }
+/* Drill-down "back to all groups" chip — subtle, set apart from the muscles. */
+.rb-chip-back {
+  color: var(--text-2); font-weight: 700;
+  margin-right: 4px;
+}
+.rb-chip-back:hover { color: var(--text-1); }
 
 /* ----- Interactive muscle map ----- */
 .rb-musclemap {
@@ -1794,8 +1800,6 @@ img, video, canvas, svg { max-width: 100%; }
                     </g>
                     <path d="M282.69,83.67c-5.36-3.86-3.61-20.07-6.05-37.39-2.56-18.19,16.27-32.16,24.89-34.59,5.86-1.65-18.28,1.29,6.39-6.76s33.37,2.13,37.66,3.41c3.74-.45-9.93-8.43,11.87-1.12,20.36,6.82,23.77,22.8,22.07,39.35-2.2,21.32,2.15,29.08-1.76,37.1" fill="none" stroke="#101010" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.46">
                     </path>
-                    <!-- Neck overlay (cervical area) — not in the source SVG; added so the Neck pill/filter has a target -->
-                    <ellipse class="neck" data-muscle="Neck" cx="330" cy="173" rx="22" ry="15"><title>Neck</title></ellipse>
                 </svg>
         </div>
         <div class="mm-view mm-back" data-view="back" hidden>
@@ -2008,8 +2012,6 @@ img, video, canvas, svg { max-width: 100%; }
                             fill="none" stroke="#101010" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.52">
                         </path>
                     </g>
-                    <!-- Neck overlay (cervical area) -->
-                    <ellipse class="neck" data-muscle="Neck" cx="330" cy="171" rx="22" ry="16"><title>Neck</title></ellipse>
                 </svg>
         </div>
       </div>
@@ -3833,20 +3835,41 @@ img, video, canvas, svg { max-width: 100%; }
   const clone = obj => JSON.parse(JSON.stringify(obj));
 
   // ── Library filtering ─────────────────────────────────────────
+  // Multi-level pill bar. At the root it shows the coarse groups; once an
+  // area with sub-muscles is in focus (via a pill OR a body-map click) it
+  // drills into that area's sub-categories. Sub pills run the exact same
+  // surgical matchesSub() filter as clicking the muscle on the body, and both
+  // stay visually in sync through currentArea()/activeSub.
+  function chip(label, isActive, onClick, extraClass) {
+    const b = document.createElement('button');
+    b.className = 'rb-chip' + (isActive ? ' active' : '') + (extraClass ? ' ' + extraClass : '');
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function setRoot() { activeMuscle = 'All'; activeSub = null; visible = PAGE; buildFilters(); applyFilter(); }
+  function setGroup(g) { activeMuscle = g; activeSub = null; visible = PAGE; buildFilters(); applyFilter(); }
+
   function buildFilters() {
-    const groups = ['All', ...Array.from(new Set(catalog.map(e => e.muscleGroup))).sort()];
     const wrap = $('rbFilters');
     wrap.innerHTML = '';
-    groups.forEach(g => {
-      const b = document.createElement('button');
-      b.className = 'rb-chip' + (g === activeMuscle ? ' active' : '');
-      b.textContent = g;
-      b.addEventListener('click', () => {
-        activeMuscle = g; activeSub = null; visible = PAGE; // pill = broad group, drop any precise pick
-        buildFilters(); applyFilter();
+    const area = currentArea();
+
+    if (area && hasSubs(area)) {
+      // Drilled-in view: « back, the whole-area "All", then each sub-muscle.
+      wrap.appendChild(chip('‹ All', false, setRoot, 'rb-chip-back'));
+      wrap.appendChild(chip(area, !activeSub, () => setGroup(area)));
+      GROUP_SUBS[area].forEach(sub => {
+        wrap.appendChild(chip(sub, activeSub === sub, () => pickMuscle(sub)));
       });
-      wrap.appendChild(b);
-    });
+    } else {
+      // Root view: All + the coarse groups. Clicking a group with sub-muscles
+      // drills in; a flat group (Cardio) just filters.
+      wrap.appendChild(chip('All', activeMuscle === 'All' && !activeSub, setRoot));
+      rootGroups().forEach(g => {
+        wrap.appendChild(chip(g, area === g, () => setGroup(g)));
+      });
+    }
     syncMuscleMap(); // keep the anatomical map in lockstep with the pills
   }
 
@@ -3862,9 +3885,30 @@ img, video, canvas, svg { max-width: 100%; }
     'Front Shoulders': 'Shoulders', 'Rear Shoulders': 'Shoulders',
     'Biceps': 'Arms', 'Triceps': 'Arms', 'Forearms': 'Arms',
     'Abdominals': 'Core/Abs', 'Obliques': 'Core/Abs',
-    'Quads': 'Legs', 'Hamstrings': 'Legs', 'Glutes': 'Legs', 'Calves': 'Legs',
-    'Neck': 'Neck'
+    'Quads': 'Legs', 'Hamstrings': 'Legs', 'Glutes': 'Legs', 'Calves': 'Legs'
   };
+  // Reverse index: catalog group → its sub-muscles (drives the drill-down pills).
+  // Insertion order of MUSCLE_MAP defines the pill order within each group.
+  const GROUP_SUBS = {};
+  Object.keys(MUSCLE_MAP).forEach(sub => {
+    const g = MUSCLE_MAP[sub];
+    (GROUP_SUBS[g] = GROUP_SUBS[g] || []).push(sub);
+  });
+  // A group "drills" into sub-pills only when it has 2+ meaningful sub-muscles.
+  const hasSubs = g => (GROUP_SUBS[g] || []).length >= 2;
+  // The area currently in focus: from a precise pick, else the active group pill.
+  function currentArea() {
+    if (activeSub) return MUSCLE_MAP[activeSub];
+    if (activeMuscle !== 'All') return activeMuscle;
+    return null;
+  }
+  // Root groups for the top-level pills (Neck is intentionally excluded — no
+  // neck training in this app). 'Other' stays out too; it isn't a real target.
+  function rootGroups() {
+    return Array.from(new Set(catalog.map(e => e.muscleGroup)))
+      .filter(g => g !== 'Neck' && g !== 'Other')
+      .sort();
+  }
   const SUB_KEYWORDS = {
     'Chest': ['chest', 'pec', 'bench press', 'fly', 'push-up', 'push up', 'dip'],
     'Traps': ['trap', 'shrug'],
@@ -3881,8 +3925,7 @@ img, video, canvas, svg { max-width: 100%; }
     'Quads': ['quad', 'squat', 'leg press', 'lunge', 'leg extension'],
     'Hamstrings': ['hamstring', 'leg curl', 'romanian', 'stiff-leg', 'stiff leg'],
     'Glutes': ['glute', 'hip thrust', 'kickback', 'bridge'],
-    'Calves': ['calf', 'calves'],
-    'Neck': ['neck']
+    'Calves': ['calf', 'calves']
   };
   // Does an exercise belong to a precise sub-muscle? Stay inside the mapped
   // group (disambiguates shared movement words like "kickback") AND require a
@@ -3906,15 +3949,14 @@ img, video, canvas, svg { max-width: 100%; }
       p.classList.toggle('active', on);
     });
   }
-  // Click a body region → surgical sub-muscle filter (toggles off if re-clicked).
-  // We also set activeMuscle to its group so the matching pill lights for context.
+  // Click a body region (or a sub pill) → surgical sub-muscle filter. The
+  // exercise stays "in" its area so the drill-down pills remain visible;
+  // re-clicking the same muscle steps back out to the whole area.
   function pickMuscle(sub) {
     if (!sub) return;
-    if (activeSub === sub) {
-      activeSub = null; activeMuscle = 'All';
-    } else {
-      activeSub = sub; activeMuscle = MUSCLE_MAP[sub] || 'All';
-    }
+    const group = MUSCLE_MAP[sub] || 'All';
+    activeMuscle = group;
+    activeSub = (activeSub === sub) ? null : sub;
     visible = PAGE;
     buildFilters(); applyFilter(); // buildFilters() re-runs syncMuscleMap()
   }
