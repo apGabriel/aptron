@@ -1225,6 +1225,43 @@ img, video, canvas, svg { max-width: 100%; }
 
 .rb-gif-muscle { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin: -8px 0 12px; }
 .rb-gif-img { width: 100%; border-radius: 12px; background: rgba(255,255,255,0.04); display: block; margin-bottom: 4px; }
+
+/* Performance & Reference Hub — PR badge + recent history inside the GIF modal */
+.rb-pr-badge {
+  margin: 14px 0 4px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(110,231,183,0.10) 0%, rgba(110,231,183,0.03) 100%);
+  border: 1px solid rgba(110,231,183,0.28);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.rb-pr-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--good);
+}
+.rb-pr-val {
+  font-size: 26px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--text-1);
+}
+.rb-pr-val .rb-pr-unit { font-size: 13px; font-weight: 600; color: var(--text-3); margin-left: 3px; }
+.rb-pr-val.empty { color: var(--text-4); }
+
+.rb-hist-title {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-3);
+  margin: 18px 0 6px;
+}
+.rb-hist-list { list-style: none; margin: 0; padding: 0; }
+.rb-hist-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 12px;
+  align-items: center; padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.rb-hist-row:last-child { border-bottom: none; }
+.rb-hist-date { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+.rb-hist-set { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); text-align: right; }
+.rb-hist-best { color: var(--good); font-size: 11px; font-weight: 800; }
+.rb-hist-empty { font-size: 12px; color: var(--text-4); font-style: italic; padding: 8px 0; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -1498,6 +1535,17 @@ img, video, canvas, svg { max-width: 100%; }
     <h3 id="rbGifTitle">Exercise</h3>
     <div class="rb-gif-muscle" id="rbGifMuscle"></div>
     <img id="rbGifImg" class="rb-gif-img" alt="">
+
+    <!-- PR / Personal Record badge — best weight ever logged for this movement -->
+    <div class="rb-pr-badge">
+      <div class="rb-pr-label">PR / Personal Record</div>
+      <div class="rb-pr-val empty" id="rbGifPr">--<span class="rb-pr-unit">kg</span></div>
+    </div>
+
+    <!-- Recent history — last 5 logged sets for this movement -->
+    <div class="rb-hist-title">Recent — last 5</div>
+    <ul class="rb-hist-list" id="rbGifHist"></ul>
+
     <div class="po-modal-actions">
       <button class="po-btn-secondary" id="rbGifClose" type="button">Close</button>
       <button class="po-btn-primary" id="rbGifAdd" type="button">Add to routine</button>
@@ -3478,12 +3526,84 @@ img, video, canvas, svg { max-width: 100%; }
     });
   }
 
+  // ── Coach history bridge ──────────────────────────────────────
+  // The coach engine (separate IIFE) saves every logged set to
+  // localStorage under 'po_coach_v1'. Logs are keyed by 'rt_' + exId so
+  // a movement shares one history across every routine it appears in.
+  // We read it here (read-only) to surface the PR and recent sets.
+  const COACH_KEY = 'po_coach_v1';
+  function coachState() {
+    try { return JSON.parse(localStorage.getItem(COACH_KEY)) || {}; }
+    catch { return {}; }
+  }
+  function exerciseLogs(exId) {
+    const s = coachState();
+    const logs = (s.logs && s.logs['rt_' + exId]) || [];
+    return Array.isArray(logs) ? logs : [];
+  }
+  function coachUnit() {
+    const u = coachState().units;
+    return (u === 'kg' || u === 'lb') ? u : 'kg';
+  }
+
+  // PR / Personal Record badge — highest weight ever logged.
+  function renderPr(exId, unit) {
+    const el = $('rbGifPr');
+    const weights = exerciseLogs(exId)
+      .map(l => Number(l.weight))
+      .filter(w => Number.isFinite(w) && w > 0);
+    if (!weights.length) {
+      el.classList.add('empty');
+      el.innerHTML = '--<span class="rb-pr-unit">' + unit + '</span>';
+      return;
+    }
+    const pr = Math.max.apply(null, weights);
+    el.classList.remove('empty');
+    el.innerHTML = pr + '<span class="rb-pr-unit">' + unit + '</span>';
+  }
+
+  // Recent history — last 5 logged sets, newest first.
+  function renderHist(exId, unit) {
+    const list = $('rbGifHist');
+    list.innerHTML = '';
+    const logs = exerciseLogs(exId);
+    if (!logs.length) {
+      const li = document.createElement('li');
+      li.className = 'rb-hist-empty';
+      li.textContent = 'No sets logged yet — log this exercise from the Coach tab.';
+      list.appendChild(li);
+      return;
+    }
+    const best = Math.max.apply(null, logs.map(l => Number(l.weight) || 0));
+    const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    logs.slice(-5).reverse().forEach(l => {
+      const li = document.createElement('li'); li.className = 'rb-hist-row';
+
+      const date = document.createElement('span'); date.className = 'rb-hist-date';
+      const d = new Date(l.date);
+      date.textContent = isNaN(d) ? '' : (mons[d.getMonth()] + ' ' + d.getDate());
+
+      const tag = document.createElement('span'); tag.className = 'rb-hist-best';
+      const w = Number(l.weight) || 0;
+      tag.textContent = (w > 0 && w === best) ? '★ PR' : '';
+
+      const set = document.createElement('span'); set.className = 'rb-hist-set';
+      set.textContent = (w > 0) ? (w + unit + ' × ' + l.reps) : (l.reps + ' reps');
+
+      li.append(date, tag, set);
+      list.appendChild(li);
+    });
+  }
+
   // ── GIF preview modal ─────────────────────────────────────────
   function openGif(e) {
     const exId = e.exId || e.id;
     $('rbGifTitle').textContent = e.name;
     $('rbGifMuscle').textContent = e.muscleGroup;
     const img = $('rbGifImg'); img.src = e.gifUrl; img.alt = e.name;
+    const u = coachUnit();
+    renderPr(exId, u);
+    renderHist(exId, u);
     const addBtn = $('rbGifAdd');
     const inRoutine = current.exercises.some(x => x.exId === exId);
     addBtn.textContent = inRoutine ? '✓ In routine' : 'Add to routine';
