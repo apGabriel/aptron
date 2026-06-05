@@ -1191,14 +1191,14 @@ img, video, canvas, svg { max-width: 100%; }
   stroke: rgba(255,255,255,0.16); fill: none;
 }
 /* Selectable muscle groups: subtle by default, smooth hover, accent glow when active. */
-.mm-svg path[data-muscle] {
+.mm-svg [data-muscle] {
   fill: rgba(255,255,255,0.07);
   stroke: rgba(255,255,255,0.20); stroke-width: 1.1;
   cursor: pointer;
   transition: fill 0.18s ease, filter 0.18s ease;
 }
-.mm-svg path[data-muscle]:hover { fill: rgba(110,231,183,0.38); }
-.mm-svg path[data-muscle].active {
+.mm-svg [data-muscle]:hover { fill: rgba(110,231,183,0.38); }
+.mm-svg [data-muscle].active {
   fill: var(--good);
   filter: drop-shadow(0 0 6px rgba(110,231,183,0.65));
 }
@@ -1794,6 +1794,8 @@ img, video, canvas, svg { max-width: 100%; }
                     </g>
                     <path d="M282.69,83.67c-5.36-3.86-3.61-20.07-6.05-37.39-2.56-18.19,16.27-32.16,24.89-34.59,5.86-1.65-18.28,1.29,6.39-6.76s33.37,2.13,37.66,3.41c3.74-.45-9.93-8.43,11.87-1.12,20.36,6.82,23.77,22.8,22.07,39.35-2.2,21.32,2.15,29.08-1.76,37.1" fill="none" stroke="#101010" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.46">
                     </path>
+                    <!-- Neck overlay (cervical area) — not in the source SVG; added so the Neck pill/filter has a target -->
+                    <ellipse class="neck" data-muscle="Neck" cx="330" cy="173" rx="22" ry="15"><title>Neck</title></ellipse>
                 </svg>
         </div>
         <div class="mm-view mm-back" data-view="back" hidden>
@@ -2006,6 +2008,8 @@ img, video, canvas, svg { max-width: 100%; }
                             fill="none" stroke="#101010" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.52">
                         </path>
                     </g>
+                    <!-- Neck overlay (cervical area) -->
+                    <ellipse class="neck" data-muscle="Neck" cx="330" cy="171" rx="22" ry="16"><title>Neck</title></ellipse>
                 </svg>
         </div>
       </div>
@@ -3812,7 +3816,8 @@ img, video, canvas, svg { max-width: 100%; }
   let catalog      = [];             // full library from JSON
   let filtered     = [];             // after muscle + search filter
   let visible      = PAGE;
-  let activeMuscle = 'All';
+  let activeMuscle = 'All';          // coarse pill filter ('All' or a muscleGroup)
+  let activeSub    = null;           // precise sub-muscle from the body map (e.g. 'Calves')
   let search       = '';
   let current      = { id: null, name: '', exercises: [] }; // routine being built
 
@@ -3837,7 +3842,7 @@ img, video, canvas, svg { max-width: 100%; }
       b.className = 'rb-chip' + (g === activeMuscle ? ' active' : '');
       b.textContent = g;
       b.addEventListener('click', () => {
-        activeMuscle = g; visible = PAGE;
+        activeMuscle = g; activeSub = null; visible = PAGE; // pill = broad group, drop any precise pick
         buildFilters(); applyFilter();
       });
       wrap.appendChild(b);
@@ -3846,34 +3851,76 @@ img, video, canvas, svg { max-width: 100%; }
   }
 
   // ── Interactive muscle map ────────────────────────────────────
-  // Each anatomical path carries a fine-grained data-muscle (e.g. "Biceps");
-  // map it onto our coarse catalog muscleGroup pills so a click on the body
-  // behaves exactly like clicking the matching text pill.
+  // Each anatomical region carries a fine-grained data-muscle (e.g. "Biceps").
+  // MUSCLE_MAP gives the coarse catalog muscleGroup it lives in (used to bound
+  // the search and to light up the matching pill for context). SUB_KEYWORDS
+  // gives the specific terms we match against an exercise's name + gifUrl so a
+  // click filters surgically down to that one muscle, not the whole group.
   const MUSCLE_MAP = {
     'Chest': 'Chest',
     'Traps': 'Back', 'Traps Middle': 'Back', 'Lats': 'Back', 'Lower Back': 'Back',
     'Front Shoulders': 'Shoulders', 'Rear Shoulders': 'Shoulders',
     'Biceps': 'Arms', 'Triceps': 'Arms', 'Forearms': 'Arms',
     'Abdominals': 'Core/Abs', 'Obliques': 'Core/Abs',
-    'Quads': 'Legs', 'Hamstrings': 'Legs', 'Glutes': 'Legs', 'Calves': 'Legs'
+    'Quads': 'Legs', 'Hamstrings': 'Legs', 'Glutes': 'Legs', 'Calves': 'Legs',
+    'Neck': 'Neck'
   };
-  // Highlight every path whose mapped group is the active pill.
+  const SUB_KEYWORDS = {
+    'Chest': ['chest', 'pec', 'bench press', 'fly', 'push-up', 'push up', 'dip'],
+    'Traps': ['trap', 'shrug'],
+    'Traps Middle': ['rhomboid', 'row', 'mid back', 'middle back'],
+    'Lats': ['lat', 'pulldown', 'pull-up', 'pull up', 'pullup', 'chin'],
+    'Lower Back': ['lower back', 'back extension', 'hyperextension', 'good morning', 'deadlift'],
+    'Front Shoulders': ['shoulder', 'deltoid', 'delt', 'overhead press', 'military'],
+    'Rear Shoulders': ['rear delt', 'reverse fly', 'rear-delt', 'face pull', 'reverse pec'],
+    'Biceps': ['bicep'],
+    'Triceps': ['tricep'],
+    'Forearms': ['forearm', 'wrist'],
+    'Abdominals': ['abdominal', 'crunch', 'sit-up', 'sit up', 'plank', 'leg raise'],
+    'Obliques': ['oblique', 'twist', 'side bend', 'woodchop'],
+    'Quads': ['quad', 'squat', 'leg press', 'lunge', 'leg extension'],
+    'Hamstrings': ['hamstring', 'leg curl', 'romanian', 'stiff-leg', 'stiff leg'],
+    'Glutes': ['glute', 'hip thrust', 'kickback', 'bridge'],
+    'Calves': ['calf', 'calves'],
+    'Neck': ['neck']
+  };
+  // Does an exercise belong to a precise sub-muscle? Stay inside the mapped
+  // group (disambiguates shared movement words like "kickback") AND require a
+  // sub-muscle keyword in the name/gifUrl.
+  function matchesSub(e, sub) {
+    const group = MUSCLE_MAP[sub];
+    if (group && e.muscleGroup !== group) return false;
+    const kws = SUB_KEYWORDS[sub] || [sub.toLowerCase()];
+    const hay = ((e.name || '') + ' ' + (e.gifUrl || '')).toLowerCase();
+    return kws.some(t => hay.includes(t));
+  }
+  // Isolate the glow: a precise pick lights ONLY that region; a broad pill
+  // lights every region in that group; "All" lights nothing.
   function syncMuscleMap() {
-    document.querySelectorAll('#rbMuscleMap path[data-muscle]').forEach(p => {
-      const g = MUSCLE_MAP[p.getAttribute('data-muscle')];
-      p.classList.toggle('active', !!g && g === activeMuscle);
+    document.querySelectorAll('#rbMuscleMap [data-muscle]').forEach(p => {
+      const dm = p.getAttribute('data-muscle');
+      let on;
+      if (activeSub) on = (dm === activeSub);
+      else if (activeMuscle === 'All') on = false;
+      else on = (MUSCLE_MAP[dm] === activeMuscle);
+      p.classList.toggle('active', on);
     });
   }
-  // Select a muscle group (toggles back to "All" if it's already active).
-  function pickMuscle(group) {
-    if (!group) return;
-    activeMuscle = (activeMuscle === group) ? 'All' : group;
+  // Click a body region → surgical sub-muscle filter (toggles off if re-clicked).
+  // We also set activeMuscle to its group so the matching pill lights for context.
+  function pickMuscle(sub) {
+    if (!sub) return;
+    if (activeSub === sub) {
+      activeSub = null; activeMuscle = 'All';
+    } else {
+      activeSub = sub; activeMuscle = MUSCLE_MAP[sub] || 'All';
+    }
     visible = PAGE;
     buildFilters(); applyFilter(); // buildFilters() re-runs syncMuscleMap()
   }
   function initMuscleMap() {
-    document.querySelectorAll('#rbMuscleMap path[data-muscle]').forEach(p => {
-      p.addEventListener('click', () => pickMuscle(MUSCLE_MAP[p.getAttribute('data-muscle')]));
+    document.querySelectorAll('#rbMuscleMap [data-muscle]').forEach(p => {
+      p.addEventListener('click', () => pickMuscle(p.getAttribute('data-muscle')));
     });
     const toggle = $('mmToggle');
     if (toggle) {
@@ -3889,9 +3936,13 @@ img, video, canvas, svg { max-width: 100%; }
 
   function applyFilter() {
     const q = search.trim().toLowerCase();
-    filtered = catalog.filter(e =>
-      (activeMuscle === 'All' || e.muscleGroup === activeMuscle) &&
-      (!q || e.name.toLowerCase().includes(q)));
+    filtered = catalog.filter(e => {
+      if (q && !e.name.toLowerCase().includes(q)) return false;
+      // Precise body-map pick: surgical sub-muscle match (name/gifUrl substring).
+      if (activeSub) return matchesSub(e, activeSub);
+      // Otherwise the coarse pill filter.
+      return activeMuscle === 'All' || e.muscleGroup === activeMuscle;
+    });
     renderGrid();
   }
 
