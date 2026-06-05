@@ -312,6 +312,8 @@ img, video, canvas, svg { max-width: 100%; }
   box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
 }
 .po-ex-select:disabled { opacity: 0.5; }
+/* Dark, readable options when the list expands (avoids white-on-white). */
+.po-ex-select option { background-color: #1a1a1a; color: var(--text-1); }
 .po-btn-icon {
   width: 44px; height: 44px;
   display: flex; align-items: center; justify-content: center;
@@ -385,6 +387,7 @@ img, video, canvas, svg { max-width: 100%; }
   font-size: 22px; font-weight: 700; text-align: center;
   font-variant-numeric: tabular-nums;
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 .po-field input[type="number"]::-webkit-outer-spin-button,
 .po-field input[type="number"]::-webkit-inner-spin-button {
@@ -518,13 +521,27 @@ img, video, canvas, svg { max-width: 100%; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .po-hist-filter {
+  /* Custom-styled control — strip the native chrome (prefixes + standard)
+     so the closed box matches our dark theme on every browser. */
+  -webkit-appearance: none; -moz-appearance: none; appearance: none;
   font-family: inherit; font-size: 12px; font-weight: 600;
-  color: var(--text-2); background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border); border-radius: 8px;
-  padding: 5px 8px; max-width: 150px;
+  /* Opaque dark fill (not translucent): the popup option list inherits the
+     control's background on some browsers, and a translucent value there
+     composited to white-on-white. */
+  color: var(--text-1); background-color: var(--bg-card);
+  border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 5px 28px 5px 10px; max-width: 160px; cursor: pointer;
+  /* Custom dropdown chevron so removing native appearance doesn't drop it. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%23ffffff' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+/* Explicit dark option styling — fixes unreadable white-on-white options
+   when the list expands (Windows/Chromium honour these). */
+.po-hist-filter option {
+  background-color: #1a1a1a; color: var(--text-1);
 }
 .po-hist-filter:focus { outline: none; border-color: rgba(255,255,255,0.40); }
-.po-hist-filter:disabled { opacity: 0.5; }
+.po-hist-filter:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ----- Sparkline ----- */
 .po-spark-wrap { position: relative; }
@@ -1230,7 +1247,7 @@ img, video, canvas, svg { max-width: 100%; }
   width: 100%; padding: 7px 6px; border: 1px solid var(--border);
   background: rgba(0,0,0,0.28); color: var(--text-1); border-radius: 7px;
   font-family: inherit; font-size: 13px; font-weight: 700; text-align: center;
-  font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield;
 }
 .rb-set-row input:focus { outline: none; border-color: rgba(255,255,255,0.35); }
 .rb-set-row input::-webkit-outer-spin-button, .rb-set-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
