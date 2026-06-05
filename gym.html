@@ -490,6 +490,42 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-unit { font-size: 11px; color: var(--text-3); font-weight: 500; margin-left: 2px; }
 
+/* ----- Active exercise GIF ----- */
+.po-ex-gif {
+  width: 100%; max-height: 220px; object-fit: contain;
+  margin-top: 12px; border-radius: 12px;
+  background: rgba(255,255,255,0.04); display: block;
+}
+
+/* ----- PR / Personal Record badge ----- */
+.po-pr-box {
+  margin-bottom: 8px; padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(110,231,183,0.10) 0%, rgba(110,231,183,0.03) 100%);
+  border: 1px solid rgba(110,231,183,0.28);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.po-pr-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--good);
+}
+.po-pr-val { font-size: 26px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.po-pr-val.empty { color: var(--text-4); }
+.po-pr-val .po-unit { color: var(--text-3); }
+
+/* ----- History header + date filter ----- */
+.po-hist-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.po-hist-filter {
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: var(--text-2); background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 8px; max-width: 150px;
+}
+.po-hist-filter:focus { outline: none; border-color: rgba(255,255,255,0.40); }
+.po-hist-filter:disabled { opacity: 0.5; }
+
 /* ----- Sparkline ----- */
 .po-spark-wrap { position: relative; }
 .po-spark-svg { width: 100%; height: 60px; display: block; }
@@ -1395,6 +1431,8 @@ img, video, canvas, svg { max-width: 100%; }
         </button>
       </div>
       <div class="po-no-ex" id="noExMsg" style="display:none">No exercises here yet. Tap <strong>+</strong> to add one.</div>
+      <!-- Visual reference GIF — bound to the active exercise's gifUrl -->
+      <img id="exGifImg" class="po-ex-gif" alt="" style="display:none">
     </div>
 
     <!-- Log a set -->
@@ -1432,6 +1470,11 @@ img, video, canvas, svg { max-width: 100%; }
     <!-- Stats -->
     <div class="po-sub-section">
       <div class="po-sub-title">Stats</div>
+      <!-- PR / Personal Record — heaviest set ever logged for this exercise -->
+      <div class="po-pr-box">
+        <div class="po-pr-label">PR / Personal Record</div>
+        <div class="po-pr-val empty" id="prStat">--<span class="po-unit" id="prUnit">kg</span></div>
+      </div>
       <div class="po-stats-row">
         <div class="po-stat-box">
           <div class="po-stat-label" id="oneRmLabel">Est. 1RM</div>
@@ -1466,7 +1509,14 @@ img, video, canvas, svg { max-width: 100%; }
 
     <!-- History -->
     <div class="po-sub-section">
-      <div class="po-sub-title">History</div>
+      <div class="po-sub-title po-hist-head">
+        <span>History</span>
+        <!-- Only dates this exercise was actually logged appear here.
+             Empty value = default recent 5; a date = that day's sets. -->
+        <select class="po-hist-filter" id="histDateFilter" aria-label="Filter history by date">
+          <option value="">Recent 5</option>
+        </select>
+      </div>
       <div id="historyCard">
         <div class="po-empty">No logs yet.</div>
       </div>
@@ -1942,6 +1992,21 @@ img, video, canvas, svg { max-width: 100%; }
       : '<span class="po-accent">' + rx.weight + unit() + '</span> × ' + rx.reps + ' reps';
     wrap.innerHTML = '<div class="po-rx-card po-rx-' + rx.type + '"><div class="po-rx-label">' + escape(ex.name) + '</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag ' + rx.type + '">' + rx.tag + '</span><p class="po-rx-reason">' + rx.reason + '</p></div>';
   }
+  // PR / Personal Record — heaviest weight ever logged (max reps for
+  // bodyweight movements). Reads the same getLogs() history as the stats.
+  function renderPr() {
+    const el = $('prStat');
+    const ex = getCurrentEx();
+    const logs = ex ? getLogs() : [];
+    const bw = ex && ex.bw;
+    const u = bw ? 'reps' : unit();
+    const vals = logs
+      .map(l => bw ? Number(l.reps) : Number(l.weight))
+      .filter(v => Number.isFinite(v) && v > 0);
+    const valHtml = vals.length ? String(Math.max.apply(null, vals)) : '--';
+    el.classList.toggle('empty', !vals.length);
+    el.innerHTML = valHtml + '<span class="po-unit" id="prUnit">' + u + '</span>';
+  }
   function renderStats() {
     const ex = getCurrentEx();
     const logs = ex ? getLogs() : [];
@@ -1995,32 +2060,82 @@ img, video, canvas, svg { max-width: 100%; }
       + '<path class="po-spark-fill" d="' + fillPath + '"/>'
       + '<path class="po-spark-line" d="' + linePath + '"/>';
   }
+  // Visual reference GIF — resolves the active exercise's gifUrl (mirrored
+  // from the routine-builder catalog into state.exercises). Hidden when the
+  // exercise has no GIF (e.g. legacy seed exercises).
+  function renderExGif() {
+    const img = $('exGifImg');
+    if (!img) return;
+    const ex = getCurrentEx();
+    const url = ex && ex.gifUrl;
+    if (!url) { img.style.display = 'none'; img.removeAttribute('src'); return; }
+    img.src = url;
+    img.alt = ex.name || '';
+    img.style.display = 'block';
+    img.onerror = () => { img.style.display = 'none'; };
+  }
+
+  // Selected History date filter (YYYY-MM-DD). Empty = default recent 5.
+  // Reset whenever the active exercise changes so we never show a date that
+  // belongs to a different movement.
+  let histDate = '';
+
   function renderHistory() {
     const wrap = $('historyCard');
+    const filter = $('histDateFilter');
     const ex = getCurrentEx();
-    const logs = ex ? getLogs().slice().reverse() : [];
-    if (!logs.length) {
+    const all = ex ? getLogs() : []; // chronological (oldest → newest)
+
+    // Build the date picker from ONLY the dates this exercise was logged.
+    const seen = new Set();
+    const dates = [];
+    all.forEach(l => {
+      const key = (l.date || '').slice(0, 10);
+      if (key && !seen.has(key)) { seen.add(key); dates.push(key); }
+    });
+    if (!seen.has(histDate)) histDate = ''; // selected date no longer valid
+    if (filter) {
+      const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const opts = ['<option value="">Recent 5</option>'].concat(
+        dates.slice().reverse().map(key => {
+          const [y, m, d] = key.split('-');
+          const label = mons[parseInt(m, 10) - 1] + ' ' + parseInt(d, 10) + ', ' + y;
+          return '<option value="' + key + '"' + (key === histDate ? ' selected' : '') + '>' + label + '</option>';
+        })
+      );
+      filter.innerHTML = opts.join('');
+      filter.disabled = !dates.length;
+    }
+
+    if (!all.length) {
       wrap.innerHTML = '<div class="po-empty">No logs yet.</div>';
       return;
     }
-    wrap.innerHTML = logs.slice(0, 12).map((l, i) => {
+
+    // Pair each log with its real index BEFORE filtering so deletes stay correct,
+    // then show newest first. A chosen date shows that whole day's sets;
+    // otherwise cap to the most recent 5 to keep the panel compact.
+    let rows = all.map((l, idx) => ({ l, idx }));
+    rows.reverse();
+    if (histDate) rows = rows.filter(r => (r.l.date || '').slice(0, 10) === histDate);
+    else rows = rows.slice(0, 5);
+
+    wrap.innerHTML = rows.map(({ l, idx }) => {
       const d = new Date(l.date);
       const dStr = (d.getMonth() + 1) + '/' + d.getDate();
       const setStr = ex.bw ? (l.reps + ' reps') : (l.weight + unit() + ' × ' + l.reps);
-      const realIdx = logs.length - 1 - i; // since we reversed
       return '<div class="po-hist-row">'
         + '<div class="po-hist-date">' + dStr + '</div>'
         + '<div class="po-hist-set">' + setStr + '</div>'
-        + '<button class="po-hist-del" data-idx="' + realIdx + '" aria-label="Delete">×</button>'
+        + '<button class="po-hist-del" data-idx="' + idx + '" aria-label="Delete">×</button>'
         + '</div>';
     }).join('');
+
     wrap.querySelectorAll('.po-hist-del').forEach(b => {
       b.addEventListener('click', () => {
         if (!confirm('Delete this log?')) return;
-        const realIdx = parseInt(b.dataset.idx, 10);
+        const origIdx = parseInt(b.dataset.idx, 10);
         const arr = state.logs[state.currentEx] || [];
-        // realIdx is index in REVERSED list; map back to original
-        const origIdx = arr.length - 1 - realIdx;
         arr.splice(origIdx, 1);
         if (!arr.length) delete state.logs[state.currentEx];
         else state.logs[state.currentEx] = arr;
@@ -2086,8 +2201,9 @@ img, video, canvas, svg { max-width: 100%; }
     ensureRoutineExercises();
     renderDayPill();
     renderFilters(); renderSelect(); renderForm(); renderLastSet();
+    renderExGif();
     renderRepsRow();
-    renderRx(); renderStats(); renderSparkline(); renderHistory();
+    renderRx(); renderStats(); renderPr(); renderSparkline(); renderHistory();
     renderTodaysWorkout();
     renderPastWorkouts();
     // Pre-fill weight input with last logged weight (or starting weight)
@@ -2280,7 +2396,16 @@ img, video, canvas, svg { max-width: 100%; }
   window.addEventListener('rb:routines-changed', () => { saveState(); renderAll(); });
 
   $('exSelect').addEventListener('change', e => {
-    state.currentEx = e.target.value; saveState(); renderAll();
+    state.currentEx = e.target.value;
+    histDate = ''; // new exercise → reset the History date filter
+    saveState(); renderAll();
+  });
+
+  // History date filter: pick a logged date to see that day's sets; the
+  // "Recent 5" option (empty value) resets to the default compact view.
+  $('histDateFilter').addEventListener('change', e => {
+    histDate = e.target.value || '';
+    renderHistory();
   });
   $('weightDownBtn').addEventListener('click', () => {
     const ex = getCurrentEx(); if (!ex || ex.bw) return;
