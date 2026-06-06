@@ -2116,10 +2116,14 @@
       });
 
       const delBtn = mini('×', () => {
-        if (!confirm('Delete routine "' + r.name + '"?')) return;
+        if (!confirm('¿Estás seguro de que quieres eliminar esta rutina? Se borrará de todos tus dispositivos.')) return;
+        // Immediate local update — drop it from rb_routines_v1. saveRoutines()
+        // also fires the 'rb:routines-changed' event so the coach refreshes.
         saveRoutines(loadRoutines().filter(x => x.id !== r.id));
         if (current.id === r.id) { current = { id: null, name: '', exercises: [] }; renderRoutine(); renderGrid(); }
         renderSaved();
+        // Background cloud delete — removes the routine from every other device.
+        try { window.GymCloud && window.GymCloud.deleteRoutine(r.id); } catch (e) {}
       }, 'rb-del');
 
       li.append(info, editBtn, delBtn);
@@ -2342,6 +2346,10 @@
         const { error } = await supa.from('exercise_logs').delete().eq('client_id', op.payload.client_id);
         return !error;
       }
+      if (op.kind === 'routineDelete') {
+        const { error } = await supa.from('routines').delete().eq('client_id', op.payload.client_id);
+        return !error;
+      }
     } catch (e) { return false; }
     return false;
   }
@@ -2395,6 +2403,10 @@
     if (!l || !l.exId || !l.date) return;
     const cid = logClientId(l.exId, l.date);
     attempt({ kind: 'logDelete', key: 'logdel:' + cid, payload: { client_id: cid } });
+  }
+  function deleteRoutine(routineId) {
+    if (!routineId) return;
+    attempt({ kind: 'routineDelete', key: 'routinedel:' + routineId, payload: { client_id: routineId } });
   }
 
   // ── Pulls / hydration ─────────────────────────────────────────
@@ -2467,7 +2479,7 @@
   }
 
   // Expose for the rest of the app + manual refresh.
-  window.GymCloud = { pushRoutines, pushLog, deleteLog, flushQueue,
+  window.GymCloud = { pushRoutines, pushLog, deleteLog, deleteRoutine, flushQueue,
                       pull: () => { pullRoutines(); pullLogs(); } };
 
   // Retry the queue the moment connectivity returns; refresh on tab focus.
