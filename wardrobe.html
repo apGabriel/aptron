@@ -60,6 +60,16 @@
         </div>
       </section>
 
+      <!-- SECTION 2b — SAVED OUTFITS (persisted looks) -->
+      <section class="wr-panel" aria-label="Saved outfits" style="margin-bottom:16px">
+        <div class="wr-panel-head">
+          <div class="wr-panel-title">Saved Outfits<small>Your kept looks</small></div>
+        </div>
+        <div class="wr-outfits" id="wrSaved">
+          <div class="wr-empty">No saved outfits yet — tap “Guardar Outfit” on a look.</div>
+        </div>
+      </section>
+
       <!-- Garment recommendations (gap analysis feed) -->
       <section class="wr-panel" aria-label="Recommendations" style="margin-bottom:16px">
         <div class="wr-panel-head">
@@ -127,6 +137,21 @@
       <button class="wr-btn wr-btn-ghost" id="wrItemDelete" type="button" style="color:var(--danger);max-width:90px">Delete</button>
       <button class="wr-btn wr-btn-ghost" id="wrItemClose" type="button">Cancel</button>
       <button class="wr-btn wr-btn-primary" id="wrItemSave" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ADD ITEM / UPLOAD MODAL (auto-categorize) ============ -->
+<div class="wr-modal-bg" id="wrUploadModalBg">
+  <div class="wr-modal" id="wrUploadModal" role="dialog" aria-modal="true" aria-label="Add item">
+    <img class="wr-modal-img" id="wrUploadImg" alt="New item preview">
+    <h3>Add to closet</h3>
+    <div class="wr-detect-note" id="wrDetectNote">Analyzing garment…</div>
+    <label class="wr-modal-label" for="wrUploadCats">Category</label>
+    <div class="wr-chip-row" id="wrUploadCats"></div>
+    <div class="wr-modal-actions">
+      <button class="wr-btn wr-btn-ghost" id="wrUploadCancel" type="button">Cancel</button>
+      <button class="wr-btn wr-btn-primary" id="wrUploadConfirm" type="button">Add item</button>
     </div>
   </div>
 </div>

@@ -42,6 +42,7 @@
     profile:  'wardrobe:profile',
     settings: 'wardrobe:settings',
     outfits:  'wardrobe:outfits',
+    savedOutfits: 'wardrobe:saved_outfits',
   };
 
   // ----------------------------------------------------------------
@@ -71,9 +72,22 @@
       // settings
       settings() { return read(KEYS.settings, { season: 'auto', tempC: null, location: '' }); },
       setSettings(s) { write(KEYS.settings, s); },
-      // cached outfits
+      // cached outfits (transient — last generation)
       outfits() { return read(KEYS.outfits, []); },
       setOutfits(o) { write(KEYS.outfits, o); },
+      // persisted saved outfits (survive regenerate / reload, synced cross-device)
+      savedOutfits() { return read(KEYS.savedOutfits, []); },
+      setSavedOutfits(o) { write(KEYS.savedOutfits, o); },
+      addSavedOutfit(outfit) {
+        const list = read(KEYS.savedOutfits, []);
+        if (list.some((o) => o.id === outfit.id)) return false; // already saved
+        list.unshift(Object.assign({}, outfit, { savedAt: Date.now() }));
+        write(KEYS.savedOutfits, list);
+        return true;
+      },
+      removeSavedOutfit(id) {
+        write(KEYS.savedOutfits, read(KEYS.savedOutfits, []).filter((o) => o.id !== id));
+      },
     };
   })();
 
@@ -115,6 +129,89 @@
     }
 
     return { fromFile, downscale };
+  })();
+
+  // ----------------------------------------------------------------
+  // Detector — garment type auto-categorization (vision seam)
+  // Analyzes an uploaded image and guesses its category so the upload
+  // modal can pre-select the right chip. Ships with an enhanced heuristic
+  // that backs a clearly-marked real-vision placeholder seam.
+  // ----------------------------------------------------------------
+  const Detector = (function () {
+    const VALID = CATEGORIES.map((c) => c.id);
+
+    /* PLACEHOLDER SEAM — real garment-vision model.
+       Swap the body for a call to a vision endpoint (Claude vision, a
+       hosted classifier, or the project proxy) passing the data URL and
+       resolving to one of CATEGORIES' ids. Return null to fall back to
+       the local heuristic below. */
+    async function callVisionModel(/* dataUrl */) {
+      // const r = await fetch('/api/wardrobe/detect', {
+      //   method: 'POST', headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ model: 'claude-opus-4-8', image: dataUrl }),
+      // });
+      // const cat = (await r.json()).category;
+      // return VALID.indexOf(cat) !== -1 ? cat : null;
+      return null;
+    }
+
+    // Pull a few cheap visual features from the image for the heuristic.
+    function features(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const W = 32, H = 32;
+          const c = document.createElement('canvas');
+          c.width = W; c.height = H;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img, 0, 0, W, H);
+          let data;
+          try { data = ctx.getImageData(0, 0, W, H).data; }
+          catch (e) { resolve(null); return; }
+          let sumL = 0, sumS = 0, n = 0;
+          let topL = 0, topN = 0, botL = 0, botN = 0;
+          for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+              const i = (y * W + x) * 4;
+              const hsl = Color.rgbToHsl({ r: data[i], g: data[i + 1], b: data[i + 2] });
+              sumL += hsl.l; sumS += hsl.s; n++;
+              if (y < H / 3) { topL += hsl.l; topN++; }
+              else if (y >= (2 * H) / 3) { botL += hsl.l; botN++; }
+            }
+          }
+          resolve({
+            aspect: img.height / Math.max(1, img.width), // >1 = portrait/tall
+            light: sumL / Math.max(1, n),
+            sat: sumS / Math.max(1, n),
+            topLight: topL / Math.max(1, topN),
+            botLight: botL / Math.max(1, botN),
+          });
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+      });
+    }
+
+    function heuristic(f) {
+      if (!f) return 'tops';
+      // Wide-format shots tend to be shoes or laid-flat accessories.
+      if (f.aspect < 0.85) return f.sat < 0.22 ? 'footwear' : 'accessories';
+      // Tall + dark/desaturated reads as a structured outer layer.
+      if (f.aspect > 1.15 && f.light < 0.45) return 'outerwear';
+      // Tall with a heavier (darker) lower half reads as bottoms (denim, trousers).
+      if (f.aspect > 1.2 && f.botLight < f.topLight - 0.05) return 'bottoms';
+      // Compact, very saturated pieces read as accessories (bags, scarves).
+      if (f.sat > 0.45 && f.aspect <= 1.15) return 'accessories';
+      return 'tops';
+    }
+
+    async function detect(dataUrl) {
+      try { const m = await callVisionModel(dataUrl); if (m && VALID.indexOf(m) !== -1) return m; }
+      catch (e) {}
+      return heuristic(await features(dataUrl));
+    }
+
+    return { detect, callVisionModel };
   })();
 
   // ----------------------------------------------------------------
@@ -305,6 +402,11 @@
       return {
         season,
         targetWarmth: Weather.targetWarmth(season),
+        // Piece include/exclude filters from per-item generation locks.
+        filters: {
+          include: items.filter((i) => i.lock === 'include').map((i) => i.id),
+          exclude: items.filter((i) => i.lock === 'exclude').map((i) => i.id),
+        },
         // Color Scale & Harmony vector
         palette: items.map((i) => ({ id: i.id, category: i.category, color: i.color })),
         // Temperature & Seasonality vector
@@ -348,7 +450,17 @@
     // Local, deterministic simulation so the feature works fully offline.
     function simulate(payload) {
       const items = Store.items();
-      const byCat = (c) => items.filter((i) => i.category === c && Weather.suitsSeason(i, payload.season));
+      const filters = payload.filters || { include: [], exclude: [] };
+      const inc = new Set(filters.include);
+      const exc = new Set(filters.exclude);
+      // Honor locks: drop excluded pieces; if any piece in a category is
+      // force-included, restrict that category to the forced pieces.
+      const byCat = (c) => {
+        const pool = items.filter((i) =>
+          i.category === c && Weather.suitsSeason(i, payload.season) && !exc.has(i.id));
+        const forced = pool.filter((i) => inc.has(i.id));
+        return forced.length ? forced : pool;
+      };
       const tops = byCat('tops'), bottoms = byCat('bottoms');
       const outer = byCat('outerwear'), shoes = byCat('footwear'), acc = byCat('accessories');
 
@@ -475,15 +587,20 @@
     async function addFromFile(file, category) {
       try {
         const image_url = await Img.fromFile(file);
-        const color = await Color.dominant(image_url);
-        const items = Store.items();
-        items.unshift({
-          id: uid(), image_url, category: category || 'tops',
-          color, tags: [], createdAt: Date.now(),
-        });
-        Store.setItems(items);
-        Toast.show('Added to closet');
+        await addFromImage(image_url, category);
       } catch (e) { Toast.show('Could not read that image'); }
+    }
+
+    // Add an already-ingested (downscaled) base64 image to the closet.
+    async function addFromImage(image_url, category) {
+      const color = await Color.dominant(image_url);
+      const items = Store.items();
+      items.unshift({
+        id: uid(), image_url, category: category || 'tops',
+        color, tags: [], lock: null, createdAt: Date.now(),
+      });
+      Store.setItems(items);
+      Toast.show('Added to closet');
     }
 
     function update(id, patch) {
@@ -492,6 +609,18 @@
       if (!it) return;
       Object.assign(it, patch);
       Store.setItems(items);
+    }
+
+    // Cycle a piece's generation lock: none → include (force) → exclude → none.
+    const LOCK_CYCLE = { '': 'include', include: 'exclude', exclude: '' };
+    function cycleLock(id) {
+      const items = Store.items();
+      const it = items.find((x) => x.id === id);
+      if (!it) return;
+      it.lock = LOCK_CYCLE[it.lock || ''] || '';
+      Store.setItems(items);
+      Toast.show(it.lock === 'include' ? 'Forced into next outfit'
+        : it.lock === 'exclude' ? 'Excluded from outfits' : 'Lock cleared');
     }
     function remove(id) {
       Store.setItems(Store.items().filter((x) => x.id !== id));
@@ -526,9 +655,14 @@
       let html = '';
       items.forEach((i) => {
         const cat = CATEGORIES.find((c) => c.id === i.category);
+        const lock = i.lock || '';
+        const lockIcon = lock === 'include' ? '📌' : lock === 'exclude' ? '🚫' : '🔓';
+        const lockTitle = lock === 'include' ? 'Forced in — tap to exclude'
+          : lock === 'exclude' ? 'Excluded — tap to clear' : 'Tap to force into outfits';
         html +=
-          '<div class="wr-item" data-id="' + i.id + '" tabindex="0">' +
+          '<div class="wr-item' + (lock ? ' wr-item-' + lock : '') + '" data-id="' + i.id + '" tabindex="0">' +
             '<img src="' + i.image_url + '" alt="' + (cat ? cat.label : '') + '" loading="lazy">' +
+            '<button class="wr-item-lock" data-lock="' + i.id + '" title="' + lockTitle + '" aria-label="' + lockTitle + '">' + lockIcon + '</button>' +
             '<button class="wr-item-del" data-del="' + i.id + '" aria-label="Remove">✕</button>' +
             '<div class="wr-item-meta">' +
               '<span class="wr-item-swatch" style="background:' + i.color + '"></span>' +
@@ -550,11 +684,84 @@
       grid.querySelector('#wrAddTile').addEventListener('click', () => UI.openUpload(activeCat === 'all' ? 'tops' : activeCat));
       grid.querySelectorAll('.wr-item-del').forEach((b) =>
         b.addEventListener('click', (e) => { e.stopPropagation(); remove(b.dataset.del); }));
+      grid.querySelectorAll('.wr-item-lock').forEach((b) =>
+        b.addEventListener('click', (e) => { e.stopPropagation(); cycleLock(b.dataset.lock); }));
       grid.querySelectorAll('.wr-item[data-id]').forEach((el) =>
         el.addEventListener('click', () => UI.openItem(el.dataset.id)));
     }
 
-    return { addFromFile, update, remove, render, setCat, uid };
+    return { addFromFile, addFromImage, update, remove, cycleLock, render, setCat, uid };
+  })();
+
+  // ----------------------------------------------------------------
+  // Profiler — automatic style-profile analysis (facial-analysis seam)
+  // Auto-calculates baseline undertone / faceShape / style. When a
+  // portrait is present it samples the face region; otherwise it returns
+  // a sensible neutral baseline. Backs a real facial-analysis placeholder.
+  // ----------------------------------------------------------------
+  const Profiler = (function () {
+    /* PLACEHOLDER SEAM — real facial-analysis model.
+       Swap for a call to a vision/face endpoint that returns
+       { undertone, faceShape, style }. Return null to fall back. */
+    async function callVisionModel(/* dataUrl */) {
+      // const r = await fetch('/api/wardrobe/profile', { ... });
+      // return await r.json(); // { undertone, faceShape, style }
+      return null;
+    }
+
+    function baseline() {
+      return { undertone: 'neutral', faceShape: 'oval', style: 'minimal' };
+    }
+
+    // Sample the central "face" region of a portrait for skin/undertone cues.
+    function analyzePortrait(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const W = 40, H = 40;
+          const c = document.createElement('canvas');
+          c.width = W; c.height = H;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img, 0, 0, W, H);
+          let data;
+          try { data = ctx.getImageData(0, 0, W, H).data; }
+          catch (e) { resolve(baseline()); return; }
+          // central region (face tends to sit in the middle of a portrait)
+          let r = 0, g = 0, b = 0, n = 0, sat = 0;
+          for (let y = H * 0.25; y < H * 0.75; y++) {
+            for (let x = W * 0.3; x < W * 0.7; x++) {
+              const i = ((y | 0) * W + (x | 0)) * 4;
+              r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+              sat += Color.rgbToHsl({ r: data[i], g: data[i + 1], b: data[i + 2] }).s;
+            }
+          }
+          if (!n) { resolve(baseline()); return; }
+          r /= n; g /= n; b /= n; sat /= n;
+          // Warm undertone skews red/yellow; cool skews blue. Small delta = neutral.
+          const delta = r - b;
+          const undertone = delta > 18 ? 'warm' : delta < -6 ? 'cool' : 'neutral';
+          // Portrait aspect as a rough face-shape proxy (taller = oval/heart).
+          const aspect = img.height / Math.max(1, img.width);
+          const faceShape = aspect > 1.25 ? 'oval' : aspect < 0.95 ? 'round' : 'square';
+          // Colorful portraits → bolder style; muted → minimal.
+          const style = sat > 0.4 ? 'bold' : sat > 0.22 ? 'classic' : 'minimal';
+          resolve({ undertone, faceShape, style });
+        };
+        img.onerror = () => resolve(baseline());
+        img.src = dataUrl;
+      });
+    }
+
+    async function analyze(dataUrl) {
+      if (dataUrl) {
+        try { const m = await callVisionModel(dataUrl); if (m) return m; }
+        catch (e) {}
+        return analyzePortrait(dataUrl);
+      }
+      return baseline();
+    }
+
+    return { analyze, baseline, callVisionModel };
   })();
 
   // ----------------------------------------------------------------
@@ -584,15 +791,35 @@
       try {
         const url = await Img.fromFile(file);
         const p = Store.profile(); p.portrait = url; Store.setProfile(p);
-        Toast.show('Portrait saved — style guidance updated');
+        Toast.show('Portrait saved — analyzing your style…');
+        // Background self-profiling: derive baseline undertone/face/style
+        // from the new portrait and set them as the active defaults.
+        await autoProfile(true);
       } catch (e) { Toast.show('Could not read that image'); }
     }
     function set(field, value) {
       const p = Store.profile();
       p[field] = (p[field] === value) ? '' : value; // toggle off if same
+      p.autoProfiled = false;                       // user took manual control
       Store.setProfile(p);
     }
-    return { render, setPortrait, set };
+
+    // Run the Profiler and apply results. With force=true (explicit portrait
+    // upload) it overrides; otherwise it only fills fields the user hasn't set.
+    async function autoProfile(force) {
+      const p = Store.profile();
+      const a = await Profiler.analyze(p.portrait || '');
+      if (!a) return;
+      const next = Store.profile(); // re-read in case it changed during await
+      ['undertone', 'faceShape', 'style'].forEach((f) => {
+        if (force || !next[f]) next[f] = a[f];
+      });
+      next.autoProfiled = true;
+      Store.setProfile(next);
+      render();
+    }
+
+    return { render, setPortrait, set, autoProfile };
   })();
 
   // ----------------------------------------------------------------
@@ -601,6 +828,9 @@
   const UI = (function () {
     let uploadTargetCat = 'tops';
     let openItemId = null;
+    let pendingUpload = null;        // { image_url } awaiting category confirm
+    let uploadSelectedCat = 'tops';  // chip selected in the upload modal
+    let currentOutfits = [];         // outfits currently shown (for save action)
 
     // ---- file inputs (one for items, one for portrait) ----
     function fileInput(onPick, capture) {
@@ -614,8 +844,59 @@
 
     function openUpload(cat) {
       uploadTargetCat = cat || 'tops';
-      // a tiny sheet: choose camera vs library
-      fileInput((f) => Closet.addFromFile(f, uploadTargetCat));
+      fileInput((f) => beginUpload(f));
+    }
+
+    // Ingest the file, run garment auto-detection, then show the upload
+    // modal with the detected category chip pre-selected.
+    async function beginUpload(file) {
+      let image_url;
+      try { image_url = await Img.fromFile(file); }
+      catch (e) { Toast.show('Could not read that image'); return; }
+      pendingUpload = { image_url };
+      uploadSelectedCat = uploadTargetCat;
+      const note = document.getElementById('wrDetectNote');
+      document.getElementById('wrUploadImg').src = image_url;
+      if (note) note.textContent = 'Analyzing garment…';
+      renderUploadChips();
+      document.getElementById('wrUploadModalBg').classList.add('show');
+      // Detection runs async; pre-select its result when it resolves.
+      try {
+        const detected = await Detector.detect(image_url);
+        if (!pendingUpload) return;                  // modal already closed
+        uploadSelectedCat = detected;
+        const c = CATEGORIES.find((x) => x.id === detected);
+        if (note) note.textContent = '✨ Auto-detected: ' + (c ? c.label : detected);
+        renderUploadChips();
+      } catch (e) {
+        if (note) note.textContent = 'Pick a category';
+      }
+    }
+
+    function renderUploadChips() {
+      const wrap = document.getElementById('wrUploadCats');
+      if (!wrap) return;
+      wrap.innerHTML = CATEGORIES.map((c) =>
+        '<button type="button" class="wr-cat-chip' + (c.id === uploadSelectedCat ? ' active' : '') +
+        '" data-upcat="' + c.id + '">' + c.icon + ' ' + c.label + '</button>').join('');
+      wrap.querySelectorAll('[data-upcat]').forEach((b) =>
+        b.addEventListener('click', () => {
+          uploadSelectedCat = b.dataset.upcat;
+          renderUploadChips();
+        }));
+    }
+
+    function confirmUpload() {
+      if (!pendingUpload) return;
+      const img = pendingUpload.image_url;
+      const cat = uploadSelectedCat;
+      closeUpload();
+      Closet.addFromImage(img, cat);
+    }
+
+    function closeUpload() {
+      pendingUpload = null;
+      document.getElementById('wrUploadModalBg').classList.remove('show');
     }
 
     // ---- item detail modal ----
@@ -651,6 +932,10 @@
         return;
       }
       btn.disabled = true; btn.innerHTML = '<span class="wr-spin"></span> Styling…';
+      // Interface reset — clear any previously generated outfits from view
+      // before the new set renders.
+      currentOutfits = [];
+      out.innerHTML = '<div class="wr-empty"><span class="wr-spin"></span></div>';
       const payload = AIEngine.buildPayload();
       const { outfits, recommendations } = await AIEngine.callAIModel(payload);
       Store.setOutfits(outfits);
@@ -660,32 +945,64 @@
       Toast.show(outfits.length + ' outfit' + (outfits.length === 1 ? '' : 's') + ' generated');
     }
 
+    // Shared outfit-card markup. `mode` is 'generated' (Save action) or
+    // 'saved' (Remove action).
+    function outfitCard(o, mode) {
+      const slots = o.pieces.map((p) =>
+        '<div class="wr-of-slot"><img src="' + p.image + '" alt="' + p.category + '"></div>').join('');
+      const pal = o.pieces.map((p) => '<span style="background:' + p.color + '"></span>').join('');
+      const action = mode === 'saved'
+        ? '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-remove" data-remove="' + o.id + '" type="button">🗑 Quitar</button>'
+        : '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-save" data-save="' + o.id + '" type="button">＋ Guardar Outfit</button>';
+      return (
+        '<div class="wr-outfit-card">' +
+          '<div class="wr-outfit-strip">' + slots + '</div>' +
+          '<div class="wr-outfit-body">' +
+            '<div class="wr-outfit-row">' +
+              '<span class="wr-outfit-name">' + o.name + '</span>' +
+              '<span class="wr-harmony-tag">' + o.harmony + '</span>' +
+            '</div>' +
+            '<div class="wr-outfit-pal">' + pal + '</div>' +
+            '<div class="wr-outfit-why">' + o.why + '</div>' +
+            '<div class="wr-outfit-meta">' +
+              '<span><b>' + o.pieces.length + '</b> pieces</span>' +
+              '<span><b>' + Weather.ICON[o.season] + '</b> ' + o.season + '</span>' +
+            '</div>' +
+            '<div class="wr-outfit-actions">' + action + '</div>' +
+          '</div>' +
+        '</div>');
+    }
+
     function renderOutfits(outfits) {
       const out = document.getElementById('wrOutfits');
-      if (!outfits || !outfits.length) {
+      currentOutfits = outfits || [];
+      if (!currentOutfits.length) {
         out.innerHTML = '<div class="wr-empty">No combinations yet — tap Generate.</div>'; return;
       }
-      out.innerHTML = outfits.map((o) => {
-        const slots = o.pieces.map((p) =>
-          '<div class="wr-of-slot"><img src="' + p.image + '" alt="' + p.category + '"></div>').join('');
-        const pal = o.pieces.map((p) => '<span style="background:' + p.color + '"></span>').join('');
-        return (
-          '<div class="wr-outfit-card">' +
-            '<div class="wr-outfit-strip">' + slots + '</div>' +
-            '<div class="wr-outfit-body">' +
-              '<div class="wr-outfit-row">' +
-                '<span class="wr-outfit-name">' + o.name + '</span>' +
-                '<span class="wr-harmony-tag">' + o.harmony + '</span>' +
-              '</div>' +
-              '<div class="wr-outfit-pal">' + pal + '</div>' +
-              '<div class="wr-outfit-why">' + o.why + '</div>' +
-              '<div class="wr-outfit-meta">' +
-                '<span><b>' + o.pieces.length + '</b> pieces</span>' +
-                '<span><b>' + Weather.ICON[o.season] + '</b> ' + o.season + '</span>' +
-              '</div>' +
-            '</div>' +
-          '</div>');
-      }).join('');
+      out.innerHTML = currentOutfits.map((o) => outfitCard(o, 'generated')).join('');
+      out.querySelectorAll('[data-save]').forEach((b) =>
+        b.addEventListener('click', () => saveOutfit(b.dataset.save)));
+    }
+
+    function saveOutfit(id) {
+      const o = currentOutfits.find((x) => x.id === id);
+      if (!o) return;
+      const added = Store.addSavedOutfit(o);
+      Toast.show(added ? 'Outfit saved' : 'Already saved');
+      if (added) renderSaved();
+    }
+
+    function renderSaved() {
+      const wrap = document.getElementById('wrSaved');
+      if (!wrap) return;
+      const saved = Store.savedOutfits();
+      if (!saved.length) {
+        wrap.innerHTML = '<div class="wr-empty">No saved outfits yet — tap “Guardar Outfit” on a look.</div>';
+        return;
+      }
+      wrap.innerHTML = saved.map((o) => outfitCard(o, 'saved')).join('');
+      wrap.querySelectorAll('[data-remove]').forEach((b) =>
+        b.addEventListener('click', () => { Store.removeSavedOutfit(b.dataset.remove); renderSaved(); Toast.show('Removed'); }));
     }
 
     function renderRecs(recs) {
@@ -741,6 +1058,10 @@
       document.getElementById('wrItemDelete').addEventListener('click', () => { if (openItemId) { Closet.remove(openItemId); closeItem(); } });
       document.getElementById('wrItemClose').addEventListener('click', closeItem);
       document.getElementById('wrItemModalBg').addEventListener('click', (e) => { if (e.target.id === 'wrItemModalBg') closeItem(); });
+      // upload modal
+      document.getElementById('wrUploadConfirm').addEventListener('click', confirmUpload);
+      document.getElementById('wrUploadCancel').addEventListener('click', closeUpload);
+      document.getElementById('wrUploadModalBg').addEventListener('click', (e) => { if (e.target.id === 'wrUploadModalBg') closeUpload(); });
     }
 
     function renderAll() {
@@ -748,9 +1069,10 @@
       Profile.render();
       renderSeason();
       renderOutfits(Store.outfits());
+      renderSaved();
     }
 
-    return { wire, renderAll, openUpload, openItem, renderOutfits, renderRecs, generate };
+    return { wire, renderAll, openUpload, openItem, renderOutfits, renderRecs, renderSaved, generate };
   })();
 
   // expose UI for Closet's inline handlers
@@ -762,6 +1084,10 @@
   function boot() {
     UI.wire();
     UI.renderAll();
+    // Self-profiling on entry: if the user hasn't set any style profile yet,
+    // auto-calculate baseline undertone / faceShape / style as the defaults.
+    const p = Store.profile();
+    if (!p.undertone && !p.faceShape && !p.style) { Profile.autoProfile(false); }
     // re-render when cloud sync applies remote changes (storage event)
     Store.onChange(() => { Closet.render(); Profile.render(); });
     window.addEventListener('storage', () => UI.renderAll());
@@ -773,5 +1099,5 @@
   } else { boot(); }
 
   // export for debugging / future real-API wiring
-  window.Wardrobe = { Store, Img, Color, Weather, AIEngine, Closet, Profile };
+  window.Wardrobe = { Store, Img, Detector, Color, Weather, Profiler, AIEngine, Closet, Profile };
 })();

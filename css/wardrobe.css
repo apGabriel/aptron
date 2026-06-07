@@ -218,6 +218,25 @@ body::before {
 }
 .wr-item:hover .wr-item-del, .wr-item:focus-within .wr-item-del { opacity: 1; }
 
+/* Per-item generation lock (force-in / exclude) */
+.wr-item-lock {
+  position: absolute; top: 6px; left: 6px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(5, 5, 6, 0.6); border: none; color: #fff;
+  font-size: 12px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity 0.15s; backdrop-filter: blur(4px);
+  z-index: 1;
+}
+.wr-item:hover .wr-item-lock, .wr-item:focus-within .wr-item-lock { opacity: 1; }
+/* Locked items stay visibly flagged even when not hovered */
+.wr-item-include .wr-item-lock,
+.wr-item-exclude .wr-item-lock { opacity: 1; }
+.wr-item-include { outline: 2px solid var(--success); outline-offset: -2px; }
+.wr-item-include .wr-item-lock { background: rgba(107, 227, 164, 0.85); color: var(--accent-ink); }
+.wr-item-exclude { outline: 2px solid var(--danger); outline-offset: -2px; }
+.wr-item-exclude img { filter: grayscale(0.85) brightness(0.7); }
+.wr-item-exclude .wr-item-lock { background: rgba(255, 107, 107, 0.85); }
+
 /* Upload tile */
 .wr-item-add {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -282,6 +301,8 @@ body::before {
   font-size: 11px; color: var(--text-quaternary);
 }
 .wr-outfit-meta b { color: var(--text-secondary); font-weight: 600; }
+.wr-outfit-actions { margin-top: 11px; display: flex; gap: 8px; }
+.wr-outfit-actions .wr-btn { flex: 1; }
 
 /* ---------- Recommendation feed (gap analysis) ---------- */
 .wr-rec-feed { display: flex; flex-direction: column; gap: 9px; }
@@ -367,6 +388,13 @@ body::before {
 }
 .wr-modal-actions { display: flex; gap: 9px; margin-top: 18px; }
 .wr-modal-actions .wr-btn { flex: 1; }
+
+/* Upload modal — auto-detect note + category chip row */
+.wr-detect-note {
+  font-size: 12px; font-weight: 600; color: var(--accent-2);
+  margin-bottom: 4px; min-height: 16px;
+}
+.wr-chip-row { display: flex; gap: 7px; flex-wrap: wrap; }
 
 /* Tag chips inside modal */
 .wr-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
