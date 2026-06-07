@@ -3,9 +3,9 @@
 // Drop this on any page with:
 //     <script src="js/topbar.js" defer></script>
 // It self-injects HTML + CSS, reads progress from localStorage,
-// and renders the water +1 button in the top bar plus the
-// Main/Health/Fitness bottom tabs. Skips chrome on finance.html
-// and inside iframes (so the water tracker can embed cleanly).
+// and renders the water +1 button plus a Smart Wardrobe shortcut
+// in the top bar, and the Main/Health/Fitness bottom tabs. Skips
+// chrome inside iframes (so the water tracker can embed cleanly).
 // =============================================================
 (function () {
   'use strict';
@@ -68,7 +68,7 @@
 .topbar-water-add.flash {
   background: linear-gradient(180deg, rgba(125, 211, 252, 0.7), rgba(110, 231, 183, 0.7));
 }
-.topbar-finance-btn {
+.topbar-wardrobe-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 44px; height: 42px;
   border: 1px solid rgba(255, 255, 255, 0.10);
@@ -77,8 +77,8 @@
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s;
 }
-.topbar-finance-btn:hover { background: rgba(255, 255, 255, 0.08); }
-.topbar-finance-icon {
+.topbar-wardrobe-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.topbar-wardrobe-icon {
   font-size: 20px; line-height: 1;
   filter: grayscale(100%) brightness(1.4); opacity: 0.85;
 }
@@ -116,8 +116,8 @@ body.has-bottombar {
   .topbar-water-pill { padding: 8px 11px; gap: 6px; }
   .topbar-pill-count { font-size: 12px; }
   .topbar-water-add { width: 40px; font-size: 18px; }
-  .topbar-finance-btn { width: 40px; height: 38px; }
-  .topbar-finance-icon { font-size: 18px; }
+  .topbar-wardrobe-btn { width: 40px; height: 38px; }
+  .topbar-wardrobe-icon { font-size: 18px; }
   .bottombar-tab-icon { font-size: 22px; }
   .bottombar-tab { font-size: 10px; }
 }
@@ -157,8 +157,8 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     </a>
     <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button">+</button>
   </div>
-  <a href="finance.html" class="topbar-finance-btn" id="topbarFinance" aria-label="Finance">
-    <span class="topbar-finance-icon">📊</span>
+  <a href="wardrobe.html" class="topbar-wardrobe-btn" id="topbarWardrobe" aria-label="Smart Wardrobe">
+    <span class="topbar-wardrobe-icon">👕</span>
   </a>
 </header>`;
 
@@ -175,14 +175,10 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   </a>
 </nav>`;
 
-  function isFinancePage() {
-    const p = (window.location.pathname || '').toLowerCase();
-    return p.endsWith('/finance.html') || p.endsWith('finance.html');
-  }
   function isEmbedded() {
     try { return window.self !== window.top; } catch (e) { return true; }
   }
-  function shouldShowChrome() { return !isFinancePage() && !isEmbedded(); }
+  function shouldShowChrome() { return !isEmbedded(); }
   function currentPageKey() {
     const p = (window.location.pathname || '').toLowerCase();
     if (p.endsWith('health.html')) return 'health';

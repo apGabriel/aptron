@@ -7,7 +7,7 @@
 //   This server holds your credentials, gets fresh access tokens automatically,
 //   and forwards the calendar data to your dashboard.
 //
-//   Browser (index.html / finance.html / …)
+//   Browser (index.html / wardrobe.html / …)
 //       │  HTTP request  (no token, goes to localhost)
 //       ▼
 //   This proxy  (localhost:3001)

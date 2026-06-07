@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0b">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Smart Wardrobe</title>
+<link rel="icon" href="img/logo.ico" type="image/x-icon">
+<link rel="stylesheet" href="css/wardrobe.css">
+<script src="js/topbar.js" defer></script>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============ HEADER ============ -->
+  <header class="wr-head">
+    <div class="wr-head-titles">
+      <div class="wr-eyebrow">Armario Inteligente</div>
+      <h1 class="wr-title">Smart&nbsp;Wardrobe</h1>
+      <p class="wr-sub">Your digital closet, styled by AI.</p>
+    </div>
+    <!-- Temperature & Seasonality control -->
+    <div class="wr-season-toggle" id="wrSeason" role="group" aria-label="Season">
+      <button data-season="auto"   title="Auto (by date)">📍</button>
+      <button data-season="spring" title="Spring">🌸</button>
+      <button data-season="summer" title="Summer">☀️</button>
+      <button data-season="autumn" title="Autumn">🍂</button>
+      <button data-season="winter" title="Winter">❄️</button>
+    </div>
+  </header>
+
+  <!-- ============ TWO-SECTION DASHBOARD GRID ============ -->
+  <div class="wr-grid">
+
+    <!-- ---- SECTION 1 — MY CLOTHES (Digital Closet) ---- -->
+    <section class="wr-panel" aria-label="My clothes">
+      <div class="wr-panel-head">
+        <div class="wr-panel-title">My Clothes<small>Digital closet</small></div>
+        <button class="wr-btn wr-btn-primary wr-btn-sm" id="wrHeadAdd" type="button">＋ Upload</button>
+      </div>
+      <!-- category filter -->
+      <div class="wr-cats" id="wrCats"></div>
+      <!-- item grid (rendered by Closet) -->
+      <div class="wr-closet-grid" id="wrCloset"></div>
+    </section>
+
+    <!-- ---- RIGHT COLUMN ---- -->
+    <div>
+
+      <!-- SECTION 2 — AI OUTFIT GENERATOR -->
+      <section class="wr-panel" aria-label="AI outfit generator" style="margin-bottom:16px">
+        <div class="wr-panel-head">
+          <div class="wr-panel-title">AI Outfit Generator<small>Curated combinations</small></div>
+          <button class="wr-btn wr-btn-primary wr-btn-sm" id="wrGenBtn" type="button">✨ Generate</button>
+        </div>
+        <div class="wr-outfits" id="wrOutfits">
+          <div class="wr-empty">No combinations yet — tap Generate.</div>
+        </div>
+      </section>
+
+      <!-- Garment recommendations (gap analysis feed) -->
+      <section class="wr-panel" aria-label="Recommendations" style="margin-bottom:16px">
+        <div class="wr-panel-head">
+          <div class="wr-panel-title">To Complete Your Closet<small>Gaps &amp; suggestions</small></div>
+        </div>
+        <div class="wr-rec-feed" id="wrRecs">
+          <div class="wr-empty">Generate outfits to see what your wardrobe is missing.</div>
+        </div>
+      </section>
+
+      <!-- Facial & Style analysis sub-section -->
+      <section class="wr-panel" aria-label="Style profile">
+        <div class="wr-panel-head">
+          <div class="wr-panel-title">Style Profile<small>Guides recommendations</small></div>
+        </div>
+        <div class="wr-profile">
+          <div class="wr-portrait" id="wrPortrait" role="button" tabindex="0" aria-label="Upload portrait">👤</div>
+          <div class="wr-profile-fields">
+            <div class="wr-field-row">
+              <span class="wr-field-label">Undertone</span>
+              <div class="wr-seg" id="wrUndertone">
+                <button data-undertone="warm">Warm</button>
+                <button data-undertone="cool">Cool</button>
+                <button data-undertone="neutral">Neutral</button>
+              </div>
+            </div>
+            <div class="wr-field-row">
+              <span class="wr-field-label">Face</span>
+              <div class="wr-seg" id="wrFaceShape">
+                <button data-face="oval">Oval</button>
+                <button data-face="round">Round</button>
+                <button data-face="square">Square</button>
+                <button data-face="heart">Heart</button>
+              </div>
+            </div>
+            <div class="wr-field-row">
+              <span class="wr-field-label">Style</span>
+              <div class="wr-seg" id="wrStyle">
+                <button data-style="minimal">Minimal</button>
+                <button data-style="classic">Classic</button>
+                <button data-style="street">Street</button>
+                <button data-style="bold">Bold</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ============ ITEM DETAIL / EDIT MODAL ============ -->
+<div class="wr-modal-bg" id="wrItemModalBg">
+  <div class="wr-modal" id="wrItemModal" role="dialog" aria-modal="true" aria-label="Edit item">
+    <img class="wr-modal-img" id="wrItemImg" alt="Clothing item">
+    <h3>Item details
+      <span class="wr-item-swatch" id="wrItemSwatch" style="display:inline-block;vertical-align:middle;width:16px;height:16px;margin-left:6px"></span>
+    </h3>
+    <label class="wr-modal-label" for="wrItemCat">Category</label>
+    <select class="wr-select" id="wrItemCat"></select>
+    <label class="wr-modal-label" for="wrItemTags">Tags (comma separated)</label>
+    <input class="wr-input" id="wrItemTags" type="text" placeholder="e.g. casual, summer, linen" autocomplete="off">
+    <div class="wr-modal-actions">
+      <button class="wr-btn wr-btn-ghost" id="wrItemDelete" type="button" style="color:var(--danger);max-width:90px">Delete</button>
+      <button class="wr-btn wr-btn-ghost" id="wrItemClose" type="button">Cancel</button>
+      <button class="wr-btn wr-btn-primary" id="wrItemSave" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Supabase client + shared cloud-sync helper -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="sync.js" defer></script>
+<script src="js/wardrobe.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (typeof initCloudSync !== 'function') return;
+  initCloudSync({
+    appKey: 'wardrobe',
+    syncedPrefixes: ['wardrobe:'],
+    onApplied: function () {
+      window.dispatchEvent(new CustomEvent('wardrobe-changed'));
+      window.dispatchEvent(new Event('storage'));
+    }
+  });
+});
+</script>
+</body>
+</html>
