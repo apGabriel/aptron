@@ -135,16 +135,24 @@
           let data;
           try { data = ctx.getImageData(0, 0, S, S).data; }
           catch (e) { resolve('#8a8a8a'); return; }
-          let r = 0, g = 0, b = 0, n = 0;
+          let r = 0, g = 0, b = 0, n = 0;        // accent pixels (background ignored)
+          let rA = 0, gA = 0, bA = 0, total = 0; // every sampled pixel
           for (let i = 0; i < data.length; i += 4) {
             const R = data[i], G = data[i + 1], B = data[i + 2];
+            rA += R; gA += G; bA += B; total++;
             const max = Math.max(R, G, B), min = Math.min(R, G, B);
             // skip near-white / near-black background pixels
             if (max > 244 && min > 232) continue;
             if (max < 18) continue;
             r += R; g += G; b += B; n++;
           }
-          if (!n) { resolve('#8a8a8a'); return; }
+          // If almost everything was skipped, the garment itself is white /
+          // black / grey — use the raw average rather than a stock fallback.
+          if (n < total * 0.1) {
+            if (!total) { resolve('#8a8a8a'); return; }
+            resolve(rgbToHex(rA / total, gA / total, bA / total));
+            return;
+          }
           resolve(rgbToHex(r / n, g / n, b / n));
         };
         img.onerror = () => resolve('#8a8a8a');
