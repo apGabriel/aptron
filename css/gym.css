@@ -1212,7 +1212,11 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-set-label {
   font-size: 12px; font-weight: 700; color: var(--text-3);
   text-align: center; font-variant-numeric: tabular-nums;
+  /* doubles as the dropset toggle — reset native button chrome */
+  background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
+.rb-set-label:disabled { cursor: default; }
 .rb-set-row input {
   width: 100%; padding: 7px 6px; border: 1px solid var(--border);
   background: rgba(0,0,0,0.28); color: var(--text-1); border-radius: 7px;
@@ -1231,6 +1235,38 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .rb-ex-actions .rb-add-set:hover { color: var(--text-1); background: rgba(255,255,255,0.08); }
 .rb-ex-actions .rb-remove-ex:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
+.rb-add-set:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Per-exercise flag toggles (Bodyweight / Completed) ── */
+.rb-ex-flags { display: flex; gap: 8px; margin: 8px 0 2px; }
+.rb-flag-chip {
+  flex: 1; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  color: var(--text-3); font-family: inherit; font-size: 11px; font-weight: 700;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.rb-flag-chip:hover { color: var(--text-1); }
+.rb-flag-bw.active   { color: var(--text-1); background: rgba(255,255,255,0.12); border-color: var(--border-strong); }
+.rb-flag-done.active { color: #0b1b12; background: var(--good); border-color: var(--good); }
+
+/* ── Bodyweight weight-cell pill (replaces the numeric input) ── */
+.rb-bw-pill {
+  display: flex; align-items: center; justify-content: center;
+  padding: 7px 6px; border: 1px dashed var(--border-strong); border-radius: 7px;
+  color: var(--text-2); font-size: 12px; font-weight: 800; letter-spacing: 0.04em;
+  background: rgba(255,255,255,0.03);
+}
+
+/* ── Dropset: amber accent + a ↓ marker on the set number ── */
+.rb-set-label.is-drop { color: var(--warn); }
+.rb-set-label.is-drop::after { content: '↓'; font-size: 9px; vertical-align: super; margin-left: 1px; }
+.rb-set-row.is-drop input { border-color: rgba(251,191,36,0.4); }
+
+/* ── Completed (locked) exercise ── */
+.rb-row.is-done { border-color: rgba(110,231,183,0.35); }
+.rb-row.is-done .rb-row-name::after { content: ' ✓'; color: var(--good); font-weight: 800; }
+.rb-set-row input:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .rb-routine-actions { display: flex; gap: 8px; }
 .rb-routine-actions .po-btn-primary { flex: 2; }

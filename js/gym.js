@@ -1928,6 +1928,7 @@
   function addToRoutine(e) {
     const exId = e.exId || e.id;
     if (current.exercises.some(x => x.exId === exId)) return; // no duplicates
+    if (dupGuard('addex_' + exId)) return;                    // swallow double-tap
     current.exercises.push({
       exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl,
       // Set-by-set log: seed with a few blank sets the user can fill in.
@@ -2005,6 +2006,27 @@
     return b;
   }
 
+  // A pill-style toggle for per-exercise flags (Bodyweight / Completed).
+  function flagChip(label, active, fn) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rb-flag-chip' + (active ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  // Debounce guard against double-fires inserting the same item twice — covers
+  // rapid double-taps and any synthesized touch+click pair on mobile. Keyed per
+  // action so unrelated taps are never blocked. Returns true → ignore this call.
+  const _dupTimes = {};
+  function dupGuard(key, ms) {
+    const now = Date.now();
+    if (now - (_dupTimes[key] || 0) < (ms || 350)) return true;
+    _dupTimes[key] = now;
+    return false;
+  }
+
   function move(idx, dir) {
     const j = idx + dir;
     if (j < 0 || j >= current.exercises.length) return;
@@ -2013,21 +2035,47 @@
     renderRoutine();
   }
 
-  // One set row: [ Set # ] [ Weight ] [ Reps ] [ × ]
+  // One set row: [ Set # ] [ Weight | BW ] [ Reps ] [ × ]
+  // The set number doubles as the Dropset toggle. When the parent exercise is
+  // bodyweight (it.bw) the weight cell becomes a static "BW" pill; when the
+  // exercise is marked complete (it.done) every control in the row is locked.
   function setRow(it, sIdx) {
     const s = it.sets[sIdx];
-    const row = document.createElement('div'); row.className = 'rb-set-row';
+    const locked = !!it.done;
+    const row = document.createElement('div');
+    row.className = 'rb-set-row' + (s.drop ? ' is-drop' : '');
 
-    const lbl = document.createElement('div'); lbl.className = 'rb-set-label'; lbl.textContent = String(sIdx + 1);
-    const w = setInput(s.weight, { min: 0, float: true }, v => s.weight = v);
-    const r = setInput(s.reps,   { min: 1, max: 36 },     v => s.reps = v);
+    // Set number = Dropset toggle (no new column → grid stays backward-compatible).
+    const lbl = document.createElement('button');
+    lbl.type = 'button';
+    lbl.className = 'rb-set-label' + (s.drop ? ' is-drop' : '');
+    lbl.textContent = String(sIdx + 1);
+    lbl.setAttribute('aria-pressed', s.drop ? 'true' : 'false');
+    lbl.title = s.drop ? 'Dropset — tap to clear' : 'Tap to mark this set as a dropset';
+    if (locked) lbl.disabled = true;
+    else lbl.addEventListener('click', () => { s.drop = !s.drop; renderRoutine(); });
+
+    // Weight cell: numeric input, or a static BW pill for bodyweight exercises.
+    let w;
+    if (it.bw) {
+      w = document.createElement('div');
+      w.className = 'rb-bw-pill';
+      w.textContent = 'BW';
+      w.title = 'Bodyweight — counts as 0 toward volume';
+    } else {
+      w = setInput(s.weight, { min: 0, float: true }, v => s.weight = v);
+      if (locked) w.disabled = true;
+    }
+
+    const r = setInput(s.reps, { min: 1, max: 36 }, v => s.reps = v);
+    if (locked) r.disabled = true;
 
     const del = mini('×', () => {
       it.sets.splice(sIdx, 1);
       renderRoutine();
     }, 'rb-del');
     del.title = 'Remove set';
-    del.disabled = it.sets.length <= 1; // keep at least one set; use Remove Exercise to clear
+    del.disabled = locked || it.sets.length <= 1; // keep ≥1 set; locked = no edits
 
     row.append(lbl, w, r, del);
     return row;
@@ -2036,7 +2084,8 @@
   function routineRow(it, idx) {
     normalizeSets(it); // migrate any legacy single-value exercises in place
 
-    const li = document.createElement('li'); li.className = 'rb-row';
+    const li = document.createElement('li');
+    li.className = 'rb-row' + (it.done ? ' is-done' : '');
 
     // ── Header: thumbnail, name/muscle, reorder controls ──
     const head = document.createElement('div'); head.className = 'rb-row-head';
@@ -2060,6 +2109,25 @@
 
     head.append(thumb, main, ctr);
 
+    // ── Flags toolbar: Bodyweight + Completion locks ──
+    const flags = document.createElement('div'); flags.className = 'rb-ex-flags';
+    const bwBtn = flagChip(it.bw ? 'BW: on' : 'Bodyweight', !!it.bw, () => {
+      it.bw = !it.bw;
+      // Zero the weights when switching to bodyweight so any volume math
+      // (weight × reps) stays valid and the cells read a clean "BW".
+      if (it.bw) it.sets.forEach((st) => { st.weight = 0; });
+      renderRoutine();
+    });
+    bwBtn.classList.add('rb-flag-bw');
+    bwBtn.title = 'Bodyweight / calisthenics — weight tracked as BW (0 volume)';
+    const doneBtn = flagChip(it.done ? '✓ Completed (locked)' : 'Mark Complete', !!it.done, () => {
+      it.done = !it.done;
+      renderRoutine();
+    });
+    doneBtn.classList.add('rb-flag-done');
+    doneBtn.title = it.done ? 'Unlock to edit sets again' : 'Lock this exercise — no more sets can be added';
+    flags.append(bwBtn, doneBtn);
+
     // ── Set table: header + one row per set ──
     const setsWrap = document.createElement('div'); setsWrap.className = 'rb-sets-wrap';
     const colHead = document.createElement('div'); colHead.className = 'rb-set-head';
@@ -2074,7 +2142,10 @@
     const actions = document.createElement('div'); actions.className = 'rb-ex-actions';
     const addSet = document.createElement('button');
     addSet.type = 'button'; addSet.className = 'rb-add-set'; addSet.textContent = '+ Add Set';
+    addSet.disabled = !!it.done; // routine locking: no injecting sets once complete
     addSet.addEventListener('click', () => {
+      if (it.done) return;                                   // guard: locked exercise
+      if (dupGuard('addset_' + (it.exId || idx))) return;    // guard: double-tap dup
       it.sets.push(blankSet(it.sets[it.sets.length - 1]));
       renderRoutine();
     });
@@ -2086,7 +2157,7 @@
     });
     actions.append(addSet, removeEx);
 
-    li.append(head, setsWrap, actions);
+    li.append(head, flags, setsWrap, actions);
     return li;
   }
 
