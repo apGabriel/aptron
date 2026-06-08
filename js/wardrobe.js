@@ -298,6 +298,30 @@
       return { l, s };
     }
 
+    // Score how strongly a column-mass profile splits into TWO distinct vertical
+    // columns flanking a central void (0 = solid block, →1 = two clean columns).
+    // Used to tell a trouser leg-pair from a solid silhouette. We compare the
+    // garment mass in the left (10–40%) and right (60–90%) bands against the
+    // exact center core (42–58%): two legs leave the core much emptier than the
+    // flanks. A *relative* dip (not "center must be totally empty") is what makes
+    // this survive a thin bright reflection running down the gap.
+    function twoColScore(col, len) {
+      if (len < 4) return 0;
+      let left = 0, core = 0, right = 0;
+      for (let x = 0; x < len; x++) {
+        const rel = x / (len - 1);
+        if (rel >= 0.10 && rel < 0.40) left += col[x];
+        else if (rel >= 0.42 && rel <= 0.58) core += col[x];
+        else if (rel > 0.60 && rel <= 0.90) right += col[x];
+      }
+      const flankMin = Math.min(left, right);
+      if (flankMin <= 0) return 0;                       // mass on only one side → not a pair
+      const flankAvg = (left + right) / 2;
+      const dip      = Math.max(0, 1 - core / flankAvg); // how empty the core is vs the legs
+      const balance  = flankMin / Math.max(left, right); // 1 = symmetric legs
+      return dip * balance;
+    }
+
     // Geometry + mass features computed over the ISOLATED garment only (via
     // Vision's foreground mask), so a centered item against a large/high-
     // contrast background still measures true. All ratios are relative to the
@@ -353,8 +377,38 @@
       }
       const legSplit = lowerRows ? splitRows / lowerRows : 0;
 
+      // Pass 3: leg-pair vs open-coat discrimination. We build per-column garment
+      // mass for the TOP half and the BOTTOM half separately, in two flavors:
+      //   • "all"  — every foreground column pixel.
+      //   • "dark" — only foreground darker than the garment's mean lightness.
+      // The "dark" profile is what defeats the open-jacket illusion: when a bright
+      // reflection (or a light shirt) fills the central gap, it is excluded from
+      // the dark mass, so two dark legs still register a clean central void. A
+      // pair of jeans splits in the BOTTOM half (crotch → ankles); an open coat
+      // splits in the TOP half (chest opening) and stays solid across the hem.
+      const meanL = sumL / n;
+      const midY = bbox.y0 + bh / 2;
+      const colAllTop = new Float64Array(bw), colAllBot = new Float64Array(bw);
+      const colDarkTop = new Float64Array(bw), colDarkBot = new Float64Array(bw);
+      for (let y = bbox.y0; y <= bbox.y1; y++) {
+        const bottom = y >= midY;
+        for (let x = bbox.x0; x <= bbox.x1; x++) {
+          if (!mask[y * w + x]) continue;
+          const xi = x - bbox.x0;
+          const i = (y * w + x) * 4;
+          const l = lsOf(data[i], data[i + 1], data[i + 2]).l;
+          if (bottom) { colAllBot[xi]++; if (l < meanL) colDarkBot[xi]++; }
+          else        { colAllTop[xi]++; if (l < meanL) colDarkTop[xi]++; }
+        }
+      }
+      // Take the stronger of the two flavors per half: "all" catches a thin
+      // reflection (mostly real background in the core), "dark" catches a wide
+      // bright gap on a dark garment.
+      const splitBot = Math.max(twoColScore(colAllBot, bw), twoColScore(colDarkBot, bw));
+      const splitTop = Math.max(twoColScore(colAllTop, bw), twoColScore(colDarkTop, bw));
+
       return {
-        gAspect, widthRatio, elong, legSplit,
+        gAspect, widthRatio, elong, legSplit, splitTop, splitBot,
         light: sumL / n, sat: sumS / n,
         topMass: topN / n, midMass: midN / n, botMass: botN / n,
       };
@@ -364,14 +418,30 @@
       if (!f) return 'tops';
       // Wide, short cluster → footwear (desaturated) or a laid-flat accessory.
       if (f.gAspect < 0.8) return f.sat < 0.22 ? 'footwear' : 'accessories';
+
+      // ── HARD GEOMETRIC ANCHOR FOR BOTTOMS ────────────────────────────────
+      // Two distinct dark vertical columns (legs) flanking a central void in the
+      // BOTTOM half of the bbox = trousers/jeans — forced regardless of how dark
+      // or desaturated the average luminance is. Crucially this runs BEFORE the
+      // outerwear branch and requires the split to be bottom-dominant
+      // (splitBot >= splitTop), so the "open dark coat over a light shirt"
+      // illusion — whose opening sits in the TOP/MIDDLE — cannot trigger it, and
+      // a bright reflection in the leg gap cannot suppress it.
+      if (f.gAspect > 1.15 && f.splitBot > 0.45 && f.splitBot >= f.splitTop)
+        return 'bottoms';
+
       // Pants / trousers: a tall, vertically-elongated garment, confirmed by
       // EITHER strong vertical mass elongation OR a visible central leg gap.
-      // Center-mass weighting makes this robust to the high-contrast backgrounds
-      // that previously dropped trousers out of detection entirely.
       if (f.gAspect > 1.25 && f.widthRatio < 0.82 && (f.elong > 1.2 || f.legSplit > 0.22))
         return 'bottoms';
-      // Tall, dark, low-saturation, structured → outer layer (coat / jacket).
-      if (f.gAspect > 1.1 && f.light < 0.42 && f.sat < 0.4) return 'outerwear';
+
+      // Tall, dark, low-saturation, structured → outer layer (coat / jacket) —
+      // but ONLY when it does NOT show a bottom-dominant leg split. The extra
+      // guard is what stops black jeans with a bright central floor reflection
+      // from being read as an open jacket.
+      if (f.gAspect > 1.1 && f.light < 0.42 && f.sat < 0.4 && f.splitBot < 0.45)
+        return 'outerwear';
+
       // Tall with clearly heavier lower mass still reads as bottoms (e.g. a
       // folded pair of jeans with no clean leg split).
       if (f.gAspect > 1.2 && f.botMass > f.topMass + 0.12) return 'bottoms';
