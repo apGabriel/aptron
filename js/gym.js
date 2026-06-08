@@ -750,8 +750,15 @@
     let reps = parseInt($('repsInput').value, 10);
     if (isNaN(reps) || reps < REP_MIN) { alert('Enter reps (1–36).'); return; }
     reps = clampReps(reps);
-    const w = ex.bw ? 0 : (parseFloat($('weightInput').value) || 0);
-    if (!ex.bw && w <= 0) { alert('Enter a weight.'); return; }
+    // Weight: bodyweight exercises log 0. Otherwise 0 is a VALID added load
+    // (pull-ups, dips, push-ups) — only reject a negative or non-numeric value.
+    let w;
+    if (ex.bw) {
+      w = 0;
+    } else {
+      w = parseFloat($('weightInput').value);
+      if (isNaN(w) || w < 0) { alert('Enter a valid weight (0 or more).'); return; }
+    }
     const arr = state.logs[ex.id] || [];
     const entry = { weight: w, reps: reps, date: new Date().toISOString() };
     arr.push(entry);
