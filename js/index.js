@@ -583,8 +583,13 @@ window.addEventListener('goals-changed', () => {
     return '';
   }
 
-  // ── Completion state (stored locally — Google Calendar has no "done" flag) ────
-  function doneKey() { return 'cal_done:' + todayStr(); }
+  // ── Completion state (Google Calendar has no "done" flag, so we track it here) ─
+  // Both keys are namespaced 'cal_done:' / 'cal_manual:' and wired into
+  // initCloudSync (see index.html) so a tap on one device propagates to the
+  // others in real time via Supabase. Writing through localStorage.setItem is
+  // what triggers the shared sync helper to serialize + push the new state.
+  function doneKey()   { return 'cal_done:' + todayStr(); }
+  function manualKey() { return 'cal_manual:' + todayStr(); }
   function getDoneSet() {
     try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); }
     catch { return new Set(); }
@@ -593,6 +598,44 @@ window.addEventListener('goals-changed', () => {
     const s = getDoneSet();
     if (done) s.add(id); else s.delete(id);
     localStorage.setItem(doneKey(), JSON.stringify([...s]));
+  }
+  // Explicit user toggles, so the time-based auto-check never re-marks an event
+  // the user deliberately left (or set) a certain way. { eventId: true|false }.
+  function getManualMap() {
+    try { return JSON.parse(localStorage.getItem(manualKey())) || {}; }
+    catch { return {}; }
+  }
+  function setManual(id, done) {
+    const m = getManualMap();
+    m[id] = !!done;
+    localStorage.setItem(manualKey(), JSON.stringify(m));
+  }
+  // On boot / refresh, mark any timed event whose end time has already passed as
+  // completed by default — e.g. the 6:30–6:45 AM "levantarse" slot is checked
+  // automatically once that time is behind us — unless the user has explicitly
+  // overridden it. Idempotent: only writes (and thus syncs) when something flips.
+  function autoCheckPastEvents(events) {
+    const now = new Date();
+    const manual = getManualMap();
+    const s = getDoneSet();
+    let changed = false;
+    events.forEach((ev) => {
+      if (ev.allDay || !ev.end) return;
+      if (Object.prototype.hasOwnProperty.call(manual, ev.id)) return; // user decided
+      if (new Date(ev.end) < now && !s.has(ev.id)) { s.add(ev.id); changed = true; }
+    });
+    if (changed) localStorage.setItem(doneKey(), JSON.stringify([...s]));
+  }
+  // Re-sync checkbox / row state from storage after a remote sync applies.
+  function applyDoneStateToDOM() {
+    const doneSet = getDoneSet();
+    document.querySelectorAll('#calEventList .cal-event-item').forEach((li) => {
+      const done = doneSet.has(li.dataset.id);
+      const cb = li.querySelector('input[type="checkbox"]');
+      if (cb) cb.checked = done;
+      li.classList.toggle('is-done', done);
+    });
+    updateCount();
   }
 
   // ── Status line helper ────────────────────────────────────────────────────────
@@ -783,6 +826,7 @@ window.addEventListener('goals-changed', () => {
     const cbCustom = document.createElement('span');
     cbCustom.className = 'cal-check-custom';
     cb.addEventListener('change', () => {
+      setManual(ev.id, cb.checked); // record explicit choice so auto-check defers to it
       setDone(ev.id, cb.checked);
       li.classList.toggle('is-done', cb.checked);
       updateCount();
@@ -809,6 +853,7 @@ window.addEventListener('goals-changed', () => {
 
   function renderEvents(events) {
     currentEvents = events;
+    autoCheckPastEvents(events); // default-complete elapsed events before building rows
     const list = document.getElementById('calEventList');
     list.innerHTML = '';
     if (!events.length) {
@@ -894,6 +939,10 @@ window.addEventListener('goals-changed', () => {
     }
     addBtn.disabled = false;
   }
+
+  // A check toggled on another device arrives via initCloudSync → onApplied,
+  // which dispatches 'calendar-synced'; reflect the new state in the DOM live.
+  window.addEventListener('calendar-synced', applyDoneStateToDOM);
 
   document.getElementById('calDateLabel').textContent = fmtDateLabel();
   document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);

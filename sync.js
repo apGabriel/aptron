@@ -84,6 +84,18 @@
       } catch (e) {}
     }
     function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 250); }
+    // Force an immediate upstream push, bypassing the 250ms debounce. Pages call
+    // this right after a critical write (e.g. a fresh wardrobe photo) so the data
+    // is durably in Supabase before a quick refresh or a mobile tab backgrounding
+    // can wipe the not-yet-synced local value. Concurrent calls coalesce onto the
+    // same in-flight push, and pushNow() dedups identical payloads.
+    let flushPromise = null;
+    window.cloudSyncFlush = function () {
+      clearTimeout(pushTimer);
+      if (flushPromise) return flushPromise;
+      flushPromise = Promise.resolve(pushNow()).finally(() => { flushPromise = null; });
+      return flushPromise;
+    };
     function flushOnUnload() {
       const state = collect();
       const json = JSON.stringify(state);

@@ -55,8 +55,10 @@
       catch (e) { return fallback; }
     }
     function write(key, value) {
-      try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { Toast.show('Storage full — try fewer / smaller photos'); }
+      try { localStorage.setItem(key, JSON.stringify(value)); }
+      catch (e) { Toast.show('Storage full — try fewer / smaller photos'); emit(); return false; }
       emit();
+      return true;
     }
     function emit() { listeners.forEach((fn) => { try { fn(); } catch (e) {} }); }
 
@@ -65,7 +67,17 @@
       emit,
       // items
       items() { return read(KEYS.items, []); },
-      setItems(arr) { write(KEYS.items, arr); },
+      // Items carry the heavy base64 image payloads. After a successful local
+      // write, force an immediate upstream push (don't wait for the debounce) so
+      // a freshly-added photo survives a quick refresh / mobile backgrounding.
+      // Returns the in-flight push promise (or false if the local write failed).
+      setItems(arr) {
+        if (!write(KEYS.items, arr)) return false;
+        if (typeof window.cloudSyncFlush === 'function') {
+          try { return window.cloudSyncFlush(); } catch (e) {}
+        }
+        return Promise.resolve();
+      },
       // profile
       profile() { return read(KEYS.profile, { portrait: '', undertone: '', faceShape: '', style: '' }); },
       setProfile(p) { write(KEYS.profile, p); },
@@ -599,7 +611,13 @@
         id: uid(), image_url, category: category || 'tops',
         color, tags: [], lock: null, createdAt: Date.now(),
       });
-      Store.setItems(items);
+      // setItems persists locally AND kicks off an immediate upstream push.
+      // false means the local write failed (quota) — bail without a success toast.
+      const pushed = Store.setItems(items);
+      if (pushed === false) return;
+      // Wait for the base64 payload to reach Supabase before reporting success,
+      // so the new photo is durable even if the user refreshes immediately.
+      try { await pushed; } catch (e) {}
       Toast.show('Added to closet');
     }
 

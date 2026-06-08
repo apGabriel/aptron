@@ -297,7 +297,7 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-field input[type="number"]::-webkit-outer-spin-button,
 .po-field input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none; margin: 0;
+  -webkit-appearance: none; appearance: none; margin: 0;
 }
 .po-field input:focus {
   outline: none; border-color: rgba(255,255,255,0.40);
@@ -1220,7 +1220,7 @@ img, video, canvas, svg { max-width: 100%; }
   font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield;
 }
 .rb-set-row input:focus { outline: none; border-color: rgba(255,255,255,0.35); }
-.rb-set-row input::-webkit-outer-spin-button, .rb-set-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rb-set-row input::-webkit-outer-spin-button, .rb-set-row input::-webkit-inner-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
 .rb-ex-actions { display: flex; gap: 8px; }
 .rb-ex-actions button {
   flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);

@@ -149,9 +149,10 @@ document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
   initCloudSync({
     appKey: 'goals',
-    syncedPrefixes: ['goals:'],
+    syncedPrefixes: ['goals:', 'cal_done:', 'cal_manual:'],
     onApplied: function () {
       window.dispatchEvent(new CustomEvent('goals-changed'));
+      window.dispatchEvent(new CustomEvent('calendar-synced'));
       window.dispatchEvent(new Event('storage'));
     }
   });
