@@ -830,6 +830,12 @@ window.addEventListener('goals-changed', () => {
       setDone(ev.id, cb.checked);
       li.classList.toggle('is-done', cb.checked);
       updateCount();
+      // Force an immediate upstream push (bypass the debounce) so a tap on mobile
+      // reaches Supabase before the tab is suspended/refreshed — otherwise the
+      // change can be lost and never propagate to other devices.
+      if (typeof window.cloudSyncFlush === 'function') {
+        try { window.cloudSyncFlush(); } catch (e) {}
+      }
     });
     cbWrap.appendChild(cb);
     cbWrap.appendChild(cbCustom);
