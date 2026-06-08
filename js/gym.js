@@ -66,6 +66,9 @@
     // ── Session model ──
     if (typeof s.activeSessionId === 'undefined') s.activeSessionId = null;
     migrateSessions(s);          // build sessions from legacy logs on first run
+    // Auto-cleanup: drop empty CLOSED (ghost) sessions left by testing or
+    // abandoned starts. Active (open) sessions are always kept, even at 0 sets.
+    s.sessions = (s.sessions || []).filter(sess => !sess.endedAt || (sess.sets && sess.sets.length > 0));
     s.logs = buildLogIndex(s);   // logs is now a derived view of session sets
     return s;
   }
@@ -152,7 +155,15 @@
   }
   function closeActiveSession() {
     const s = getActiveSession();
-    if (s) s.endedAt = new Date().toISOString();
+    if (s) {
+      if (!s.sets || s.sets.length === 0) {
+        // Empty session (started then abandoned) — discard rather than leave a
+        // 0-set ghost card in Past workouts.
+        state.sessions = (state.sessions || []).filter(x => x.id !== s.id);
+      } else {
+        s.endedAt = new Date().toISOString();
+      }
+    }
     state.activeSessionId = null;
   }
   // Close the current session and open a fresh empty one (manual segmentation).
@@ -729,10 +740,31 @@
 
   // Lists every CLOSED session, newest first — one card per session, so two
   // workouts on the same day stay visually separate (never merged by date).
+  // Permanently remove a session: drop its sets from the normalized cloud store,
+  // delete the session locally, rebuild the derived index, persist + re-render.
+  // The session removal also syncs via the app_state blob on saveState().
+  function deleteSession(id) {
+    const sess = (state.sessions || []).find(s => s.id === id);
+    if (!sess) return;
+    try {
+      (sess.sets || []).forEach(st => {
+        if (window.GymCloud) window.GymCloud.deleteLog({ exId: st.exId, date: st.date });
+      });
+    } catch (e) {}
+    state.sessions = (state.sessions || []).filter(s => s.id !== id);
+    if (state.activeSessionId === id) state.activeSessionId = null;
+    rebuildLogIndex();
+    saveState();
+    renderAll();
+  }
+
   function renderPastWorkouts() {
     const u = state.units;
+    // Only CLOSED sessions that actually hold ≥1 set — empty "ghost" sessions
+    // (abandoned starts / old test data) are filtered out so the list stays
+    // meaningful. (normalize() also prunes them from state on load.)
     const past = (state.sessions || [])
-      .filter(s => s.endedAt)
+      .filter(s => s.endedAt && (s.sets || []).length > 0)
       .slice()
       .sort((a, b) => (b.endedAt || b.startedAt || '').localeCompare(a.endedAt || a.startedAt || ''));
     $('poTwPastCount').textContent = past.length;
@@ -746,12 +778,15 @@
       const dk = (sess.endedAt || sess.startedAt || '').slice(0, 10);
       const exNames = sum.perEx.map(e => e.ex.name).slice(0, 3).join(', ')
         + (sum.perEx.length > 3 ? '…' : '');
-      return '<div class="po-tw-past-day">'
+      return '<div class="po-tw-past-day" data-session="' + escape(sess.id) + '">'
         + '<div class="po-tw-past-day-h">'
         +   '<span class="po-tw-past-day-date">' + escape(sess.label || 'Workout') + ' · ' + fmtPastDate(dk) + '</span>'
-        +   '<span class="po-tw-past-day-summary">'
-        +     sum.totalSets + ' sets · ' + Math.round(sum.totalVol).toLocaleString() + ' ' + u
-        +     ' <span class="po-tw-past-day-done">DONE</span>'
+        +   '<span class="po-tw-past-day-right">'
+        +     '<span class="po-tw-past-day-summary">'
+        +       sum.totalSets + ' sets · ' + Math.round(sum.totalVol).toLocaleString() + ' ' + u
+        +       ' <span class="po-tw-past-day-done">DONE</span>'
+        +     '</span>'
+        +     '<button class="po-hist-del po-tw-past-del" type="button" data-del="' + escape(sess.id) + '" aria-label="Delete session" title="Delete this session">×</button>'
         +   '</span>'
         + '</div>'
         + '<div class="po-tw-past-day-summary" style="margin-top:6px; font-size:11px; color:var(--text-3);">'
@@ -759,6 +794,18 @@
         + '</div>'
         + '</div>';
     }).join('');
+
+    body.querySelectorAll('.po-tw-past-del').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = b.dataset.del;
+        const sess = (state.sessions || []).find(s => s.id === id);
+        const n = sess ? (sess.sets || []).length : 0;
+        if (!confirm('Delete this session' + (n ? ' and its ' + n + ' set' + (n === 1 ? '' : 's') : '')
+          + '? This removes it from all your devices.')) return;
+        deleteSession(id);
+      });
+    });
   }
 
   // Done = close (lock) the active session → it moves to Past workouts and no

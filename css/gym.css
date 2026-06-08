@@ -803,6 +803,8 @@ img, video, canvas, svg { max-width: 100%; }
   font-size: 12px; color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
+.po-tw-past-day-right { display: flex; align-items: center; gap: 6px; }
+.po-tw-past-del { font-size: 15px; padding: 2px 6px; line-height: 1; }
 .po-tw-past-day-done {
   display: inline-block; padding: 2px 7px; border-radius: 999px;
   background: rgba(110,231,183,0.14); color: var(--good);
