@@ -144,6 +144,128 @@
   })();
 
   // ----------------------------------------------------------------
+  // Vision — garment isolation (offscreen pre-processing)
+  // Separates the clothing item from background noise (floor / wall / bed /
+  // shadow) BEFORE any color or category math runs. Works only on an internal
+  // analysis canvas; the stored library image is never modified.
+  //
+  // Strategy (no ML — pure pixel math):
+  //   1. Decode onto a small analysis canvas (long edge ≈ 80px) that PRESERVES
+  //      aspect ratio (the category stage needs true garment geometry).
+  //   2. Learn the background from a peripheral border ring — the outer ~10%
+  //      frame — because garments are virtually always shot centered. Quantize
+  //      those border pixels into coarse RGB buckets (3 bits/channel = 8³ = 512
+  //      buckets) and keep the few most populated as background reference
+  //      clusters. This captures multiple backgrounds at once (wall + floor +
+  //      shadow) instead of a single averaged color.
+  //   3. Any pixel within an ADAPTIVE RGB distance of ANY background reference
+  //      is masked out (mask=0); the survivors are the garment (mask=1). The
+  //      threshold widens for busy/noisy borders so we don't punch holes in the
+  //      garment, and tightens for clean backdrops for a crisp cut.
+  //   4. The garment bounding box is the extent of the surviving foreground.
+  //   Graceful fallbacks keep low-contrast / full-frame garments fully intact.
+  // ----------------------------------------------------------------
+  const Vision = (function () {
+    const LONG_EDGE   = 80;    // analysis canvas long edge (px)
+    const BORDER_FRAC = 0.10;  // outer ring thickness as a fraction of min side
+    const BG_CLUSTERS = 3;     // max distinct background colors to learn
+    const MIN_FG_FRAC = 0.08;  // below this fraction of foreground → fill-frame fallback
+    let cacheKey = null, cachePromise = null; // 1-entry memo (detect + dominant reuse)
+
+    function analyze(dataUrl) {
+      if (dataUrl && dataUrl === cacheKey && cachePromise) return cachePromise;
+      cacheKey = dataUrl;
+      cachePromise = new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(run(img));
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+      });
+      return cachePromise;
+    }
+
+    // Nearest background reference by squared RGB distance.
+    function nearest(refs, r, g, b) {
+      let bd = Infinity;
+      for (let i = 0; i < refs.length; i++) {
+        const dr = r - refs[i][0], dg = g - refs[i][1], db = b - refs[i][2];
+        const d2 = dr * dr + dg * dg + db * db;
+        if (d2 < bd) bd = d2;
+      }
+      return bd;
+    }
+
+    function run(img) {
+      const scale = Math.min(1, LONG_EDGE / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      let data;
+      try { data = ctx.getImageData(0, 0, w, h).data; }
+      catch (e) { return null; } // tainted (cross-origin) canvas — skip isolation
+      const total = w * h;
+
+      // ---- 1. Border ring → background color histogram --------------------
+      const margin = Math.max(2, Math.round(Math.min(w, h) * BORDER_FRAC));
+      const hist = new Map(); // coarse bucket key -> { r, g, b, n }
+      for (let y = 0; y < h; y++) {
+        const edgeRow = (y < margin || y >= h - margin);
+        for (let x = 0; x < w; x++) {
+          if (!edgeRow && x >= margin && x < w - margin) continue; // interior — skip
+          const i = (y * w + x) * 4;
+          const R = data[i], G = data[i + 1], B = data[i + 2];
+          const key = ((R >> 5) << 6) | ((G >> 5) << 3) | (B >> 5); // 3 bits / channel
+          let e = hist.get(key);
+          if (!e) { e = { r: 0, g: 0, b: 0, n: 0 }; hist.set(key, e); }
+          e.r += R; e.g += G; e.b += B; e.n++;
+        }
+      }
+      // Most-populated border buckets become the background reference colors.
+      const refs = [...hist.values()].sort((a, b) => b.n - a.n).slice(0, BG_CLUSTERS)
+        .map((e) => [e.r / e.n, e.g / e.n, e.b / e.n]);
+
+      // ---- 2. Adaptive threshold from border spread -----------------------
+      // Variance = mean squared distance of every border bucket to its nearest
+      // reference, weighted by population. A tight border → small std → crisp
+      // threshold; a noisy border → large std → looser threshold.
+      let bvar = 0, bn = 0;
+      for (const e of hist.values()) {
+        bvar += nearest(refs, e.r / e.n, e.g / e.n, e.b / e.n) * e.n; bn += e.n;
+      }
+      const bstd  = bn ? Math.sqrt(bvar / bn) : 0;
+      const thresh = Math.max(30, Math.min(70, 26 + 1.4 * bstd)); // RGB distance
+      const T2 = thresh * thresh;
+
+      // ---- 3. Foreground mask + garment bounding box ----------------------
+      const mask = new Uint8Array(total);
+      let fg = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          const isBg = refs.length && nearest(refs, data[i], data[i + 1], data[i + 2]) <= T2;
+          if (!isBg) {
+            mask[y * w + x] = 1; fg++;
+            if (x < x0) x0 = x; if (x > x1) x1 = x;
+            if (y < y0) y0 = y; if (y > y1) y1 = y;
+          }
+        }
+      }
+
+      // ---- 4. Fallback: garment fills the frame / matches the background ---
+      if (fg < total * MIN_FG_FRAC || x1 < x0 || y1 < y0) {
+        mask.fill(1);
+        return { w, h, data, mask, fgCount: total, bbox: { x0: 0, y0: 0, x1: w - 1, y1: h - 1 } };
+      }
+      return { w, h, data, mask, fgCount: fg, bbox: { x0, y0, x1, y1 } };
+    }
+
+    return { analyze };
+  })();
+
+  // ----------------------------------------------------------------
   // Detector — garment type auto-categorization (vision seam)
   // Analyzes an uploaded image and guesses its category so the upload
   // modal can pre-select the right chip. Ships with an enhanced heuristic
@@ -167,53 +289,94 @@
       return null;
     }
 
-    // Pull a few cheap visual features from the image for the heuristic.
-    function features(dataUrl) {
-      return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          const W = 32, H = 32;
-          const c = document.createElement('canvas');
-          c.width = W; c.height = H;
-          const ctx = c.getContext('2d');
-          ctx.drawImage(img, 0, 0, W, H);
-          let data;
-          try { data = ctx.getImageData(0, 0, W, H).data; }
-          catch (e) { resolve(null); return; }
-          let sumL = 0, sumS = 0, n = 0;
-          let topL = 0, topN = 0, botL = 0, botN = 0;
-          for (let y = 0; y < H; y++) {
-            for (let x = 0; x < W; x++) {
-              const i = (y * W + x) * 4;
-              const hsl = Color.rgbToHsl({ r: data[i], g: data[i + 1], b: data[i + 2] });
-              sumL += hsl.l; sumS += hsl.s; n++;
-              if (y < H / 3) { topL += hsl.l; topN++; }
-              else if (y >= (2 * H) / 3) { botL += hsl.l; botN++; }
-            }
-          }
-          resolve({
-            aspect: img.height / Math.max(1, img.width), // >1 = portrait/tall
-            light: sumL / Math.max(1, n),
-            sat: sumS / Math.max(1, n),
-            topLight: topL / Math.max(1, topN),
-            botLight: botL / Math.max(1, botN),
-          });
-        };
-        img.onerror = () => resolve(null);
-        img.src = dataUrl;
-      });
+    // Lightweight HSL (lightness + saturation only) for foreground stats.
+    function lsOf(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      const l = (max + min) / 2;
+      const s = max === min ? 0 : (l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min));
+      return { l, s };
+    }
+
+    // Geometry + mass features computed over the ISOLATED garment only (via
+    // Vision's foreground mask), so a centered item against a large/high-
+    // contrast background still measures true. All ratios are relative to the
+    // garment's own bounding box, never the whole photo.
+    async function features(dataUrl) {
+      const v = await Vision.analyze(dataUrl);
+      if (!v) return null;
+      const { w, data, mask, bbox } = v;
+      const bw = bbox.x1 - bbox.x0 + 1, bh = bbox.y1 - bbox.y0 + 1;
+      const gAspect    = bh / Math.max(1, bw); // >1 = tall/portrait garment
+      const widthRatio = bw / Math.max(1, w);  // how much of the frame width it spans
+
+      // Pass 1: foreground light/sat means, vertical-third mass split, centroid.
+      let sumL = 0, sumS = 0, n = 0, mx = 0, my = 0;
+      let topN = 0, midN = 0, botN = 0;
+      const t1 = bbox.y0 + bh / 3, t2 = bbox.y0 + (2 * bh) / 3;
+      for (let y = bbox.y0; y <= bbox.y1; y++) {
+        for (let x = bbox.x0; x <= bbox.x1; x++) {
+          if (!mask[y * w + x]) continue;        // background — excluded
+          const i = (y * w + x) * 4;
+          const ls = lsOf(data[i], data[i + 1], data[i + 2]);
+          sumL += ls.l; sumS += ls.s; n++; mx += x; my += y;
+          if (y < t1) topN++; else if (y < t2) midN++; else botN++;
+        }
+      }
+      if (!n) return null;
+      mx /= n; my /= n;
+
+      // Pass 2: spatial spread → vertical elongation (stdY vs stdX). A tall,
+      // narrow column (trousers) has stdY noticeably greater than stdX.
+      let vx = 0, vy = 0;
+      for (let y = bbox.y0; y <= bbox.y1; y++)
+        for (let x = bbox.x0; x <= bbox.x1; x++) {
+          if (!mask[y * w + x]) continue;
+          vx += (x - mx) * (x - mx); vy += (y - my) * (y - my);
+        }
+      const elong = Math.sqrt(vy / n) / Math.max(1e-3, Math.sqrt(vx / n));
+
+      // Leg-split: fraction of lower-half rows showing foreground on BOTH flanks
+      // but a gap through the horizontal center — the signature of two trouser
+      // legs. This center-mass test catches pants even when poor contrast washes
+      // out the top/bottom luminance delta the old heuristic relied on.
+      let splitRows = 0, lowerRows = 0;
+      for (let y = Math.round(my); y <= bbox.y1; y++) {
+        let leftFg = false, rightFg = false, centerFg = false;
+        for (let x = bbox.x0; x <= bbox.x1; x++) {
+          if (!mask[y * w + x]) continue;
+          const rel = (x - bbox.x0) / Math.max(1, bw - 1);
+          if (rel < 0.4) leftFg = true; else if (rel > 0.6) rightFg = true; else centerFg = true;
+        }
+        lowerRows++;
+        if (leftFg && rightFg && !centerFg) splitRows++;
+      }
+      const legSplit = lowerRows ? splitRows / lowerRows : 0;
+
+      return {
+        gAspect, widthRatio, elong, legSplit,
+        light: sumL / n, sat: sumS / n,
+        topMass: topN / n, midMass: midN / n, botMass: botN / n,
+      };
     }
 
     function heuristic(f) {
       if (!f) return 'tops';
-      // Wide-format shots tend to be shoes or laid-flat accessories.
-      if (f.aspect < 0.85) return f.sat < 0.22 ? 'footwear' : 'accessories';
-      // Tall + dark/desaturated reads as a structured outer layer.
-      if (f.aspect > 1.15 && f.light < 0.45) return 'outerwear';
-      // Tall with a heavier (darker) lower half reads as bottoms (denim, trousers).
-      if (f.aspect > 1.2 && f.botLight < f.topLight - 0.05) return 'bottoms';
-      // Compact, very saturated pieces read as accessories (bags, scarves).
-      if (f.sat > 0.45 && f.aspect <= 1.15) return 'accessories';
+      // Wide, short cluster → footwear (desaturated) or a laid-flat accessory.
+      if (f.gAspect < 0.8) return f.sat < 0.22 ? 'footwear' : 'accessories';
+      // Pants / trousers: a tall, vertically-elongated garment, confirmed by
+      // EITHER strong vertical mass elongation OR a visible central leg gap.
+      // Center-mass weighting makes this robust to the high-contrast backgrounds
+      // that previously dropped trousers out of detection entirely.
+      if (f.gAspect > 1.25 && f.widthRatio < 0.82 && (f.elong > 1.2 || f.legSplit > 0.22))
+        return 'bottoms';
+      // Tall, dark, low-saturation, structured → outer layer (coat / jacket).
+      if (f.gAspect > 1.1 && f.light < 0.42 && f.sat < 0.4) return 'outerwear';
+      // Tall with clearly heavier lower mass still reads as bottoms (e.g. a
+      // folded pair of jeans with no clean leg split).
+      if (f.gAspect > 1.2 && f.botMass > f.topMass + 0.12) return 'bottoms';
+      // Compact, very saturated piece → accessory (bag / scarf).
+      if (f.sat > 0.5 && f.gAspect <= 1.2) return 'accessories';
       return 'tops';
     }
 
@@ -231,8 +394,82 @@
   // ("Color Scale & Harmony" analytical vector)
   // ----------------------------------------------------------------
   const Color = (function () {
-    // Sample a small canvas and average non-extreme pixels → dominant hex.
-    function dominant(dataUrl) {
+    // Dominant garment color via background-isolated k-means clustering.
+    // Pulls ONLY foreground (garment) pixels — as masked by Vision — from the
+    // inner 60% of the detected bounding box, where fabric lies flat and the
+    // edge-pooling fold shadows are excluded. Clustering (not a flat average)
+    // means a few stray highlight / button / residual-background pixels land in
+    // minority clusters and can't drag the result toward mud; we return the
+    // centroid of the most populous cluster as a precise hex.
+    async function dominant(dataUrl) {
+      const v = await Vision.analyze(dataUrl);
+      if (!v) return legacyDominant(dataUrl); // tainted canvas → safe fallback
+      const { w, h, data, mask, bbox } = v;
+      const bw = bbox.x1 - bbox.x0 + 1, bh = bbox.y1 - bbox.y0 + 1;
+      // Inner 60% = shrink 20% off each side of the garment bounding box.
+      const ix0 = bbox.x0 + bw * 0.2, ix1 = bbox.x1 - bw * 0.2;
+      const iy0 = bbox.y0 + bh * 0.2, iy1 = bbox.y1 - bh * 0.2;
+
+      const collect = (xa, ya, xb, yb) => {
+        const pts = [];
+        for (let y = Math.floor(ya); y <= Math.ceil(yb); y++) {
+          for (let x = Math.floor(xa); x <= Math.ceil(xb); x++) {
+            if (x < 0 || y < 0 || x >= w || y >= h) continue;
+            if (!mask[y * w + x]) continue;        // background — ignored
+            const i = (y * w + x) * 4;
+            pts.push([data[i], data[i + 1], data[i + 2]]);
+          }
+        }
+        return pts;
+      };
+
+      // Inner core first; relax to the full bbox if it was too small to trust.
+      let pts = collect(ix0, iy0, ix1, iy1);
+      if (pts.length < 12) pts = collect(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
+      if (!pts.length) return '#8a8a8a';
+
+      const clusters = kmeans(pts, 3, 6).sort((a, b) => b.n - a.n);
+      const c = clusters[0].c;
+      return rgbToHex(c[0], c[1], c[2]);
+    }
+
+    // k-means over RGB points. Seeded deterministically by luminance spread so
+    // results are stable run-to-run; a handful of iterations converges at this
+    // pixel count. Returns [{ c:[r,g,b], n }] where n = members in the cluster.
+    function kmeans(points, k, iters) {
+      const lum = (p) => 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+      if (points.length <= k) return points.map((p) => ({ c: p.slice(), n: 1 }));
+      const sorted = points.slice().sort((a, b) => lum(a) - lum(b));
+      const cents = [];
+      for (let i = 0; i < k; i++) cents.push(sorted[Math.floor(((i + 0.5) / k) * sorted.length)].slice());
+      const assign = new Array(points.length).fill(0);
+      for (let it = 0; it < iters; it++) {
+        for (let p = 0; p < points.length; p++) {
+          let best = 0, bd = Infinity;
+          for (let cI = 0; cI < k; cI++) {
+            const dr = points[p][0] - cents[cI][0], dg = points[p][1] - cents[cI][1], db = points[p][2] - cents[cI][2];
+            const d = dr * dr + dg * dg + db * db;
+            if (d < bd) { bd = d; best = cI; }
+          }
+          assign[p] = best;
+        }
+        const sum = [];
+        for (let cI = 0; cI < k; cI++) sum.push([0, 0, 0, 0]);
+        for (let p = 0; p < points.length; p++) {
+          const cI = assign[p], pt = points[p];
+          sum[cI][0] += pt[0]; sum[cI][1] += pt[1]; sum[cI][2] += pt[2]; sum[cI][3]++;
+        }
+        for (let cI = 0; cI < k; cI++)
+          if (sum[cI][3]) cents[cI] = [sum[cI][0] / sum[cI][3], sum[cI][1] / sum[cI][3], sum[cI][2] / sum[cI][3]];
+      }
+      const counts = new Array(k).fill(0);
+      for (let p = 0; p < points.length; p++) counts[assign[p]]++;
+      return cents.map((cc, i) => ({ c: cc, n: counts[i] }));
+    }
+
+    // Legacy global-average sampler — used only when the analysis canvas is
+    // unreadable (e.g. a cross-origin / tainted source) so Vision returns null.
+    function legacyDominant(dataUrl) {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -250,13 +487,10 @@
             const R = data[i], G = data[i + 1], B = data[i + 2];
             rA += R; gA += G; bA += B; total++;
             const max = Math.max(R, G, B), min = Math.min(R, G, B);
-            // skip near-white / near-black background pixels
-            if (max > 244 && min > 232) continue;
-            if (max < 18) continue;
+            if (max > 244 && min > 232) continue; // skip near-white background
+            if (max < 18) continue;               // skip near-black background
             r += R; g += G; b += B; n++;
           }
-          // If almost everything was skipped, the garment itself is white /
-          // black / grey — use the raw average rather than a stock fallback.
           if (n < total * 0.1) {
             if (!total) { resolve('#8a8a8a'); return; }
             resolve(rgbToHex(rA / total, gA / total, bA / total));
