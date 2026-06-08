@@ -15,7 +15,7 @@
     if (!SUPABASE_URL || !SUPABASE_KEY) return;
     if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) return;
 
-    let supa = null, pushTimer = null, suppressSync = false, lastSyncedJson = null;
+    let supa = null, pushTimer = null, suppressSync = false, lastSyncedJson = null, lastUpdatedAt = null;
 
     function matches(k) {
       if (!k) return false;
@@ -75,14 +75,42 @@
       const state = collect();
       const json = JSON.stringify(state);
       if (json === lastSyncedJson) return;
+      const stamp = new Date().toISOString();
       try {
         const { error } = await supa.from('app_state').upsert(
-          { key: appKey, data: state, updated_at: new Date().toISOString() },
+          { key: appKey, data: state, updated_at: stamp },
           { onConflict: 'key' }
         );
-        if (!error) lastSyncedJson = json;
+        // Remember our own timestamp so the fallback poll doesn't treat our push
+        // as a remote change and re-download it.
+        if (!error) { lastSyncedJson = json; lastUpdatedAt = stamp; }
       } catch (e) {}
     }
+    // Pull the full row and apply it if the payload differs from what we have.
+    async function pullRemote() {
+      if (!supa) return;
+      try {
+        const { data, error } = await supa.from('app_state').select('data,updated_at').eq('key', appKey).maybeSingle();
+        if (error || !data || !data.data) return;
+        if (data.updated_at) lastUpdatedAt = data.updated_at;
+        const incoming = JSON.stringify(data.data);
+        if (incoming === lastSyncedJson) return;
+        lastSyncedJson = incoming;
+        applyRemote(data.data);
+      } catch (e) {}
+    }
+    // Cheap fallback poll: fetch only `updated_at`; download the heavy `data`
+    // (which on the wardrobe page holds base64 images) only when it changed.
+    async function pollRemote() {
+      if (!supa) return;
+      try {
+        const { data, error } = await supa.from('app_state').select('updated_at').eq('key', appKey).maybeSingle();
+        if (error || !data) return;
+        if (lastUpdatedAt && data.updated_at && data.updated_at === lastUpdatedAt) return;
+        await pullRemote();
+      } catch (e) {}
+    }
+    window.cloudSyncPull = pullRemote;
     function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(pushNow, 250); }
     // Force an immediate upstream push, bypassing the 250ms debounce. Pages call
     // this right after a critical write (e.g. a fresh wardrobe photo) so the data
@@ -118,25 +146,38 @@
     (async function init() {
       supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
       try {
-        const { data, error } = await supa.from('app_state').select('data').eq('key', appKey).maybeSingle();
+        const { data, error } = await supa.from('app_state').select('data,updated_at').eq('key', appKey).maybeSingle();
         if (!error && data && data.data && Object.keys(data.data).length > 0) {
           lastSyncedJson = JSON.stringify(data.data);
+          if (data.updated_at) lastUpdatedAt = data.updated_at;
           applyRemote(data.data);
         } else if (Object.keys(collect()).length > 0) {
           schedulePush();
         }
       } catch (e) {}
+      // Fast path: realtime websocket. Can silently drop on mobile network
+      // transitions / backgrounded tabs, or never fire if the table isn't in the
+      // realtime publication — hence the polling fallback below.
       supa.channel('app_state_' + appKey)
         .on('postgres_changes', {
           event: '*', schema: 'public', table: 'app_state', filter: 'key=eq.' + appKey,
         }, (payload) => {
           if (!payload.new || !payload.new.data) return;
+          if (payload.new.updated_at) lastUpdatedAt = payload.new.updated_at;
           const incoming = JSON.stringify(payload.new.data);
           if (incoming === lastSyncedJson) return;
           lastSyncedJson = incoming;
           applyRemote(payload.new.data);
         })
         .subscribe();
+      // Bulletproof fallback: even if the socket is silent, a light 5s poll keeps
+      // every device eventually consistent. Also pull on the moments most likely
+      // to follow a missed update — tab refocus, regained network, page show.
+      setInterval(pollRemote, 5000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) pollRemote(); });
+      window.addEventListener('focus', pollRemote);
+      window.addEventListener('online', pollRemote);
+      window.addEventListener('pageshow', pollRemote);
     })();
     window.addEventListener('beforeunload', flushOnUnload);
     window.addEventListener('pagehide', flushOnUnload);

@@ -626,15 +626,20 @@ window.addEventListener('goals-changed', () => {
     });
     if (changed) localStorage.setItem(doneKey(), JSON.stringify([...s]));
   }
-  // Re-sync checkbox / row state from storage after a remote sync applies.
+  // Re-sync checkbox / row state from storage after a remote sync applies. Reads
+  // getDoneSet() fresh from the just-merged localStorage and always refreshes the
+  // counter — even if a row update throws — so a check toggled on another device
+  // is reflected on this one without a manual refresh.
   function applyDoneStateToDOM() {
-    const doneSet = getDoneSet();
-    document.querySelectorAll('#calEventList .cal-event-item').forEach((li) => {
-      const done = doneSet.has(li.dataset.id);
-      const cb = li.querySelector('input[type="checkbox"]');
-      if (cb) cb.checked = done;
-      li.classList.toggle('is-done', done);
-    });
+    try {
+      const doneSet = getDoneSet();
+      document.querySelectorAll('#calEventList .cal-event-item').forEach((li) => {
+        const done = doneSet.has(li.dataset.id);
+        const cb = li.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = done;
+        li.classList.toggle('is-done', done);
+      });
+    } catch (e) {}
     updateCount();
   }
 
@@ -947,8 +952,10 @@ window.addEventListener('goals-changed', () => {
   }
 
   // A check toggled on another device arrives via initCloudSync → onApplied,
-  // which dispatches 'calendar-synced'; reflect the new state in the DOM live.
+  // which dispatches 'calendar-synced' (and a generic 'storage' event); reflect
+  // the new state in the DOM live, no manual refresh needed.
   window.addEventListener('calendar-synced', applyDoneStateToDOM);
+  window.addEventListener('storage', applyDoneStateToDOM);
 
   document.getElementById('calDateLabel').textContent = fmtDateLabel();
   document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);
