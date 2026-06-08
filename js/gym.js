@@ -63,11 +63,121 @@
         index: idx
       };
     }
+    // ── Session model ──
+    if (typeof s.activeSessionId === 'undefined') s.activeSessionId = null;
+    migrateSessions(s);          // build sessions from legacy logs on first run
+    s.logs = buildLogIndex(s);   // logs is now a derived view of session sets
     return s;
   }
   function saveState() {
     try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
   }
+
+  // ============================================================
+  // SESSION MODEL (routine/session-driven, replaces date-driven)
+  //
+  // Source of truth: state.sessions — an ordered list of workout sessions,
+  // each OWNING its own sets (nested). A session is "open" while endedAt is
+  // null and "closed" once the user marks it Done / starts a new one.
+  //   session = { id, label, startedAt, endedAt|null,
+  //               sets: [ { exId, name, weight, reps, date } ] }
+  //
+  // state.logs[exId] is now a DERIVED flat index rebuilt from every session's
+  // sets, so the prescription engine, PR badge, sparkline and history (which
+  // all read the per-exercise array) keep working untouched.
+  // ============================================================
+  function uidSession() {
+    return 'sess_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  }
+  // Flatten all session sets into the per-exercise chronological index.
+  function buildLogIndex(s) {
+    const idx = {};
+    (s.sessions || []).forEach((sess) => {
+      (sess.sets || []).forEach((set) => {
+        (idx[set.exId] = idx[set.exId] || []).push({
+          weight: set.weight, reps: set.reps, date: set.date, session: sess.id,
+        });
+      });
+    });
+    Object.keys(idx).forEach((k) => idx[k].sort((a, b) => (a.date || '').localeCompare(b.date || '')));
+    return idx;
+  }
+  function rebuildLogIndex() { state.logs = buildLogIndex(state); }
+
+  // One-time migration: fold any pre-existing flat logs into one CLOSED session
+  // per calendar day, so historical data survives the model switch and shows up
+  // under Past workouts. Runs only when sessions don't exist yet.
+  function migrateSessions(s) {
+    if (Array.isArray(s.sessions)) return;
+    const nameById = {};
+    (s.exercises || []).forEach((e) => { if (e && e.id) nameById[e.id] = e.name; });
+    const byDay = {};
+    Object.keys(s.logs || {}).forEach((exId) => {
+      (s.logs[exId] || []).forEach((l) => {
+        if (!l || !l.date) return;
+        const day = l.date.slice(0, 10);
+        (byDay[day] = byDay[day] || []).push({
+          exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date,
+        });
+      });
+    });
+    s.sessions = Object.keys(byDay).sort().map((day) => {
+      const sets = byDay[day].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      return {
+        id: 'sess_legacy_' + day, label: 'Workout',
+        startedAt: sets[0].date, endedAt: sets[sets.length - 1].date, sets, // legacy = closed
+      };
+    });
+    s.activeSessionId = null;
+  }
+
+  // Label a new session from the day's split (e.g. "Push") or selected routine.
+  function currentSessionLabel() {
+    try { const sp = todaySplit(); if (sp && sp.name) return sp.name; } catch (e) {}
+    return 'Workout';
+  }
+  function getActiveSession() {
+    if (!state.activeSessionId) return null;
+    return (state.sessions || []).find((s) => s.id === state.activeSessionId && !s.endedAt) || null;
+  }
+  // Open session getter that auto-creates one — the auto-start on first log.
+  function ensureActiveSession() {
+    let s = getActiveSession();
+    if (!s) {
+      s = { id: uidSession(), label: currentSessionLabel(), startedAt: new Date().toISOString(), endedAt: null, sets: [] };
+      (state.sessions = state.sessions || []).push(s);
+      state.activeSessionId = s.id;
+    }
+    return s;
+  }
+  function closeActiveSession() {
+    const s = getActiveSession();
+    if (s) s.endedAt = new Date().toISOString();
+    state.activeSessionId = null;
+  }
+  // Close the current session and open a fresh empty one (manual segmentation).
+  function startNewSession() {
+    closeActiveSession();
+    ensureActiveSession();
+  }
+  // Group an active/closed session's sets by exercise for the summary cards.
+  function summarizeSession(sess) {
+    const byEx = {};
+    (sess.sets || []).forEach((set) => {
+      const ex = (state.exercises || []).find((e) => e.id === set.exId)
+        || { id: set.exId, name: set.name || set.exId, bw: false };
+      if (!byEx[ex.id]) byEx[ex.id] = { ex, sets: [], vol: 0 };
+      byEx[ex.id].sets.push(set);
+      byEx[ex.id].vol += (set.weight || 0) * (set.reps || 0);
+    });
+    const perEx = Object.values(byEx);
+    return {
+      perEx,
+      totalSets: perEx.reduce((a, e) => a + e.sets.length, 0),
+      totalVol: perEx.reduce((a, e) => a + e.vol, 0),
+    };
+  }
+
   let state = loadState();
   document.getElementById('appTitle').textContent = CONFIG.appTitle || 'Progressive Overload Coach';
 
@@ -448,9 +558,12 @@
         const origIdx = parseInt(b.dataset.idx, 10);
         const arr = state.logs[exId] || [];
         const victim = arr[origIdx];
-        arr.splice(origIdx, 1);
-        if (!arr.length) delete state.logs[exId];
-        else state.logs[exId] = arr;
+        if (victim) {
+          // Remove the set from its owning session, then rebuild the index.
+          const sess = (state.sessions || []).find((s) => s.id === victim.session);
+          if (sess) sess.sets = sess.sets.filter((st) => !(st.exId === exId && st.date === victim.date));
+          rebuildLogIndex();
+        }
         saveState(); renderAll();
         // Mirror the delete to the normalized cloud store (best-effort / queued).
         try {
@@ -532,40 +645,18 @@
   }
 
   // ============================================================
-  // TODAY'S WORKOUT + PAST WORKOUTS
+  // CURRENT SESSION + PAST WORKOUTS
   //
-  // Reads state.logs, groups by date, surfaces:
-  //  - Today: every set logged today, per exercise, with set count + total
-  //    volume (kg lifted = sum of weight × reps across all working sets).
-  //  - Past: every previous workout day, sorted newest-first, with the
-  //    same summary numbers + a DONE badge if the user marked that day.
+  // Renders from state.sessions (the session model):
+  //  - Current: the ACTIVE (in-progress) session, per exercise, with set count
+  //    + total volume (kg lifted = sum of weight × reps across its sets).
+  //  - Past: every CLOSED session, newest first — one card per session, so two
+  //    workouts on the same day never merge.
   //
-  // The total volume here is what the composition-estimate uses (combined
-  // with the 1RM trend) — more weekly volume + strength gain = more of
-  // recent body-weight delta gets attributed to muscle.
+  // Per-session volume is what the composition-estimate reads (combined with the
+  // 1RM trend) — more weekly volume + strength gain = more of recent body-weight
+  // delta attributed to muscle.
   // ============================================================
-  const WORKOUT_DONE_KEY = 'po_coach_workout_done';
-  function loadDoneDays() {
-    try { const raw = localStorage.getItem(WORKOUT_DONE_KEY); return raw ? JSON.parse(raw) : {}; }
-    catch (e) { return {}; }
-  }
-  function saveDoneDays(d) {
-    try { localStorage.setItem(WORKOUT_DONE_KEY, JSON.stringify(d)); } catch (e) {}
-  }
-  let doneDays = loadDoneDays();
-
-  function logsByDay() {
-    const byDay = {};
-    state.exercises.forEach(ex => {
-      (state.logs[ex.id] || []).forEach(l => {
-        const dk = l.date.slice(0, 10);
-        if (!byDay[dk]) byDay[dk] = [];
-        byDay[dk].push({ ex, log: l });
-      });
-    });
-    return byDay;
-  }
-
   function fmtPastDate(dk) {
     const [y, m, d] = dk.split('-').map(Number);
     const dt = new Date(y, m - 1, d);
@@ -574,90 +665,93 @@
     return dows[dt.getDay()] + ' ' + mons[dt.getMonth()] + ' ' + dt.getDate();
   }
 
-  function summarizeDay(daySets) {
-    // daySets: [{ex, log}]. Group by exercise, return {sets: N, vol: kg, perEx: [...]}.
-    const byEx = {};
-    daySets.forEach(({ex, log}) => {
-      if (!byEx[ex.id]) byEx[ex.id] = { ex, sets: [], vol: 0 };
-      byEx[ex.id].sets.push(log);
-      byEx[ex.id].vol += (log.weight || 0) * (log.reps || 0);
-    });
-    const perEx = Object.values(byEx);
-    const totalSets = perEx.reduce((s, e) => s + e.sets.length, 0);
-    const totalVol = perEx.reduce((s, e) => s + e.vol, 0);
-    return { perEx, totalSets, totalVol };
+  // Render one exercise summary row from a summarizeSession() perEx entry.
+  function twRowHtml(e, u) {
+    const top = e.ex.bw
+      ? 'top ' + Math.max.apply(null, e.sets.map(s => s.reps)) + ' reps'
+      : 'top ' + Math.max.apply(null, e.sets.map(s => s.weight)) + u;
+    const meta = e.ex.bw
+      ? (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top)
+      : (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top + ' · ' + Math.round(e.vol) + u + ' total');
+    return '<li class="po-tw-row">'
+      + '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
+      + '<span class="po-tw-row-meta">' + meta + '</span>'
+      + '</li>';
   }
 
+  // Renders the ACTIVE session (the workout in progress) — not "everything
+  // logged today". Closing a session moves it to Past workouts, so a second
+  // routine started the same day shows up as its own separate session.
   function renderTodaysWorkout() {
-    const todayKey = wtDateKey(new Date());
-    const all = logsByDay();
-    const todaySets = all[todayKey] || [];
-    const sum = summarizeDay(todaySets);
     const u = state.units;
-
+    const sess = getActiveSession();
     const eyebrow = $('poTwDateLabel');
+    const list = $('poTwList');
+    const empty = $('poTwEmpty');
+    const btn = $('poTwDoneBtn');
     const dows = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
     const mons = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-    const d = new Date();
-    eyebrow.textContent = 'TODAY · ' + dows[d.getDay()] + ', ' + mons[d.getMonth()] + ' ' + d.getDate();
 
+    if (!sess) {
+      eyebrow.textContent = 'NO ACTIVE SESSION';
+      $('poTwSetCount').textContent = '0';
+      $('poTwTotalVol').textContent = '0 ' + u + ' lifted';
+      list.innerHTML = '';
+      empty.classList.remove('hidden');
+      empty.textContent = 'No active session — log a set to start one, or tap “New session”.';
+      btn.textContent = 'Mark done';
+      btn.classList.remove('is-done');
+      btn.disabled = true; btn.style.opacity = '0.4';
+      return;
+    }
+
+    const sum = summarizeSession(sess);
+    const d = new Date(sess.startedAt);
+    eyebrow.textContent = (sess.label ? escape(sess.label.toUpperCase()) + ' · ' : '')
+      + 'IN PROGRESS · ' + dows[d.getDay()] + ' ' + mons[d.getMonth()] + ' ' + d.getDate();
     $('poTwSetCount').textContent = sum.totalSets;
     $('poTwTotalVol').textContent = Math.round(sum.totalVol).toLocaleString() + ' ' + u + ' lifted';
 
-    const list = $('poTwList');
-    const empty = $('poTwEmpty');
     if (sum.totalSets === 0) {
       list.innerHTML = '';
       empty.classList.remove('hidden');
+      empty.textContent = 'Session started — log a set above and it’ll appear here.';
     } else {
       empty.classList.add('hidden');
-      list.innerHTML = sum.perEx.map(e => {
-        const top = e.ex.bw
-          ? 'top ' + Math.max.apply(null, e.sets.map(s => s.reps)) + ' reps'
-          : 'top ' + Math.max.apply(null, e.sets.map(s => s.weight)) + u;
-        const meta = e.ex.bw
-          ? (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top)
-          : (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top + ' · ' + Math.round(e.vol) + u + ' total');
-        return '<li class="po-tw-row">'
-          + '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
-          + '<span class="po-tw-row-meta">' + meta + '</span>'
-          + '</li>';
-      }).join('');
+      list.innerHTML = sum.perEx.map(e => twRowHtml(e, u)).join('');
     }
 
-    // Done button state
-    const btn = $('poTwDoneBtn');
-    const isDone = !!doneDays[todayKey];
-    btn.textContent = isDone ? '✓ Done' : 'Mark workout done';
-    btn.classList.toggle('is-done', isDone);
-    btn.disabled = sum.totalSets === 0 && !isDone;
+    btn.textContent = '✓ Mark done';
+    btn.classList.remove('is-done');
+    btn.disabled = sum.totalSets === 0;
     btn.style.opacity = btn.disabled ? '0.4' : '';
   }
 
+  // Lists every CLOSED session, newest first — one card per session, so two
+  // workouts on the same day stay visually separate (never merged by date).
   function renderPastWorkouts() {
-    const todayKey = wtDateKey(new Date());
-    const all = logsByDay();
-    const past = Object.entries(all)
-      .filter(([dk]) => dk !== todayKey)
-      .sort((a, b) => b[0].localeCompare(a[0]));
+    const u = state.units;
+    const past = (state.sessions || [])
+      .filter(s => s.endedAt)
+      .slice()
+      .sort((a, b) => (b.endedAt || b.startedAt || '').localeCompare(a.endedAt || a.startedAt || ''));
     $('poTwPastCount').textContent = past.length;
     const body = $('poTwPastBody');
     if (!past.length) {
-      body.innerHTML = '<div class="po-tw-past-empty">No past workouts yet.</div>';
+      body.innerHTML = '<div class="po-tw-past-empty">No past sessions yet.</div>';
       return;
     }
-    const u = state.units;
-    body.innerHTML = past.slice(0, 30).map(([dk, sets]) => {
-      const sum = summarizeDay(sets);
-      const isDone = !!doneDays[dk];
+    body.innerHTML = past.slice(0, 40).map(sess => {
+      const sum = summarizeSession(sess);
+      const dk = (sess.endedAt || sess.startedAt || '').slice(0, 10);
       const exNames = sum.perEx.map(e => e.ex.name).slice(0, 3).join(', ')
         + (sum.perEx.length > 3 ? '…' : '');
       return '<div class="po-tw-past-day">'
         + '<div class="po-tw-past-day-h">'
-        +   '<span class="po-tw-past-day-date">' + fmtPastDate(dk) + '</span>'
+        +   '<span class="po-tw-past-day-date">' + escape(sess.label || 'Workout') + ' · ' + fmtPastDate(dk) + '</span>'
         +   '<span class="po-tw-past-day-summary">'
         +     sum.totalSets + ' sets · ' + Math.round(sum.totalVol).toLocaleString() + ' ' + u
-        +     (isDone ? ' <span class="po-tw-past-day-done">DONE</span>' : '')
+        +     ' <span class="po-tw-past-day-done">DONE</span>'
         +   '</span>'
         + '</div>'
         + '<div class="po-tw-past-day-summary" style="margin-top:6px; font-size:11px; color:var(--text-3);">'
@@ -667,14 +761,20 @@
     }).join('');
   }
 
+  // Done = close (lock) the active session → it moves to Past workouts and no
+  // further sets can be appended to it.
   $('poTwDoneBtn').addEventListener('click', () => {
-    const todayKey = wtDateKey(new Date());
-    if (doneDays[todayKey]) {
-      delete doneDays[todayKey];
-    } else {
-      doneDays[todayKey] = new Date().toISOString();
-    }
-    saveDoneDays(doneDays);
+    if (!getActiveSession()) return;
+    closeActiveSession();
+    saveState();
+    renderTodaysWorkout();
+    renderPastWorkouts();
+  });
+  // New session = close any open session and start a fresh, empty one, so a
+  // second workout the same day is isolated from the first.
+  $('poTwNewBtn').addEventListener('click', () => {
+    startNewSession();
+    saveState();
     renderTodaysWorkout();
     renderPastWorkouts();
   });
@@ -759,15 +859,19 @@
       w = parseFloat($('weightInput').value);
       if (isNaN(w) || w < 0) { alert('Enter a valid weight (0 or more).'); return; }
     }
-    const arr = state.logs[ex.id] || [];
-    const entry = { weight: w, reps: reps, date: new Date().toISOString() };
-    arr.push(entry);
-    state.logs[ex.id] = arr;
+    // Log into the ACTIVE session (auto-opening one if none is in progress),
+    // then rebuild the derived per-exercise index. Sets never land in a closed
+    // session, so a finished routine can't be appended to.
+    const iso = new Date().toISOString();
+    const sess = ensureActiveSession();
+    sess.sets.push({ exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso });
+    rebuildLogIndex();
     saveState(); renderAll();
     // Write-through to the normalized cloud store (async; queues if offline).
+    // session id rides in metadata so the row carries its session attribution.
     try {
       window.GymCloud && window.GymCloud.pushLog({
-        exId: ex.id, name: ex.name, weight: w, reps: reps, date: entry.date, unit: unit()
+        exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso, unit: unit(), session: sess.id
       });
     } catch (e) {}
     // Tiny pulse on the button so the user feels the save
@@ -1675,22 +1779,40 @@
   // Lets the cloud module hydrate logs pulled from exercise_logs into the
   // coach's in-memory state without coupling the two IIFEs. Merges by date
   // so we never double-count sets the blob cache already restored.
+  // Merge logs pulled from the normalized cloud table into the SESSION model.
+  // The app_state blob already carries sessions canonically across devices, so
+  // this is a gap-filler: any (exId|date) not already present in a session is
+  // attached to its named session (from metadata.session) when known, else to a
+  // per-day import session. Dedup by (exId|date) prevents double-counting.
   window.__gymCoachMergeLogs = function (byExId) {
     if (!byExId || typeof byExId !== 'object') return false;
+    const present = new Set();
+    (state.sessions || []).forEach(s => (s.sets || []).forEach(st => present.add(st.exId + '|' + st.date)));
+    const nameById = {};
+    (state.exercises || []).forEach(e => { if (e && e.id) nameById[e.id] = e.name; });
     let changed = false;
     Object.keys(byExId).forEach(exId => {
-      const incoming = byExId[exId] || [];
-      const arr = state.logs[exId] || [];
-      const seen = new Set(arr.map(l => l.date));
-      incoming.forEach(l => {
-        if (l && l.date && !seen.has(l.date)) { arr.push(l); seen.add(l.date); changed = true; }
+      (byExId[exId] || []).forEach(l => {
+        if (!l || !l.date) return;
+        const key = exId + '|' + l.date;
+        if (present.has(key)) return;        // already have it locally
+        present.add(key);
+        let sid = l.session;
+        let sess = sid ? (state.sessions || []).find(s => s.id === sid) : null;
+        if (!sess) {
+          const day = l.date.slice(0, 10);
+          sid = sid || ('sess_legacy_' + day);
+          sess = (state.sessions || []).find(s => s.id === sid);
+          if (!sess) {
+            sess = { id: sid, label: 'Workout', startedAt: l.date, endedAt: l.date, sets: [] };
+            (state.sessions = state.sessions || []).push(sess);
+          }
+        }
+        sess.sets.push({ exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date });
+        changed = true;
       });
-      if (arr.length) {
-        arr.sort((a, b) => new Date(a.date) - new Date(b.date));
-        state.logs[exId] = arr;
-      }
     });
-    if (changed) { saveState(); renderAll(); }
+    if (changed) { rebuildLogIndex(); saveState(); renderAll(); }
     return changed;
   };
 })();
@@ -2464,7 +2586,9 @@
       weight: (l.weight != null ? l.weight : null),
       reps:   (l.reps   != null ? l.reps   : null),
       timestamp: l.date,
-      metadata: { exId: l.exId, unit: l.unit || null }
+      // session id rides in metadata (jsonb) so no schema migration is required;
+      // an optional dedicated session_id column can be added later for analytics.
+      metadata: { exId: l.exId, unit: l.unit || null, session: l.session || null }
     };
   }
 
@@ -2515,7 +2639,8 @@
         (byExId[exId] = byExId[exId] || []).push({
           weight: row.weight != null ? Number(row.weight) : 0,
           reps:   row.reps   != null ? Number(row.reps)   : 0,
-          date:   row.timestamp
+          date:   row.timestamp,
+          session: (row.metadata && row.metadata.session) || null
         });
       });
       if (window.__gymCoachMergeLogs) window.__gymCoachMergeLogs(byExId);

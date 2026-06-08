@@ -333,10 +333,13 @@ const CONFIG = {
               <span class="po-tw-summary-vol" id="poTwTotalVol">0 kg lifted</span>
             </div>
           </div>
-          <button class="po-tw-done-btn" id="poTwDoneBtn" type="button">Mark workout done</button>
+          <div class="po-tw-actions">
+            <button class="po-tw-new-btn" id="poTwNewBtn" type="button">+ New session</button>
+            <button class="po-tw-done-btn" id="poTwDoneBtn" type="button">Mark done</button>
+          </div>
         </div>
         <ul class="po-tw-list" id="poTwList"></ul>
-        <div class="po-tw-empty" id="poTwEmpty">No sets logged today — log one above and it'll appear here.</div>
+        <div class="po-tw-empty" id="poTwEmpty">No active session — log a set to start one, or tap “New session”.</div>
       </div>
 
       <button type="button" class="po-tw-past-toggle" id="poTwPastToggle" aria-expanded="false">

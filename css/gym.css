@@ -720,6 +720,18 @@ img, video, canvas, svg { max-width: 100%; }
   background: rgba(110,231,183,0.16);
   color: var(--good);
 }
+.po-tw-actions { display: flex; gap: 8px; align-items: center; }
+.po-tw-new-btn {
+  background: rgba(255,255,255,0.06); color: var(--text-2);
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  padding: 9px 14px;
+  font-family: inherit; font-size: 12px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+}
+.po-tw-new-btn:hover { color: var(--text-1); background: rgba(255,255,255,0.1); transform: translateY(-1px); }
+.po-tw-new-btn:active { transform: scale(0.98); }
 .po-tw-list {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-direction: column; gap: 6px;
