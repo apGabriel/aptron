@@ -1070,12 +1070,6 @@
       + '<button class="po-mini-btn" data-action="del" aria-label="Delete">×</button>'
       + '</div>'
     ).join('');
-    $('setDays').innerHTML = state.days.map((d, i) =>
-      '<div class="po-set-row" data-i="' + i + '">'
-      + '<input type="text" value="' + escape(d.name) + '" data-field="name" placeholder="Day name">'
-      + '<button class="po-mini-btn" data-action="del" aria-label="Delete">×</button>'
-      + '</div>'
-    ).join('');
     $('setGyms').querySelectorAll('.po-set-row').forEach(row => {
       const i = parseInt(row.dataset.i, 10);
       row.querySelector('input').addEventListener('input', e => {
@@ -1087,20 +1081,6 @@
         if (!confirm('Remove "' + state.gyms[i].name + '"? Exercises tagged to this gym will become invisible until you reassign them.')) return;
         state.gyms.splice(i, 1);
         if (!state.gyms.find(g => g.id === state.filterGym)) state.filterGym = state.gyms[0].id;
-        saveState(); renderSettings(); renderAll();
-      });
-    });
-    $('setDays').querySelectorAll('.po-set-row').forEach(row => {
-      const i = parseInt(row.dataset.i, 10);
-      row.querySelector('input').addEventListener('input', e => {
-        state.days[i].name = e.target.value;
-        saveState();
-      });
-      row.querySelector('[data-action="del"]').addEventListener('click', () => {
-        if (state.days.length <= 1) { alert('You need at least one day.'); return; }
-        if (!confirm('Remove "' + state.days[i].name + '"?')) return;
-        state.days.splice(i, 1);
-        if (!state.days.find(d => d.id === state.filterDay)) state.filterDay = state.days[0].id;
         saveState(); renderSettings(); renderAll();
       });
     });
@@ -1127,12 +1107,20 @@
     state.gyms.push({ id, name });
     saveState(); renderSettings(); renderAll();
   });
-  $('setAddDay').addEventListener('click', () => {
-    const name = (prompt('New day name:') || '').trim();
-    if (!name) return;
-    const id = 'd_' + Date.now();
-    state.days.push({ id, name });
-    saveState(); renderSettings(); renderAll();
+
+  // Deduplicate History — one-time scrub of the ghost-duplicate sets left by
+  // the old tab-hydration bug. Walks every session's sets, collapses any that
+  // share an (exId | epoch-ms) key down to a single instance, then rebuilds the
+  // derived per-exercise index, persists, and re-renders. Idempotent: running
+  // it on already-clean data removes nothing. Same engine as __gymPurgeGhosts.
+  $('setDedup').addEventListener('click', () => {
+    const removed = dedupSessionSets(state);
+    rebuildLogIndex();
+    saveState();
+    renderAll();
+    alert(removed
+      ? 'Removed ' + removed + ' duplicate set' + (removed === 1 ? '' : 's') + ' from your history.'
+      : 'No duplicate sets found — your history is already clean.');
   });
 
   // Export / Import / Reset
@@ -1158,7 +1146,7 @@
     reader.readAsText(file);
   });
   $('setReset').addEventListener('click', () => {
-    if (!confirm('Delete EVERYTHING (logs, edits, gyms, days)? This cannot be undone.')) return;
+    if (!confirm('Delete EVERYTHING (logs, edits, gyms)? This cannot be undone.')) return;
     localStorage.removeItem(LS_KEY);
     state = loadState();
     $('setModalBg').classList.remove('show');

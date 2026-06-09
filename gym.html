@@ -816,16 +816,11 @@ const CONFIG = {
     </div>
 
     <div class="po-set-section">
-      <h4>Days</h4>
-      <div class="po-set-list" id="setDays"></div>
-      <button class="po-add-row-btn" id="setAddDay">+ Add day</button>
-    </div>
-
-    <div class="po-set-section">
       <h4>Data</h4>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="po-btn-secondary" id="setExport">Export JSON</button>
         <button class="po-btn-secondary" id="setImport">Import JSON</button>
+        <button class="po-btn-secondary" id="setDedup">Deduplicate History</button>
         <button class="po-btn-secondary" id="setReset" style="color:var(--bad);border-color:rgba(255,138,138,0.3)">Reset all</button>
       </div>
       <input type="file" id="setImportFile" accept=".json" style="display:none">
