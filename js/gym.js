@@ -807,8 +807,6 @@
     body.innerHTML = past.slice(0, 40).map(sess => {
       const sum = summarizeSession(sess);
       const dk = (sess.endedAt || sess.startedAt || '').slice(0, 10);
-      const exNames = sum.perEx.map(e => e.ex.name).slice(0, 3).join(', ')
-        + (sum.perEx.length > 3 ? '…' : '');
       return '<div class="po-tw-past-day" data-session="' + escape(sess.id) + '">'
         + '<div class="po-tw-past-day-h">'
         +   '<span class="po-tw-past-day-date">' + escape(sess.label || 'Workout') + ' · ' + fmtPastDate(dk) + '</span>'
@@ -819,9 +817,6 @@
         +     '</span>'
         +     '<button class="po-hist-del po-tw-past-del" type="button" data-del="' + escape(sess.id) + '" aria-label="Delete session" title="Delete this session">×</button>'
         +   '</span>'
-        + '</div>'
-        + '<div class="po-tw-past-day-summary" style="margin-top:6px; font-size:11px; color:var(--text-3);">'
-        +   escape(exNames)
         + '</div>'
         + '</div>';
     }).join('');
@@ -2180,16 +2175,6 @@
       : { weight: 0, reps: DEFAULTS.reps };
   }
 
-  // Normalize a legacy exercise ({ sets: <number>, reps, rest }) into the new
-  // set-array shape, preserving the old set count + rep target where possible.
-  function normalizeSets(it) {
-    if (Array.isArray(it.sets)) return;
-    const count = Math.max(1, parseInt(it.sets, 10) || DEFAULTS.sets);
-    const reps  = parseInt(it.reps, 10) || DEFAULTS.reps;
-    it.sets = Array.from({ length: count }, () => ({ weight: 0, reps }));
-    delete it.reps; delete it.rest;
-  }
-
   function renderRoutine() {
     const list = $('rbRoutineList');
     list.innerHTML = '';
@@ -2198,52 +2183,10 @@
     if ($('rbRoutineName').value !== current.name) $('rbRoutineName').value = current.name;
   }
 
-  // A single numeric set input (weight or reps) with graceful clamping.
-  // opts: { min, max, float } — float allows decimals (weight); integers
-  // otherwise (reps). Out-of-range / empty values snap to the nearest bound
-  // on commit and the sanitized value is written back into the box.
-  function setInput(value, opts, onChange) {
-    opts = opts || {};
-    const min = (opts.min != null) ? opts.min : 0;
-    const max = (opts.max != null) ? opts.max : null;
-    const parse = opts.float ? parseFloat : (v => parseInt(v, 10));
-    const i = document.createElement('input');
-    i.type = 'number'; i.value = value;
-    i.min = String(min); if (max != null) i.max = String(max);
-    i.inputMode = opts.float ? 'decimal' : 'numeric';
-    if (opts.float) i.step = '0.5';
-    const clamp = () => {
-      let n = parse(i.value);
-      if (isNaN(n)) n = min;
-      if (n < min) n = min;
-      if (max != null && n > max) n = max;
-      i.value = String(n);
-      onChange(n);
-    };
-    i.addEventListener('change', clamp);
-    // Stop an over-the-max value from lingering while the user is still typing.
-    if (max != null) {
-      i.addEventListener('input', () => {
-        if (i.value !== '' && parse(i.value) > max) i.value = String(max);
-      });
-    }
-    return i;
-  }
-
   function mini(label, fn, cls) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'rb-mini' + (cls ? ' ' + cls : '');
-    b.textContent = label;
-    b.addEventListener('click', fn);
-    return b;
-  }
-
-  // A pill-style toggle for per-exercise flags (Bodyweight / Completed).
-  function flagChip(label, active, fn) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'rb-flag-chip' + (active ? ' active' : '');
     b.textContent = label;
     b.addEventListener('click', fn);
     return b;
@@ -2268,57 +2211,12 @@
     renderRoutine();
   }
 
-  // One set row: [ Set # ] [ Weight | BW ] [ Reps ] [ × ]
-  // The set number doubles as the Dropset toggle. When the parent exercise is
-  // bodyweight (it.bw) the weight cell becomes a static "BW" pill; when the
-  // exercise is marked complete (it.done) every control in the row is locked.
-  function setRow(it, sIdx) {
-    const s = it.sets[sIdx];
-    const locked = !!it.done;
-    const row = document.createElement('div');
-    row.className = 'rb-set-row' + (s.drop ? ' is-drop' : '');
-
-    // Set number = Dropset toggle (no new column → grid stays backward-compatible).
-    const lbl = document.createElement('button');
-    lbl.type = 'button';
-    lbl.className = 'rb-set-label' + (s.drop ? ' is-drop' : '');
-    lbl.textContent = String(sIdx + 1);
-    lbl.setAttribute('aria-pressed', s.drop ? 'true' : 'false');
-    lbl.title = s.drop ? 'Dropset — tap to clear' : 'Tap to mark this set as a dropset';
-    if (locked) lbl.disabled = true;
-    else lbl.addEventListener('click', () => { s.drop = !s.drop; renderRoutine(); });
-
-    // Weight cell: numeric input, or a static BW pill for bodyweight exercises.
-    let w;
-    if (it.bw) {
-      w = document.createElement('div');
-      w.className = 'rb-bw-pill';
-      w.textContent = 'BW';
-      w.title = 'Bodyweight — counts as 0 toward volume';
-    } else {
-      w = setInput(s.weight, { min: 0, float: true }, v => s.weight = v);
-      if (locked) w.disabled = true;
-    }
-
-    const r = setInput(s.reps, { min: 1, max: 36 }, v => s.reps = v);
-    if (locked) r.disabled = true;
-
-    const del = mini('×', () => {
-      it.sets.splice(sIdx, 1);
-      renderRoutine();
-    }, 'rb-del');
-    del.title = 'Remove set';
-    del.disabled = locked || it.sets.length <= 1; // keep ≥1 set; locked = no edits
-
-    row.append(lbl, w, r, del);
-    return row;
-  }
-
+  // A routine row is now template-only: it identifies the exercise and lets the
+  // user reorder or remove it. Per-set weight/reps/bodyweight live in the live
+  // logging terminal, not here — the builder just owns the exercise lineup.
   function routineRow(it, idx) {
-    normalizeSets(it); // migrate any legacy single-value exercises in place
-
     const li = document.createElement('li');
-    li.className = 'rb-row' + (it.done ? ' is-done' : '');
+    li.className = 'rb-row';
 
     // ── Header: thumbnail, name/muscle, reorder controls ──
     const head = document.createElement('div'); head.className = 'rb-row-head';
@@ -2342,55 +2240,17 @@
 
     head.append(thumb, main, ctr);
 
-    // ── Flags toolbar: Bodyweight + Completion locks ──
-    const flags = document.createElement('div'); flags.className = 'rb-ex-flags';
-    const bwBtn = flagChip(it.bw ? 'BW: on' : 'Bodyweight', !!it.bw, () => {
-      it.bw = !it.bw;
-      // Zero the weights when switching to bodyweight so any volume math
-      // (weight × reps) stays valid and the cells read a clean "BW".
-      if (it.bw) it.sets.forEach((st) => { st.weight = 0; });
-      renderRoutine();
-    });
-    bwBtn.classList.add('rb-flag-bw');
-    bwBtn.title = 'Bodyweight / calisthenics — weight tracked as BW (0 volume)';
-    const doneBtn = flagChip(it.done ? '✓ Completed (locked)' : 'Mark Complete', !!it.done, () => {
-      it.done = !it.done;
-      renderRoutine();
-    });
-    doneBtn.classList.add('rb-flag-done');
-    doneBtn.title = it.done ? 'Unlock to edit sets again' : 'Lock this exercise — no more sets can be added';
-    flags.append(bwBtn, doneBtn);
-
-    // ── Set table: header + one row per set ──
-    const setsWrap = document.createElement('div'); setsWrap.className = 'rb-sets-wrap';
-    const colHead = document.createElement('div'); colHead.className = 'rb-set-head';
-    ['Set', 'Weight', 'Reps', ''].forEach(t => {
-      const sp = document.createElement('span'); sp.textContent = t; colHead.appendChild(sp);
-    });
-    const setList = document.createElement('div'); setList.className = 'rb-sets';
-    it.sets.forEach((s, sIdx) => setList.appendChild(setRow(it, sIdx)));
-    setsWrap.append(colHead, setList);
-
-    // ── Manage buttons: add a set / remove the whole exercise ──
+    // ── Manage: remove the whole exercise from the template ──
     const actions = document.createElement('div'); actions.className = 'rb-ex-actions';
-    const addSet = document.createElement('button');
-    addSet.type = 'button'; addSet.className = 'rb-add-set'; addSet.textContent = '+ Add Set';
-    addSet.disabled = !!it.done; // routine locking: no injecting sets once complete
-    addSet.addEventListener('click', () => {
-      if (it.done) return;                                   // guard: locked exercise
-      if (dupGuard('addset_' + (it.exId || idx))) return;    // guard: double-tap dup
-      it.sets.push(blankSet(it.sets[it.sets.length - 1]));
-      renderRoutine();
-    });
     const removeEx = document.createElement('button');
     removeEx.type = 'button'; removeEx.className = 'rb-remove-ex'; removeEx.textContent = 'Remove Exercise';
     removeEx.addEventListener('click', () => {
       current.exercises.splice(idx, 1);
       renderRoutine(); renderGrid();
     });
-    actions.append(addSet, removeEx);
+    actions.append(removeEx);
 
-    li.append(head, flags, setsWrap, actions);
+    li.append(head, actions);
     return li;
   }
 
