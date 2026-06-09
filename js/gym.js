@@ -102,6 +102,7 @@
       (sess.sets || []).forEach((set) => {
         (idx[set.exId] = idx[set.exId] || []).push({
           weight: set.weight, reps: set.reps, date: set.date, session: sess.id,
+          is_dropset: !!set.is_dropset,
         });
       });
     });
@@ -232,6 +233,15 @@
   function gymName(id) { const g = state.gyms.find(x => x.id === id); return g ? g.name : id; }
   function dayName(id) { const d = state.days.find(x => x.id === id); return d ? d.name : id; }
   function estimate1RM(w, r) { if (r < 2) return w; return w * (1 + r / 30); }
+  // Dropsets are performed under accumulated fatigue at intentionally reduced
+  // load, so they must NOT skew peak-strength tracking (1RM, PR, prescription,
+  // trend). Returns only the "working" sets; falls back to the full list if an
+  // exercise somehow has dropsets only, so peak panels never go blank. Volume
+  // math deliberately ignores this filter — dropsets always count toward total.
+  function workingSets(logs) {
+    const w = (logs || []).filter(l => !l.is_dropset);
+    return w.length ? w : (logs || []);
+  }
   function roundToStep(v, s) { return Math.round(v / s) * s; }
   // ── Routines bridge ──────────────────────────────────────────
   // The exercise list is now driven by the user's saved routines from
@@ -315,6 +325,11 @@
   // upgrade at 8; a 6-12 lifter ALSO hits it at 8 instead of grinding
   // out 12 reps before adding weight.
   function getRx(ex, logs) {
+    if (!logs.length) return null;
+    // Progress only off working sets — a trailing dropset must not be read as
+    // the "last set" or counted in the stuck-streak (its lighter load would
+    // wrongly trigger a deload).
+    logs = workingSets(logs);
     if (!logs.length) return null;
     const last = logs[logs.length - 1];
     const { weight, reps } = last;
@@ -462,7 +477,8 @@
     const logs = ex ? getLogs() : [];
     const bw = ex && ex.bw;
     const u = bw ? 'reps' : unit();
-    const vals = logs
+    // A PR is a peak — dropsets (lighter, fatigued) are excluded.
+    const vals = workingSets(logs)
       .map(l => bw ? Number(l.reps) : Number(l.weight))
       .filter(v => Number.isFinite(v) && v > 0);
     const valHtml = vals.length ? String(Math.max.apply(null, vals)) : '--';
@@ -478,15 +494,17 @@
       $('sessionCount').textContent = '—';
       return;
     }
+    // Peak metrics (1RM + best set) ignore dropsets; the set count is total.
+    const peak = workingSets(logs);
     if (ex.bw) {
-      const br = Math.max.apply(null, logs.map(l => l.reps));
+      const br = Math.max.apply(null, peak.map(l => l.reps));
       $('oneRm').innerHTML = br + '<span class="po-unit">reps</span>';
     } else {
-      const orm = Math.max.apply(null, logs.map(l => estimate1RM(l.weight, l.reps)));
+      const orm = Math.max.apply(null, peak.map(l => estimate1RM(l.weight, l.reps)));
       $('oneRm').innerHTML = Math.round(orm) + '<span class="po-unit">' + unit() + '</span>';
     }
-    let best = logs[0];
-    logs.forEach(l => {
+    let best = peak[0];
+    peak.forEach(l => {
       const cur = ex.bw ? l.reps : estimate1RM(l.weight, l.reps);
       const bestVal = ex.bw ? best.reps : estimate1RM(best.weight, best.reps);
       if (cur > bestVal) best = l;
@@ -498,7 +516,9 @@
     const svg = $('sparkline');
     const empty = $('sparkEmpty');
     const ex = getCurrentEx();
-    const logs = ex ? getLogs().slice(-10) : [];
+    // Strength trend tracks working sets only, so a dropset chain doesn't
+    // sawtooth the line downward.
+    const logs = ex ? workingSets(getLogs()).slice(-10) : [];
     if (logs.length < 2) {
       svg.style.display = 'none'; empty.style.display = 'block';
       return;
@@ -586,9 +606,12 @@
       const d = new Date(l.date);
       const dStr = (d.getMonth() + 1) + '/' + d.getDate();
       const setStr = ex.bw ? (l.reps + ' reps') : (l.weight + unit() + ' × ' + l.reps);
-      return '<div class="po-hist-row">'
-        + '<div class="po-hist-date">' + dStr + '</div>'
-        + '<div class="po-hist-set">' + setStr + '</div>'
+      // Dropsets chain off the working set above: drop the date column and
+      // prefix a ↳ DS tag so the row reads as a continuation, not a fresh set.
+      const ds = !!l.is_dropset;
+      return '<div class="po-hist-row' + (ds ? ' is-dropset' : '') + '">'
+        + '<div class="po-hist-date">' + (ds ? '' : dStr) + '</div>'
+        + '<div class="po-hist-set">' + (ds ? '<span class="po-ds-tag">↳ DS</span>' : '') + setStr + '</div>'
         + '<button class="po-hist-del" data-idx="' + idx + '" aria-label="Delete">×</button>'
         + '</div>';
     }).join('');
@@ -708,6 +731,23 @@
   }
 
   // Render one exercise summary row from a summarizeSession() perEx entry.
+  // Per-set breakdown for one exercise. Working sets get a "Set N" label;
+  // dropsets render indented beneath the preceding set with a ↳ DS tag, so a
+  // heavy→light chain (e.g. 75 → 60 → 42 kg) reads as one fatigue block.
+  function setLinesHtml(e, u) {
+    let n = 0;
+    const lines = e.sets.map(s => {
+      const val = e.ex.bw ? (s.reps + ' reps') : (s.weight + u + ' × ' + s.reps);
+      if (s.is_dropset) {
+        return '<li class="po-tw-set is-drop"><span class="po-ds-tag">↳ DS</span>'
+          + '<span class="po-tw-set-val">' + val + '</span></li>';
+      }
+      n++;
+      return '<li class="po-tw-set"><span class="po-set-n">Set ' + n + '</span>'
+        + '<span class="po-tw-set-val">' + val + '</span></li>';
+    });
+    return '<ul class="po-tw-sets">' + lines.join('') + '</ul>';
+  }
   function twRowHtml(e, u) {
     const top = e.ex.bw
       ? 'top ' + Math.max.apply(null, e.sets.map(s => s.reps)) + ' reps'
@@ -716,8 +756,11 @@
       ? (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top)
       : (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top + ' · ' + Math.round(e.vol) + u + ' total');
     return '<li class="po-tw-row">'
-      + '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
-      + '<span class="po-tw-row-meta">' + meta + '</span>'
+      + '<div class="po-tw-row-head">'
+      +   '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
+      +   '<span class="po-tw-row-meta">' + meta + '</span>'
+      + '</div>'
+      + setLinesHtml(e, u)
       + '</li>';
   }
 
@@ -917,6 +960,19 @@
     const v = $('repsInput').value;
     if (v !== '' && parseInt(v, 10) > REP_MAX) $('repsInput').value = String(REP_MAX);
   });
+  // Dropset arming: when ON, the NEXT logged set is tagged is_dropset and
+  // chains onto the working set above it. Auto-disarms after each log so it
+  // never silently sticks across sets.
+  let dsArmed = false;
+  function setDropArmed(on) {
+    dsArmed = !!on;
+    const t = $('dsToggle');
+    if (!t) return;
+    t.classList.toggle('active', dsArmed);
+    t.setAttribute('aria-pressed', dsArmed ? 'true' : 'false');
+  }
+  if ($('dsToggle')) $('dsToggle').addEventListener('click', () => setDropArmed(!dsArmed));
+
   $('logBtn').addEventListener('click', () => {
     const ex = getCurrentEx();
     if (!ex) return;
@@ -936,15 +992,20 @@
     // then rebuild the derived per-exercise index. Sets never land in a closed
     // session, so a finished routine can't be appended to.
     const iso = new Date().toISOString();
+    const isDrop = dsArmed;
     const sess = ensureActiveSession();
-    sess.sets.push({ exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso });
+    const setObj = { exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso };
+    if (isDrop) setObj.is_dropset = true;
+    sess.sets.push(setObj);
     rebuildLogIndex();
+    // Disarm before re-render so the toggle never carries into the next set.
+    setDropArmed(false);
     saveState(); renderAll();
     // Write-through to the normalized cloud store (async; queues if offline).
     // session id rides in metadata so the row carries its session attribution.
     try {
       window.GymCloud && window.GymCloud.pushLog({
-        exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso, unit: unit(), session: sess.id
+        exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso, unit: unit(), session: sess.id, is_dropset: isDrop
       });
     } catch (e) {}
     // Tiny pulse on the button so the user feels the save
@@ -1907,7 +1968,7 @@
             (state.sessions = state.sessions || []).push(sess);
           }
         }
-        sess.sets.push({ exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date });
+        sess.sets.push({ exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date, is_dropset: !!l.is_dropset });
         changed = true;
       });
     });
@@ -2552,7 +2613,7 @@
       timestamp: l.date,
       // session id rides in metadata (jsonb) so no schema migration is required;
       // an optional dedicated session_id column can be added later for analytics.
-      metadata: { exId: l.exId, unit: l.unit || null, session: l.session || null }
+      metadata: { exId: l.exId, unit: l.unit || null, session: l.session || null, is_dropset: !!l.is_dropset }
     };
   }
 
@@ -2604,7 +2665,8 @@
           weight: row.weight != null ? Number(row.weight) : 0,
           reps:   row.reps   != null ? Number(row.reps)   : 0,
           date:   row.timestamp,
-          session: (row.metadata && row.metadata.session) || null
+          session: (row.metadata && row.metadata.session) || null,
+          is_dropset: !!(row.metadata && row.metadata.is_dropset)
         });
       });
       if (window.__gymCoachMergeLogs) window.__gymCoachMergeLogs(byExId);

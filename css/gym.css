@@ -333,6 +333,23 @@ img, video, canvas, svg { max-width: 100%; }
 .po-btn-primary:active { transform: translateY(0) scale(0.98); }
 .po-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
 
+/* Log-set action row: dropset toggle + primary Log button side by side */
+.po-log-actions { display: flex; gap: 8px; align-items: stretch; }
+.po-log-actions .po-btn-primary { flex: 1; width: auto; }
+.po-ds-toggle {
+  flex: 0 0 auto; min-width: 52px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(255,255,255,0.04); color: var(--text-3);
+  font-family: inherit; font-size: 13px; font-weight: 800; letter-spacing: 0.04em;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.po-ds-toggle:hover { color: var(--text-1); border-color: var(--border-strong); }
+.po-ds-toggle.active {
+  color: #0a0a0b; background: var(--warn); border-color: var(--warn);
+  box-shadow: 0 0 0 1px var(--warn) inset;
+}
+
 .po-btn-secondary {
   padding: 12px 18px;
   border: 1px solid var(--border);
@@ -472,6 +489,10 @@ img, video, canvas, svg { max-width: 100%; }
 .po-hist-row:last-child { border-bottom: none; }
 .po-hist-date { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
 .po-hist-set { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.po-hist-set .po-ds-tag { margin-right: 6px; }
+/* Dropset history rows read as a continuation of the set above them */
+.po-hist-row.is-dropset { border-bottom: none; padding-top: 2px; padding-bottom: 6px; }
+.po-hist-row.is-dropset .po-hist-set { margin-left: 8px; font-size: 13px; color: var(--warn); }
 .po-hist-del {
   background: transparent; border: none; color: var(--text-4);
   font-size: 16px; cursor: pointer; padding: 4px 8px;
@@ -737,18 +758,39 @@ img, video, canvas, svg { max-width: 100%; }
   display: flex; flex-direction: column; gap: 6px;
 }
 .po-tw-row {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; flex-direction: column; gap: 8px;
   padding: 10px 12px;
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 13px;
 }
+.po-tw-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .po-tw-row-name { font-weight: 600; color: var(--text-1); }
 .po-tw-row-meta {
   font-size: 11px; color: var(--text-3);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+/* Per-set breakdown (chained dropsets) */
+.po-tw-sets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.po-tw-set {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12px; color: var(--text-2);
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.po-tw-set .po-set-n { color: var(--text-4); min-width: 42px; }
+.po-tw-set-val { font-weight: 700; color: var(--text-1); }
+/* Dropset rows sit indented under the working set, joined by a left rail */
+.po-tw-set.is-drop {
+  margin-left: 10px; padding-left: 10px;
+  border-left: 2px solid rgba(251,191,36,0.45);
+}
+.po-tw-set.is-drop .po-tw-set-val { color: var(--warn); font-weight: 700; }
+/* Shared ↳ DS tag (active terminal + history) */
+.po-ds-tag {
+  color: var(--warn); font-weight: 800; font-size: 10px;
+  letter-spacing: 0.04em; white-space: nowrap;
 }
 .po-tw-empty {
   text-align: center; padding: 14px 0;
