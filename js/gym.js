@@ -69,6 +69,9 @@
     // Auto-cleanup: drop empty CLOSED (ghost) sessions left by testing or
     // abandoned starts. Active (open) sessions are always kept, even at 0 sets.
     s.sessions = (s.sessions || []).filter(sess => !sess.endedAt || (sess.sets && sess.sets.length > 0));
+    // Purge ghost-duplicate sets (legacy artifacts of the pre-fix merge bug)
+    // BEFORE deriving the index, so charts/history rebuild from clean data.
+    s.__ghostsPurged = dedupSessionSets(s);
     s.logs = buildLogIndex(s);   // logs is now a derived view of session sets
     return s;
   }
@@ -106,6 +109,34 @@
     return idx;
   }
   function rebuildLogIndex() { state.logs = buildLogIndex(state); }
+
+  // Canonical identity for a logged set: exId + the set's instant normalized to
+  // epoch-ms, so "...789Z" and "...789+00:00" (the same instant in different
+  // string forms) collapse to one key. Hoisted (function decl) so it's callable
+  // from boot — the merge layer's logKey const lives lower in the IIFE and is in
+  // the temporal dead zone at load time.
+  function logSetKey(exId, date) {
+    const t = Date.parse(date);
+    return exId + '|' + (Number.isNaN(t) ? String(date) : String(t));
+  }
+  // One-time cleanup of ghost duplicates baked in before the merge-dedup fix:
+  // within EACH session, keep the first set of any (exId | epoch-ms) and drop the
+  // rest. Returns how many were removed. Idempotent — safe to run on every load,
+  // which also scrubs old duplicates that sync in from another device's blob.
+  function dedupSessionSets(s) {
+    let removed = 0;
+    (s.sessions || []).forEach((sess) => {
+      if (!Array.isArray(sess.sets)) return;
+      const seen = new Set();
+      sess.sets = sess.sets.filter((st) => {
+        const k = logSetKey(st.exId, st.date);
+        if (seen.has(k)) { removed++; return false; }
+        seen.add(k);
+        return true;
+      });
+    });
+    return removed;
+  }
 
   // One-time migration: fold any pre-existing flat logs into one CLOSED session
   // per calendar day, so historical data survives the model switch and shows up
@@ -1597,6 +1628,22 @@
   // ============================================================
   // BOOT
   // ============================================================
+  // normalize() already scrubbed ghost-duplicate sets in memory on load; if it
+  // dropped any, persist the cleaned state once so the purge is durable.
+  if (state.__ghostsPurged) {
+    console.info('[gym] Purged ' + state.__ghostsPurged + ' ghost-duplicate set(s).');
+    delete state.__ghostsPurged;
+    saveState();
+  }
+  // Manual re-run (e.g. after an old blob syncs in from another device):
+  // call window.__gymPurgeGhosts() from the console.
+  window.__gymPurgeGhosts = function () {
+    const removed = dedupSessionSets(state);
+    rebuildLogIndex();
+    saveState();
+    renderAll();
+    return removed;
+  };
   renderAll();
   photosRender();
 
@@ -1831,17 +1878,27 @@
   // this is a gap-filler: any (exId|date) not already present in a session is
   // attached to its named session (from metadata.session) when known, else to a
   // per-day import session. Dedup by (exId|date) prevents double-counting.
+  // Dedup must survive the date-string round-trip through Postgres: a set logged
+  // locally as "...789Z" comes back from the cloud as "...789+00:00", so a raw
+  // string compare misses and re-imports the set as a duplicate ghost on every
+  // pull (including the visibilitychange re-pull fired when you navigate back to
+  // the tab). Normalize both sides to epoch-ms so the same instant collapses to
+  // one key regardless of how the offset/precision is formatted.
+  const logKey = (exId, date) => {
+    const t = Date.parse(date);
+    return exId + '|' + (Number.isNaN(t) ? String(date) : String(t));
+  };
   window.__gymCoachMergeLogs = function (byExId) {
     if (!byExId || typeof byExId !== 'object') return false;
     const present = new Set();
-    (state.sessions || []).forEach(s => (s.sets || []).forEach(st => present.add(st.exId + '|' + st.date)));
+    (state.sessions || []).forEach(s => (s.sets || []).forEach(st => present.add(logKey(st.exId, st.date))));
     const nameById = {};
     (state.exercises || []).forEach(e => { if (e && e.id) nameById[e.id] = e.name; });
     let changed = false;
     Object.keys(byExId).forEach(exId => {
       (byExId[exId] || []).forEach(l => {
         if (!l || !l.date) return;
-        const key = exId + '|' + l.date;
+        const key = logKey(exId, l.date);
         if (present.has(key)) return;        // already have it locally
         present.add(key);
         let sid = l.session;
