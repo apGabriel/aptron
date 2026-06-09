@@ -99,29 +99,6 @@ img, video, canvas, svg { max-width: 100%; }
   justify-content: center;
 }
 .tab-icon svg { width: 100%; height: 100%; display: block; }
-.po-day-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
-  text-transform: uppercase;
-  cursor: pointer; margin-bottom: 10px;
-  transition: background 0.18s, border-color 0.18s, color 0.18s;
-  -webkit-tap-highlight-color: transparent;
-}
-.po-day-pill:hover {
-  background: rgba(255,255,255,0.07);
-  border-color: var(--border-strong);
-  color: var(--text-1);
-}
-.po-day-date { color: var(--text-2); }
-.po-day-sep { color: var(--text-4); }
-.po-day-split { color: var(--good); font-weight: 800; }
-.po-day-split.is-rest { color: #7DD3FC; }
 
 .po-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -588,55 +565,6 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-add-row-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-1); }
 
-/* Rotation editor list */
-.rot-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.rot-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto auto auto;
-  gap: 6px; align-items: center;
-  padding: 8px 10px;
-  background: rgba(255,255,255,0.025);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  transition: border-color 0.15s, background 0.15s;
-}
-.rot-row.is-today {
-  background: linear-gradient(180deg, rgba(110,231,183,0.10), rgba(255,255,255,0.025));
-  border-color: rgba(110,231,183,0.30);
-}
-.rot-row-num {
-  font-size: 11px; color: var(--text-3);
-  font-family: var(--font-mono); font-weight: 700;
-  width: 18px; text-align: center;
-}
-.rot-row input {
-  background: transparent; border: none; outline: none;
-  color: var(--text-1); font-family: inherit; font-size: 13px;
-  padding: 4px 0; min-width: 0;
-}
-.rot-row .rot-mini {
-  background: transparent; border: none;
-  color: var(--text-3); font-size: 14px;
-  cursor: pointer; padding: 4px 8px;
-  -webkit-tap-highlight-color: transparent;
-}
-.rot-row .rot-mini:hover { color: var(--text-1); }
-.rot-row .rot-mini-del:hover { color: var(--bad); }
-.rot-row .rot-today-tag {
-  font-size: 8px; font-weight: 800; letter-spacing: 0.10em;
-  color: var(--good); padding: 2px 6px; border-radius: 999px;
-  background: rgba(110,231,183,0.16);
-}
-.rot-row .rot-today-btn {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  color: var(--text-3); font-size: 9px; font-weight: 700;
-  letter-spacing: 0.06em; padding: 4px 8px; border-radius: 999px;
-  cursor: pointer; text-transform: uppercase;
-  -webkit-tap-highlight-color: transparent;
-}
-.rot-row .rot-today-btn:hover { color: var(--good); border-color: rgba(110,231,183,0.30); }
-
 @media (max-width: 480px) {
   /* === Mobile / iPhone polish === */
   .po-shell { padding: 14px 10px calc(32px + env(safe-area-inset-bottom)); }
@@ -724,8 +652,6 @@ img, video, canvas, svg { max-width: 100%; }
 .po-tw-summary-label {
   font-size: 12px; color: var(--text-3); font-weight: 500;
 }
-.po-tw-summary-sep { color: var(--text-4); margin: 0 4px; }
-.po-tw-summary-vol { font-size: 13px; color: var(--text-2); font-weight: 500; }
 .po-tw-done-btn {
   background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
   color: #0a0a0b; border: none; border-radius: 999px;

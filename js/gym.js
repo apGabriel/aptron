@@ -39,30 +39,11 @@
     s.filterDay = s.filterDay || s.days[0].id;
     // Selected routine (id from the Routine Builder). Validated at render time.
     if (typeof s.filterRoutine === 'undefined') s.filterRoutine = null;
-    // Split rotation lives in state so the user can edit it via the pill modal.
-    // Stored as a plain array of names (e.g. ["Push", "Pull", "Legs", "Rest"]).
-    if (!Array.isArray(s.splitRotation) || !s.splitRotation.length) {
-      s.splitRotation = (CONFIG.splitRotation || ['Push', 'Pull', 'Legs', 'Rest']).map(x =>
-        // CONFIG used ids — map id → display name where possible
-        (CONFIG.days || []).find(d => d.id === x) ? (CONFIG.days.find(d => d.id === x).name) :
-        (x === 'rest' ? 'Rest' : x.charAt(0).toUpperCase() + x.slice(1))
-      );
-    }
-    if (!s.splitAnchor || !s.splitAnchor.date || s.splitAnchor.index == null) {
-      // Map old anchor-by-id to new anchor-by-index, or default to today=index 0.
-      const oldId = (CONFIG.splitAnchor && CONFIG.splitAnchor.splitId) || null;
-      let idx = 0;
-      if (oldId) {
-        const oldName = (CONFIG.days || []).find(d => d.id === oldId);
-        const targetName = oldName ? oldName.name : (oldId === 'rest' ? 'Rest' : oldId);
-        const found = s.splitRotation.findIndex(n => n.toLowerCase() === targetName.toLowerCase());
-        if (found >= 0) idx = found;
-      }
-      s.splitAnchor = {
-        date: (CONFIG.splitAnchor && CONFIG.splitAnchor.date) || new Date().toISOString().slice(0, 10),
-        index: idx
-      };
-    }
+    // Drop any legacy split-rotation state — the feature was removed. Sessions
+    // are now labelled from the selected routine, so this keeps the serialized
+    // localStorage blob clean instead of carrying dead keys forward.
+    delete s.splitRotation;
+    delete s.splitAnchor;
     // ── Session model ──
     if (typeof s.activeSessionId === 'undefined') s.activeSessionId = null;
     migrateSessions(s);          // build sessions from legacy logs on first run
@@ -166,9 +147,9 @@
     s.activeSessionId = null;
   }
 
-  // Label a new session from the day's split (e.g. "Push") or selected routine.
+  // Label a new session from the currently selected routine (e.g. "Push").
   function currentSessionLabel() {
-    try { const sp = todaySplit(); if (sp && sp.name) return sp.name; } catch (e) {}
+    try { const r = getCurrentRoutine(); if (r && r.name) return r.name; } catch (e) {}
     return 'Workout';
   }
   function getActiveSession() {
@@ -209,15 +190,13 @@
     (sess.sets || []).forEach((set) => {
       const ex = (state.exercises || []).find((e) => e.id === set.exId)
         || { id: set.exId, name: set.name || set.exId, bw: false };
-      if (!byEx[ex.id]) byEx[ex.id] = { ex, sets: [], vol: 0 };
+      if (!byEx[ex.id]) byEx[ex.id] = { ex, sets: [] };
       byEx[ex.id].sets.push(set);
-      byEx[ex.id].vol += (set.weight || 0) * (set.reps || 0);
     });
     const perEx = Object.values(byEx);
     return {
       perEx,
       totalSets: perEx.reduce((a, e) => a + e.sets.length, 0),
-      totalVol: perEx.reduce((a, e) => a + e.vol, 0),
     };
   }
 
@@ -375,8 +354,6 @@
         b.addEventListener('click', () => {
           state.filterRoutine = b.dataset.routine;
           state.currentEx = null;
-          // User has now manually picked a routine — stop auto-overriding to today's split.
-          state._userPickedDay = true;
           saveState(); renderAll();
         });
       });
@@ -637,41 +614,6 @@
       });
     });
   }
-  // Compute today's split from state.splitRotation + state.splitAnchor.
-  // Returns the rotation entry name (e.g. "Push" or "Rest") AND the index.
-  function todaySplit() {
-    try {
-      const rot = state.splitRotation;
-      if (!rot || !rot.length) return { name: '—', index: 0 };
-      const a = new Date(state.splitAnchor.date);
-      const t = new Date();
-      a.setHours(0,0,0,0); t.setHours(0,0,0,0);
-      const diffDays = Math.round((t - a) / 86400000);
-      const idx = ((state.splitAnchor.index + diffDays) % rot.length + rot.length) % rot.length;
-      return { name: rot[idx], index: idx };
-    } catch (e) {
-      return { name: (state.splitRotation && state.splitRotation[0]) || '—', index: 0 };
-    }
-  }
-  function todayDateLabel() {
-    const d = new Date();
-    const dows = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-    const mons = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-    return dows[d.getDay()] + ', ' + mons[d.getMonth()] + ' ' + d.getDate();
-  }
-  function isRestName(name) { return /^rest\b/i.test(name || ''); }
-  function splitLabel(name) {
-    if (!name) return '—';
-    return (isRestName(name) ? 'REST DAY' : (name + ' DAY')).toUpperCase();
-  }
-  function renderDayPill() {
-    const split = todaySplit();
-    $('dayPillDate').textContent = todayDateLabel();
-    const splitEl = $('dayPillSplit');
-    splitEl.textContent = splitLabel(split.name);
-    splitEl.classList.toggle('is-rest', isRestName(split.name));
-  }
-
   // Reps is now a single free-entry numeric box (1–36). On render we seed it
   // with a useful default — the reps from this exercise's last logged set,
   // else 8 — but keep whatever valid value the user has already typed.
@@ -693,7 +635,6 @@
 
   function renderAll() {
     ensureRoutineExercises();
-    renderDayPill();
     renderFilters(); renderSelect(); renderForm(); renderLastSet();
     renderExGif();
     renderRepsRow();
@@ -714,13 +655,9 @@
   //
   // Renders from state.sessions (the session model):
   //  - Current: the ACTIVE (in-progress) session, per exercise, with set count
-  //    + total volume (kg lifted = sum of weight × reps across its sets).
+  //    and the per-exercise breakdown (top weight + reps/weight per row).
   //  - Past: every CLOSED session, newest first — one card per session, so two
   //    workouts on the same day never merge.
-  //
-  // Per-session volume is what the composition-estimate reads (combined with the
-  // 1RM trend) — more weekly volume + strength gain = more of recent body-weight
-  // delta attributed to muscle.
   // ============================================================
   function fmtPastDate(dk) {
     const [y, m, d] = dk.split('-').map(Number);
@@ -738,7 +675,10 @@
     let n = 0;
     const lines = e.sets.map(s => {
       const val = e.ex.bw ? (s.reps + ' reps') : (s.weight + u + ' × ' + s.reps);
-      if (s.is_dropset) {
+      // A dropset only renders as a ↳ DS child once a baseline set anchors it.
+      // A leading dropset (no parent yet — only possible from legacy data) is
+      // promoted to a numbered baseline set so the chain always has an anchor.
+      if (s.is_dropset && n > 0) {
         return '<li class="po-tw-set is-drop"><span class="po-ds-tag">↳ DS</span>'
           + '<span class="po-tw-set-val">' + val + '</span></li>';
       }
@@ -752,9 +692,7 @@
     const top = e.ex.bw
       ? 'top ' + Math.max.apply(null, e.sets.map(s => s.reps)) + ' reps'
       : 'top ' + Math.max.apply(null, e.sets.map(s => s.weight)) + u;
-    const meta = e.ex.bw
-      ? (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top)
-      : (e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top + ' · ' + Math.round(e.vol) + u + ' total');
+    const meta = e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top;
     return '<li class="po-tw-row">'
       + '<div class="po-tw-row-head">'
       +   '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
@@ -780,7 +718,6 @@
     if (!sess) {
       eyebrow.textContent = 'NO ACTIVE SESSION';
       $('poTwSetCount').textContent = '0';
-      $('poTwTotalVol').textContent = '0 ' + u + ' lifted';
       list.innerHTML = '';
       empty.classList.remove('hidden');
       empty.textContent = 'No active session — log a set to start one, or tap “New session”.';
@@ -795,7 +732,6 @@
     eyebrow.textContent = (sess.label ? escape(sess.label.toUpperCase()) + ' · ' : '')
       + 'IN PROGRESS · ' + dows[d.getDay()] + ' ' + mons[d.getMonth()] + ' ' + d.getDate();
     $('poTwSetCount').textContent = sum.totalSets;
-    $('poTwTotalVol').textContent = Math.round(sum.totalVol).toLocaleString() + ' ' + u + ' lifted';
 
     if (sum.totalSets === 0) {
       list.innerHTML = '';
@@ -833,7 +769,6 @@
   }
 
   function renderPastWorkouts() {
-    const u = state.units;
     // Only CLOSED sessions that actually hold ≥1 set — empty "ghost" sessions
     // (abandoned starts / old test data) are filtered out so the list stays
     // meaningful. (normalize() also prunes them from state on load.)
@@ -855,7 +790,7 @@
         +   '<span class="po-tw-past-day-date">' + escape(sess.label || 'Workout') + ' · ' + fmtPastDate(dk) + '</span>'
         +   '<span class="po-tw-past-day-right">'
         +     '<span class="po-tw-past-day-summary">'
-        +       sum.totalSets + ' sets · ' + Math.round(sum.totalVol).toLocaleString() + ' ' + u
+        +       sum.totalSets + ' sets'
         +       ' <span class="po-tw-past-day-done">DONE</span>'
         +     '</span>'
         +     '<button class="po-hist-del po-tw-past-del" type="button" data-del="' + escape(sess.id) + '" aria-label="Delete session" title="Delete this session">×</button>'
@@ -906,23 +841,6 @@
   // ============================================================
   // EVENT WIRING
   // ============================================================
-  // Tap the day pill → opens the rotation editor so you can rename /
-  // reorder / add / delete entries (e.g. switch Push/Pull/Legs/Rest to
-  // Legs/Arms/Back/Chest). Long-press isn't a thing on web reliably so
-  // this is the only action — the day filter still auto-snaps on load.
-  $('dayPill').addEventListener('click', () => openRotationModal());
-
-  // First-load nicety: if today's split name appears in one of the saved
-  // routine names (case-insensitive) and the user hasn't manually picked
-  // one, pre-select that routine.
-  (function autoSelectTodayRoutine() {
-    const s = todaySplit();
-    if (!s.name || isRestName(s.name) || state._userPickedDay) return;
-    const routines = getRoutines();
-    const match = routines.find(r => (r.name || '').toLowerCase().includes(s.name.toLowerCase()));
-    if (match) state.filterRoutine = match.id;
-  })();
-
   // Keep the routine selector live: when the Routine Builder saves / edits /
   // deletes a routine, re-render so the segment control reflects it instantly.
   window.addEventListener('rb:routines-changed', () => { saveState(); renderAll(); });
@@ -962,8 +880,16 @@
   });
   // Dropset arming: when ON, the NEXT logged set is tagged is_dropset and
   // chains onto the working set above it. Auto-disarms after each log so it
-  // never silently sticks across sets.
+  // never silently sticks across sets. A dropset can only ever attach to a
+  // baseline set, so arming it before this exercise has one is ignored (see
+  // the parent-anchor guard in the log handler).
   let dsArmed = false;
+  // True once the exercise already owns a baseline (non-dropset) set in the
+  // active session — the anchor a dropset chains onto. Without one, the next
+  // log must be a numbered baseline set, never a child ↳ DS row.
+  function exerciseHasBaseline(sess, exId) {
+    return !!(sess && (sess.sets || []).some(st => st.exId === exId && !st.is_dropset));
+  }
   function setDropArmed(on) {
     dsArmed = !!on;
     const t = $('dsToggle');
@@ -992,8 +918,11 @@
     // then rebuild the derived per-exercise index. Sets never land in a closed
     // session, so a finished routine can't be appended to.
     const iso = new Date().toISOString();
-    const isDrop = dsArmed;
     const sess = ensureActiveSession();
+    // A dropset only counts if a baseline set already anchors it. Arming DS on
+    // the first set of an exercise falls back to a normal baseline (Set 1), so
+    // a chain can never start with an orphan child row.
+    const isDrop = dsArmed && exerciseHasBaseline(sess, ex.id);
     const setObj = { exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso };
     if (isDrop) setObj.is_dropset = true;
     sess.sets.push(setObj);
@@ -1125,105 +1054,6 @@
     editingExId = null;
     saveState();
     $('exModalBg').classList.remove('show');
-    renderAll();
-  });
-
-  // ============================================================
-  // ROTATION EDITOR (tap the day pill)
-  // Edit the split cycle in place: rename, reorder, add, delete.
-  // "Today is →" jumps the cycle anchor to any entry, so you can change
-  // both the order AND which day in that order is "today".
-  // ============================================================
-  let rotDraft = null;          // working copy while modal is open
-  let rotDraftTodayIdx = 0;     // which entry IS today in the draft
-
-  function openRotationModal() {
-    rotDraft = (state.splitRotation || []).slice();
-    if (!rotDraft.length) rotDraft = ['Push', 'Pull', 'Legs', 'Rest'];
-    rotDraftTodayIdx = todaySplit().index;
-    if (rotDraftTodayIdx >= rotDraft.length) rotDraftTodayIdx = 0;
-    renderRotList();
-    $('rotModalBg').classList.add('show');
-  }
-
-  function renderRotList() {
-    const list = $('rotList');
-    list.innerHTML = rotDraft.map((name, i) => {
-      const isToday = (i === rotDraftTodayIdx);
-      return '<div class="rot-row ' + (isToday ? 'is-today' : '') + '" data-i="' + i + '">'
-        + '<span class="rot-row-num">' + (i + 1) + '</span>'
-        + '<input type="text" value="' + escape(name) + '" placeholder="e.g. Arms" maxlength="30">'
-        + (isToday
-            ? '<span class="rot-today-tag">TODAY</span>'
-            : '<button type="button" class="rot-today-btn" data-action="today">Today is →</button>')
-        + '<button type="button" class="rot-mini" data-action="up"   aria-label="Move up">↑</button>'
-        + '<button type="button" class="rot-mini" data-action="down" aria-label="Move down">↓</button>'
-        + '<button type="button" class="rot-mini rot-mini-del" data-action="del" aria-label="Delete">×</button>'
-        + '</div>';
-    }).join('');
-    list.querySelectorAll('.rot-row').forEach(row => {
-      const i = parseInt(row.dataset.i, 10);
-      row.querySelector('input').addEventListener('input', e => { rotDraft[i] = e.target.value; });
-      const upBtn = row.querySelector('[data-action="up"]');
-      const dnBtn = row.querySelector('[data-action="down"]');
-      const delBtn = row.querySelector('[data-action="del"]');
-      const todayBtn = row.querySelector('[data-action="today"]');
-      if (upBtn) upBtn.addEventListener('click', () => {
-        if (i === 0) return;
-        [rotDraft[i-1], rotDraft[i]] = [rotDraft[i], rotDraft[i-1]];
-        if (rotDraftTodayIdx === i)   rotDraftTodayIdx = i - 1;
-        else if (rotDraftTodayIdx === i - 1) rotDraftTodayIdx = i;
-        renderRotList();
-      });
-      if (dnBtn) dnBtn.addEventListener('click', () => {
-        if (i >= rotDraft.length - 1) return;
-        [rotDraft[i+1], rotDraft[i]] = [rotDraft[i], rotDraft[i+1]];
-        if (rotDraftTodayIdx === i)   rotDraftTodayIdx = i + 1;
-        else if (rotDraftTodayIdx === i + 1) rotDraftTodayIdx = i;
-        renderRotList();
-      });
-      if (delBtn) delBtn.addEventListener('click', () => {
-        if (rotDraft.length <= 1) { alert('Need at least one day in the cycle.'); return; }
-        rotDraft.splice(i, 1);
-        if (rotDraftTodayIdx >= rotDraft.length) rotDraftTodayIdx = rotDraft.length - 1;
-        else if (i < rotDraftTodayIdx) rotDraftTodayIdx--;
-        renderRotList();
-      });
-      if (todayBtn) todayBtn.addEventListener('click', () => {
-        rotDraftTodayIdx = i;
-        renderRotList();
-      });
-    });
-  }
-
-  $('rotAddBtn').addEventListener('click', () => {
-    rotDraft.push('New day');
-    renderRotList();
-    // Focus the newly added input
-    setTimeout(() => {
-      const inputs = $('rotList').querySelectorAll('input');
-      const last = inputs[inputs.length - 1];
-      if (last) { last.focus(); last.select(); }
-    }, 30);
-  });
-  $('rotCancel').addEventListener('click', () => {
-    $('rotModalBg').classList.remove('show');
-    rotDraft = null;
-  });
-  $('rotSave').addEventListener('click', () => {
-    // Trim + drop empty entries
-    const cleaned = rotDraft.map(s => (s || '').trim()).filter(Boolean);
-    if (!cleaned.length) { alert('Need at least one day in the cycle.'); return; }
-    let newTodayIdx = rotDraftTodayIdx;
-    if (newTodayIdx >= cleaned.length) newTodayIdx = 0;
-    state.splitRotation = cleaned;
-    state.splitAnchor = {
-      date: new Date().toISOString().slice(0, 10),
-      index: newTodayIdx
-    };
-    saveState();
-    $('rotModalBg').classList.remove('show');
-    rotDraft = null;
     renderAll();
   });
 

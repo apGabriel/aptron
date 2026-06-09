@@ -37,20 +37,6 @@ const CONFIG = {
     { id: "legs", name: "Legs" }
   ],
 
-  // Split rotation — the order your training days cycle through. Use day
-  // ids from `days` above, plus "rest" for off-days. The pill at the top
-  // of the app reads this + splitAnchor to compute "what day is today".
-  splitRotation: ["push", "pull", "legs", "rest"],
-
-  // Anchor: pair a real calendar date with which split day fell on it.
-  // The rotation advances from this point. Set `date` to a recent day
-  // when you knew what split you were on, and `splitId` to that day.
-  // Edit this if your split drifts.
-  splitAnchor: {
-    date: "2026-05-12",
-    splitId: "rest"
-  },
-
   // Progression rule: hit this many reps on the top set → coach tells you
   // to add weight next session. Lower this to be more aggressive (e.g. 6),
   // raise it for more volume bias (e.g. 10).
@@ -98,12 +84,6 @@ const CONFIG = {
 <body>
 
 <div class="po-shell">
-  <button class="po-day-pill" type="button" id="dayPill" title="Tap to switch the day filter to today's split">
-    <span class="po-day-date" id="dayPillDate">—</span>
-    <span class="po-day-sep">·</span>
-    <span class="po-day-split" id="dayPillSplit">—</span>
-  </button>
-
   <!-- PROGRESS PHOTOS -->
   <div class="wt-section">
     <button class="wt-progress-link" id="wtProgressLink" type="button" aria-label="Open progress photos">
@@ -321,8 +301,7 @@ const CONFIG = {
 
     <!-- Today's Workout — every set logged today, grouped by exercise.
          "Mark done" stamps the day so the past-workouts list shows it
-         as a completed session. The volume here also feeds the
-         composition estimate at the top of the page. -->
+         as a completed session. -->
     <div class="po-sub-section">
       <div class="po-sub-title">Today's workout</div>
       <div class="po-tw" id="poTw">
@@ -332,8 +311,6 @@ const CONFIG = {
             <div class="po-tw-summary">
               <span class="po-tw-summary-num" id="poTwSetCount">0</span>
               <span class="po-tw-summary-label">sets</span>
-              <span class="po-tw-summary-sep">·</span>
-              <span class="po-tw-summary-vol" id="poTwTotalVol">0 kg lifted</span>
             </div>
           </div>
           <div class="po-tw-actions">
@@ -816,23 +793,6 @@ const CONFIG = {
       <button class="po-btn-primary" id="exModalSave">Save</button>
     </div>
     <span class="po-delete-link" id="exDelete" style="display:none">Delete this exercise</span>
-  </div>
-</div>
-
-<!-- Rotation editor modal -->
-<div class="po-modal-bg" id="rotModalBg">
-  <div class="po-modal">
-    <h3>Edit split rotation</h3>
-    <p style="font-size:12px;color:var(--text-3);margin:-6px 0 14px;line-height:1.45;">
-      Days cycle in this order, repeating forever. Today is whichever entry is highlighted.
-      Use <strong>Today is →</strong> to jump the cycle to a different starting day.
-    </p>
-    <div class="rot-list" id="rotList"></div>
-    <button class="po-add-row-btn" id="rotAddBtn">+ Add day</button>
-    <div class="po-modal-actions">
-      <button class="po-btn-secondary" id="rotCancel">Cancel</button>
-      <button class="po-btn-primary" id="rotSave">Save</button>
-    </div>
   </div>
 </div>
 
