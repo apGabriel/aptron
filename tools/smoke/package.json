@@ -1,0 +1,10 @@
+{
+  "name": "aptron-smoke",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Throwaway Playwright smoke test for gym.html (dev tooling, not part of the app build).",
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}

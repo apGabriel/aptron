@@ -3,3 +3,4 @@ proxy/.env
 node_modules/
 proxy/node_modules/
 CLAUDE.local.md
+tools/smoke/gym-smoke.png
