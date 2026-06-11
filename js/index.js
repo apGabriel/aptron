@@ -884,13 +884,28 @@ window.addEventListener('goals-changed', () => {
     setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
     try {
       const res = await fetch(PROXY + '/api/events?date=' + todayStr(), { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        // Distinguish an expired/revoked Google OAuth token (the proxy answers
+        // HTTP 500 {"error":"invalid_grant"}) from a plain unreachable proxy, so
+        // the banner can tell the user to re-authenticate instead of chasing a
+        // dead server. Body is read defensively — a non-JSON error just falls
+        // through to the generic offline path.
+        let authExpired = false;
+        try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
+        throw Object.assign(new Error('HTTP ' + res.status), { authExpired });
+      }
       const events = await res.json();
       offlineEl.style.display = 'none';
       renderEvents(events);
-    } catch {
+    } catch (err) {
       offlineEl.style.display = 'block';
-      countEl.textContent = 'proxy offline';
+      if (err && err.authExpired) {
+        offlineEl.innerHTML = '⚠ Sesión de Google expirada — <strong>Reautenticar</strong>';
+        countEl.textContent = 'sesión expirada';
+      } else {
+        offlineEl.innerHTML = '⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.';
+        countEl.textContent = 'proxy offline';
+      }
       document.getElementById('calEventList').innerHTML = '';
     }
   }

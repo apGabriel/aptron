@@ -147,6 +147,24 @@ html, body {
 .water-row {
   display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;
 }
+/* The counter doubles as the bottles/glasses toggle. */
+#waterDisplayToggle {
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  user-select: none; border-radius: 12px; outline: none;
+  transition: opacity 0.15s;
+}
+#waterDisplayToggle:hover { opacity: 0.85; }
+#waterDisplayToggle:focus-visible { box-shadow: 0 0 0 2px rgba(110,231,183,0.40); }
+.water-unit-chip {
+  margin-left: auto; align-self: center;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+}
+.water-chip-swap { color: var(--info); font-size: 13px; line-height: 1; }
 .water-num {
   font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
   line-height: 1; font-variant-numeric: tabular-nums;
@@ -186,6 +204,10 @@ html, body {
   color: var(--good); font-weight: 700; letter-spacing: 0.10em;
   text-transform: lowercase;
 }
+
+/* Input-mode toggle (Bottle vs Glass) */
+.water-mode-seg { margin-bottom: 12px; }
+.water-mode-seg button { padding: 11px; font-size: 13px; font-weight: 700; }
 
 /* Action row */
 .water-actions {
@@ -478,9 +500,17 @@ html, body {
 
   <div class="card">
     <div class="water-label" id="waterUnitLabel">BOTTLES DRANK TODAY</div>
-    <div class="water-row">
+    <!-- The counter itself is the toggle: tap to rotate the WHOLE view between
+         bottles and glasses. Purely a unit-of-measure switch — the stored ml is
+         untouched (see rotateDisplayUnit). -->
+    <div class="water-row" id="waterDisplayToggle" role="button" tabindex="0"
+         aria-label="Tap to switch between bottles and glasses" title="Tap to switch bottles / glasses">
       <span class="water-num" id="waterNum">0</span>
       <span class="water-target" id="waterTarget">/ 9</span>
+      <span class="water-unit-chip" id="waterUnitChip" aria-hidden="true">
+        <span class="water-chip-swap">⇄</span>
+        <span id="waterUnitChipLabel">Bottles</span>
+      </span>
     </div>
 
     <div class="water-bar-wrap">
@@ -494,6 +524,13 @@ html, body {
         <span class="water-zone-name">healthy zone</span>
         <span id="waterBarMax">12+</span>
       </div>
+    </div>
+
+    <!-- Input-mode rotation: pick what you're drinking from right now. This is
+         purely an input choice — switching never alters today's stored ml. -->
+    <div class="seg water-mode-seg" id="waterModeSeg" role="group" aria-label="What are you drinking?">
+      <button type="button" data-m="bottle">Bottle</button>
+      <button type="button" data-m="glass">Glass</button>
     </div>
 
     <div class="water-actions">
@@ -551,7 +588,6 @@ html, body {
           <div class="seg" id="setSex">
             <button data-s="m">Male</button>
             <button data-s="f">Female</button>
-            <button data-s="o">Other</button>
           </div>
         </div>
       </div>
@@ -567,12 +603,18 @@ html, body {
         <label>Show water as</label>
         <div class="seg" id="setUnit">
           <button data-u="bottle">Bottles</button>
-          <button data-u="ml">ml</button>
+          <button data-u="glass">Glasses</button>
         </div>
       </div>
-      <div class="field">
-        <label>Bottle size (ml)</label>
-        <input type="number" id="setBottleMl" min="100" max="2000" step="50">
+      <div class="field-row">
+        <div class="field">
+          <label>Bottle size (ml)</label>
+          <input type="number" id="setBottleMl" min="100" max="2000" step="50">
+        </div>
+        <div class="field">
+          <label>Glass size (ml)</label>
+          <input type="number" id="setGlassMl" min="50" max="1000" step="10">
+        </div>
       </div>
     </div>
 
@@ -688,18 +730,55 @@ html, body {
   }
   function normalize(s) {
     s = s || {};
-    s.unit = s.unit || CONFIG.unit || 'bottle';
+    // The main view now shows ONLY bottles or glasses (raw ml was removed as a
+    // display option — it's tedious to track). Coerce any legacy value such as
+    // 'ml' or 'oz' to bottles. Storage stays in ml regardless; this is display.
+    const prevUnit = s.unit;
+    s.unit = (s.unit === 'glass') ? 'glass' : 'bottle';
+    // Persist the coercion at boot (reusing the migration flag) so the stored
+    // blob/sync stop carrying a dead 'ml' display unit. Skips fresh state.
+    if (prevUnit !== undefined && prevUnit !== s.unit) s.__migrated = true;
     s.bottleMl = s.bottleMl || CONFIG.bottleMl || 500;
     s.glassMl  = s.glassMl  || CONFIG.glassMl  || 250;
+    // What each tap logs RIGHT NOW (independent of the display unit).
+    s.inputMode = (s.inputMode === 'glass') ? 'glass' : 'bottle';
     s.weightUnit = s.weightUnit || 'kg';
     s.profile = Object.assign({}, CONFIG.profile, s.profile || {});
+    // The "Other" sex option was removed. It contributed +0 ml (same as female),
+    // so fold any saved 'o' into 'f' to preserve the computed target exactly.
+    if (s.profile.sex === 'o') s.profile.sex = 'f';
     s.caffeineMgPerDay = (s.caffeineMgPerDay != null) ? s.caffeineMgPerDay : (CONFIG.caffeineMgPerDay || 200);
     s.substances = Array.isArray(s.substances) ? s.substances : (CONFIG.defaultSubstances || []);
-    s.logs = (s.logs && typeof s.logs === 'object') ? s.logs : {};  // {YYYY-MM-DD: number_of_servings}
+    s.logs = (s.logs && typeof s.logs === 'object') ? s.logs : {};
+    // ── v1 → v2 migration ──────────────────────────────────────────────
+    // v1 stored logs as a COUNT of servings (bottles); v2 stores the absolute
+    // daily total in ml so bottle/glass logging can be mixed freely. Convert
+    // once using the saved bottle size — the only faithful conversion the old
+    // count-based model allows — then stamp the version so it never re-runs.
+    if (s.v !== 2) {
+      const bMl = s.bottleMl || 500;
+      const out = {};
+      for (const k in s.logs) {
+        const n = Number(s.logs[k]) || 0;
+        if (n > 0) out[k] = Math.round(n * bMl);
+      }
+      s.logs = out;   // logs are now {YYYY-MM-DD: total_ml}
+      s.v = 2;
+      s.__migrated = true;   // transient — tells boot to persist the new shape
+    }
     return s;
   }
   function saveState() {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
+    try {
+      // Never persist the transient migration marker into storage/sync.
+      const { __migrated, ...clean } = state;
+      localStorage.setItem(LS_KEY, JSON.stringify(clean));
+      // Notify the shared topbar (js/topbar.js) so its bubble re-renders in the
+      // active unit immediately. A dedicated event (not 'storage') so the page
+      // doesn't reload its own freshly-saved state. The embedded case also
+      // reaches the parent topbar via the native cross-frame storage event.
+      window.dispatchEvent(new CustomEvent('water:changed'));
+    } catch (e) {}
   }
   let state = loadState();
   $('appTitle').textContent = CONFIG.appTitle || 'Water Coach';
@@ -709,13 +788,17 @@ html, body {
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   }
   function todayKey() { return dateKey(new Date()); }
-  function todayCount() { return state.logs[todayKey()] || 0; }
-  function setTodayCount(n) {
+  // Source of truth for "today" is absolute ml. Servings are only ever a
+  // display/input convenience derived from this number.
+  function todayMl() { return state.logs[todayKey()] || 0; }
+  function setTodayMl(ml) {
     const k = todayKey();
-    if (n <= 0) delete state.logs[k];
-    else state.logs[k] = n;
+    ml = Math.max(0, Math.round(ml));
+    if (ml <= 0) delete state.logs[k];
+    else state.logs[k] = ml;
     saveState();
   }
+  function addMl(delta) { setTodayMl(todayMl() + delta); }
 
   // ============================================================
   // CALCULATOR — daily water target in ml
@@ -742,18 +825,29 @@ html, body {
     };
   }
 
+  // DISPLAY unit (how the big total/target reads) — bottles or glasses only.
+  // The volume of ONE display unit, in ml. The absolute total is always stored
+  // in ml; this only changes how that total is divided up for display.
   function unitVolMl() {
-    if (state.unit === 'bottle') return state.bottleMl || 500;
-    return 1; // ml
+    return state.unit === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
   }
   function unitLabelPlural() {
-    if (state.unit === 'bottle') return 'bottles';
-    return 'ml';
+    return state.unit === 'glass' ? 'glasses' : 'bottles';
   }
-  function unitLabelSingular() {
-    if (state.unit === 'bottle') return 'bottle';
-    return 'ml';
+  function unitLabelTitle() {
+    return state.unit === 'glass' ? 'Glasses' : 'Bottles';
   }
+  // INPUT mode (what one tap adds) — bottle or glass volume, in ml.
+  function inputModeMl() {
+    return state.inputMode === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
+  }
+  function inputModeSingular() {
+    return state.inputMode === 'glass' ? 'glass' : 'bottle';
+  }
+  // Serving count, always to ONE decimal so it reads cleanly during rotation
+  // ("2.0", "1.5", "12.0"). Fractions are intentional — half a bottle / half a
+  // glass stays visible so tracking is accurate but still easy to read.
+  function fmtUnits(n) { return (Number(n) || 0).toFixed(1); }
   function fmtMl(ml) {
     if (ml >= 1000) return (ml / 1000).toFixed(1) + ' L';
     return Math.round(ml) + ' ml';
@@ -771,17 +865,26 @@ html, body {
 
   function renderWater() {
     const calc = computeTargetMl();
-    const targetUnits = Math.ceil(calc.total / unitVolMl());
-    const count = todayCount();
-    const unitName = unitLabelPlural();
+    const targetMl = calc.total;
+    const ml = todayMl();
+    // Convert the absolute ml total into the chosen DISPLAY unit. Bottles can be
+    // fractional now (e.g. 3 bottles + 1 glass → 3.5 bottles); ml stays whole.
+    const display = ml / unitVolMl();
+    // Target in the SAME unit, kept fractional (e.g. 2.5 bottles / 10.0 glasses).
+    // Both numbers are just the stored ml re-divided by the current unit volume,
+    // so rotating units never changes the amount — only how it reads.
+    const targetUnits = targetMl / unitVolMl();
 
-    $('waterUnitLabel').textContent = unitName.toUpperCase() + ' DRANK TODAY';
-    $('waterNum').textContent = count;
-    $('waterTarget').textContent = '/ ' + targetUnits;
-    $('waterPlusLabel').textContent = 'Drank a ' + unitLabelSingular();
+    renderInputMode();
+    $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
+    $('waterUnitChipLabel').textContent = unitLabelTitle();
+    $('waterNum').textContent = fmtUnits(display);
+    // e.g. "/ 2.5 Bottles" — no raw ml anywhere in the main readout.
+    $('waterTarget').textContent = '/ ' + fmtUnits(targetUnits) + ' ' + unitLabelTitle();
 
-    // Progress bar with three zones: low (0-65%), healthy (65-100%), over (100-150%)
-    const pctRaw = (count / targetUnits) * 100;
+    // Progress bar runs on the ml ratio directly, so it's identical regardless
+    // of display unit. Three zones: low (0-65%), healthy (65-100%), over (100%+).
+    const pctRaw = targetMl > 0 ? (ml / targetMl) * 100 : 0;
     const fillPct = Math.min(150, pctRaw) / 1.5;   // bar represents 0-150%
     const fill = $('waterBarFill');
     fill.style.width = fillPct + '%';
@@ -792,20 +895,34 @@ html, body {
     $('waterBarZoneStart').style.left = (65 / 1.5) + '%';
     $('waterBarZoneEnd').style.left   = (100 / 1.5) + '%';
 
-    // Helper text
+    // Helper text — remaining shown in the display unit.
     const helper = $('waterHelper');
-    if (count === 0) { helper.textContent = 'Start the day — first one in.'; helper.classList.remove('good'); }
+    const remaining = fmtUnits(Math.max(0, targetUnits - display));
+    if (ml === 0) { helper.textContent = 'Start the day — first one in.'; helper.classList.remove('good'); }
     else if (pctRaw < 50) { helper.textContent = 'Behind pace — drink one in the next hour.'; helper.classList.remove('good'); }
-    else if (pctRaw < 100) { helper.textContent = (targetUnits - count) + ' to go. Pacing well.'; helper.classList.remove('good'); }
+    else if (pctRaw < 100) { helper.textContent = remaining + ' to go. Pacing well.'; helper.classList.remove('good'); }
     else if (pctRaw < 130) { helper.textContent = '✓ Target hit — top up if you train this evening.'; helper.classList.add('good'); }
     else { helper.textContent = 'Strong — way past target.'; helper.classList.add('good'); }
 
     // Disable minus when at zero
-    $('waterMinusBtn').disabled = count <= 0;
+    $('waterMinusBtn').disabled = ml <= 0;
 
     renderWhy(calc, targetUnits);
     renderHistory();
-    renderSparkline(targetUnits);
+    renderSparkline(targetMl);
+  }
+
+  // Reflect the current input mode on the toggle + the big plus button. Each
+  // button shows its configured volume so the user sees exactly what a tap adds.
+  function renderInputMode() {
+    const seg = $('waterModeSeg');
+    const bBtn = seg.querySelector('[data-m="bottle"]');
+    const gBtn = seg.querySelector('[data-m="glass"]');
+    bBtn.textContent = 'Bottle · ' + (state.bottleMl || 500) + 'ml';
+    gBtn.textContent = 'Glass · ' + (state.glassMl || 250) + 'ml';
+    bBtn.classList.toggle('active', state.inputMode !== 'glass');
+    gBtn.classList.toggle('active', state.inputMode === 'glass');
+    $('waterPlusLabel').textContent = 'Drank a ' + inputModeSingular();
   }
 
   function renderWhy(calc, targetUnits) {
@@ -829,30 +946,32 @@ html, body {
 
   function renderHistory() {
     const list = $('histList');
-    const target = Math.ceil(computeTargetMl().total / unitVolMl());
-    // Last 7 days
+    const targetMl = computeTargetMl().total;
+    const targetUnits = targetMl / unitVolMl();   // fractional, in display unit
+    // Last 7 days — logs hold ml; the displayed count tracks the display unit.
     const days = [];
     for (let i = 6; i >= 1; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const k = dateKey(d);
-      const n = state.logs[k] || 0;
-      days.push({ date: d, key: k, count: n });
+      days.push({ date: d, key: k, ml: state.logs[k] || 0 });
     }
-    list.innerHTML = days.map(({date, count}) => {
+    list.innerHTML = days.map(({date, ml}) => {
       const dows = ['Sun','Mon','Tue','Wed','THU','Fri','Sat'];
       const lbl = dows[date.getDay()] + ' ' + (date.getMonth()+1) + '/' + date.getDate();
-      const pct = Math.min(100, (count / target) * 100);
-      const cls = (count >= target) ? '' : 'miss';
+      const pct = targetMl > 0 ? Math.min(100, (ml / targetMl) * 100) : 0;
+      const cls = (ml >= targetMl) ? '' : 'miss';
       return '<div class="hist-row">'
         + '<span class="hist-date">' + lbl + '</span>'
         + '<div class="hist-bar-wrap"><div class="hist-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div>'
-        + '<span class="hist-count">' + count + '/' + target + '</span>'
+        + '<span class="hist-count">' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
         + '</div>';
     }).join('') || '<div style="text-align:center;font-size:12px;color:var(--text-3);padding:12px 0">No logs yet.</div>';
   }
 
   function renderSparkline(target) {
+    // `target` is in ml; `data` is each day's ml total — the whole chart lives
+    // in ml space so it's unaffected by the display unit.
     const svg = $('sparkSvg');
     const W = 280, H = 70, pad = 4;
     const days = 14;
@@ -886,15 +1005,42 @@ html, body {
   // EVENT WIRING
   // ============================================================
   $('waterPlusBtn').addEventListener('click', () => {
-    setTodayCount(todayCount() + 1);
+    addMl(inputModeMl());          // +bottle or +glass, in absolute ml
     renderWater();
     const btn = $('waterPlusBtn');
     btn.style.transform = 'scale(0.97)';
     setTimeout(() => { btn.style.transform = ''; }, 120);
   });
   $('waterMinusBtn').addEventListener('click', () => {
-    setTodayCount(Math.max(0, todayCount() - 1));
+    addMl(-inputModeMl());         // undo one of whatever mode is selected
     renderWater();
+  });
+
+  // Input-mode rotation (Bottle ⇄ Glass). Changes only what a tap adds — it
+  // never touches today's stored ml, so progress is preserved across switches.
+  $('waterModeSeg').querySelectorAll('button').forEach(b => {
+    b.addEventListener('click', () => {
+      state.inputMode = b.dataset.m === 'glass' ? 'glass' : 'bottle';
+      saveState();
+      renderInputMode();
+    });
+  });
+
+  // DISPLAY rotation — tapping the counter flips the whole view bottles ⇄
+  // glasses. This is strictly a unit-of-measure switch: the absolute ml total is
+  // never read or rewritten here, so nothing is converted in storage and sync
+  // stays byte-identical. The next renderWater() just re-divides the same ml by
+  // the new unit volume.
+  function rotateDisplayUnit() {
+    state.unit = (state.unit === 'bottle') ? 'glass' : 'bottle';
+    saveState();         // persists ONLY the chosen unit; logs are unchanged
+    renderWater();       // re-derives bottles/glasses from the stored ml
+    setSegActive('setUnit', state.unit);   // keep the settings seg in lockstep
+  }
+  $('waterDisplayToggle').addEventListener('click', rotateDisplayUnit);
+  // Keyboard access (the toggle is a role="button" div, not a native button).
+  $('waterDisplayToggle').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); rotateDisplayUnit(); }
   });
 
   $('whyToggle').addEventListener('click', () => {
@@ -913,6 +1059,7 @@ html, body {
     $('setActivity').value = state.profile.activityHrsPerWeek;
     $('setCaffeine').value = state.caffeineMgPerDay;
     $('setBottleMl').value = state.bottleMl;
+    $('setGlassMl').value = state.glassMl;
 
     setSegActive('setUnit', state.unit);
     setSegActive('setWeightUnit', state.weightUnit);
@@ -940,7 +1087,7 @@ html, body {
   bindSeg('setWeightUnit', 'u', (v) => { state.weightUnit = v; saveState(); renderWater(); });
   bindSeg('setSex', 's', (v) => { state.profile.sex = v; saveState(); renderWater(); });
 
-  ['setWeight','setAge','setActivity','setCaffeine','setBottleMl'].forEach(id => {
+  ['setWeight','setAge','setActivity','setCaffeine','setBottleMl','setGlassMl'].forEach(id => {
     $(id).addEventListener('input', () => {
       const v = parseFloat($(id).value);
       if (id === 'setWeight') state.profile.weightKg = v || 0;
@@ -948,6 +1095,7 @@ html, body {
       else if (id === 'setActivity') state.profile.activityHrsPerWeek = v || 0;
       else if (id === 'setCaffeine') state.caffeineMgPerDay = v || 0;
       else if (id === 'setBottleMl') state.bottleMl = v || 500;
+      else if (id === 'setGlassMl') state.glassMl = v || 250;
       saveState(); renderWater();
     });
   });
@@ -1075,7 +1223,21 @@ html, body {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  // BOOT
+  // Absorb EXTERNAL writes to our key — the shared topbar's "+" button, the
+  // cloud-sync apply, or another tab/frame — by reloading state and re-rendering
+  // so the page never clobbers a change it didn't make. Guarded to our own key
+  // (manual same-document dispatches carry a null key and still pass). Our own
+  // saveState fires 'water:changed' instead, so this never self-triggers.
+  window.addEventListener('storage', (e) => {
+    if (e.key && e.key !== LS_KEY) return;
+    state = loadState();
+    renderAll();
+  });
+
+  // BOOT — if loadState migrated v1→v2 in memory, persist the new ml-based
+  // shape once now so localStorage (and therefore cloud sync) carries it even
+  // if the user never taps anything this session.
+  if (state.__migrated) { delete state.__migrated; saveState(); }
   renderAll();
 })();
 </script>

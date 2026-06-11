@@ -212,12 +212,27 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
       String(d.getMonth() + 1).padStart(2, '0') + '-' +
       String(d.getDate()).padStart(2, '0');
   }
+  // Volume of one display unit, in ml. The water app stores everything in ml
+  // and shows progress strictly in bottles or glasses (raw ml was removed), so
+  // the topbar mirrors that: any legacy 'ml'/'oz' unit reads as bottles.
+  function unitVolMlFor(state) {
+    return state.unit === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
+  }
+  // Compact serving number for the small bubble: ≤1 decimal with a trailing
+  // ".0" trimmed, so it stays tidy — bottles "1.6", glasses "8" / "8.5" / "12".
+  function fmtUnit(n) {
+    const r = Math.round((Number(n) || 0) * 10) / 10;
+    return Number.isInteger(r) ? String(r) : r.toFixed(1);
+  }
+  // Returns today's progress already CONVERTED into the active display unit
+  // (bottles or glasses) — never raw ml. Both values are fractional so the
+  // bubble matches the main panel exactly (e.g. 1.6 / 2.4).
   function getWaterProgress() {
     let state = null;
     try { state = JSON.parse(localStorage.getItem('po_water_v1')); } catch (e) {}
-    if (!state) return { done: 0, total: 0 };
+    if (!state) return { unit: 'bottle', done: 0, total: 0 };
     const todayKey = calendarDateKey();
-    const done = (state.logs || {})[todayKey] || 0;
+    const doneMl = (state.logs || {})[todayKey] || 0;   // logs are absolute ml
     const p = state.profile || { weightKg: 75 };
     const wKg = state.weightUnit === 'lb' ? (p.weightKg || 0) / 2.20462 : (p.weightKg || 0);
     const base = wKg * 35;
@@ -231,16 +246,13 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     if (p.sex === 'm') adjust += 200;
     if ((p.age || 0) >= 50) adjust += 100;
     const totalMl = base + exercise + caffeine + subs + adjust;
-    let unitVol;
-    if (state.unit === 'glass') unitVol = state.glassMl || 250;
-    else if (state.unit === 'oz') unitVol = 30;
-    else if (state.unit === 'ml') unitVol = 1;
-    else unitVol = state.bottleMl || 500;
-    const total = Math.max(1, Math.ceil(totalMl / unitVol));
-    return { done, total };
+    const unitVol = unitVolMlFor(state);
+    const unit = state.unit === 'glass' ? 'glass' : 'bottle';
+    // Divide the SAME stored ml by the unit volume → progress in the chosen unit.
+    return { unit, done: doneMl / unitVol, total: totalMl / unitVol };
   }
   function classifyStatus(done, total) {
-    if (total === 0) return 'idle';
+    if (total <= 0) return 'idle';
     if (done >= total) return 'good';
     if (done >= total * 0.5) return 'warn';
     const h = new Date().getHours();
@@ -256,16 +268,33 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     if (!waterEl) return;
     const w = getWaterProgress();
     const countEl = document.getElementById('topbarWaterCount');
-    if (countEl) countEl.textContent = w.total ? w.done + '/' + w.total : '0/0';
+    // Mirror the main panel: "<done>/<target>" in the active unit, no ml.
+    if (countEl) countEl.textContent = w.total > 0 ? (fmtUnit(w.done) + '/' + fmtUnit(w.total)) : '0/0';
     setPillStatus(waterEl, classifyStatus(w.done, w.total));
   }
 
   function defaultWaterState() {
     return {
-      unit: 'bottle', bottleMl: 500, glassMl: 250, weightUnit: 'kg',
+      v: 2, unit: 'bottle', inputMode: 'bottle', bottleMl: 500, glassMl: 250, weightUnit: 'kg',
       profile: { weightKg: 75, age: 25, sex: 'm', activityHrsPerWeek: 5 },
       caffeineMgPerDay: 200, substances: [], logs: {}
     };
+  }
+  // Keep topbar writes compatible with the water app's ml store. If we ever meet
+  // a pre-v2 (count-based) blob, convert it the same way the app's normalize()
+  // does, so the + button can't corrupt data by appending ml to a serving count.
+  function ensureWaterV2(state) {
+    if (state.v === 2) return;
+    const bMl = state.bottleMl || 500;
+    const out = {};
+    for (const key in (state.logs || {})) {
+      const n = Number(state.logs[key]) || 0;
+      if (n > 0) out[key] = Math.round(n * bMl);
+    }
+    state.logs = out;
+    if (state.profile && state.profile.sex === 'o') state.profile.sex = 'f';
+    state.unit = state.unit === 'glass' ? 'glass' : 'bottle';
+    state.v = 2;
   }
   async function pushWaterMergedToSupabase(localWater) {
     if (window.location.pathname.endsWith('/health.html') ||
@@ -288,11 +317,19 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     let state = null;
     try { state = JSON.parse(localStorage.getItem('po_water_v1')); } catch (e) {}
     if (!state || typeof state !== 'object') state = defaultWaterState();
+    ensureWaterV2(state);
     state.logs = state.logs || {};
     const k = calendarDateKey();
-    state.logs[k] = (state.logs[k] || 0) + 1;
+    // Add one serving's worth of ml (matching the app's input mode), NOT "+1",
+    // since logs are absolute ml now.
+    const addMl = state.inputMode === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
+    state.logs[k] = Math.max(0, Math.round((state.logs[k] || 0) + addMl));
     try { localStorage.setItem('po_water_v1', JSON.stringify(state)); } catch (e) {}
     render();
+    // Tell same-document listeners (the water panel) to reload, so it picks up
+    // this add instead of overwriting it on its next action. Cross-frame docs
+    // get this natively from the localStorage write above.
+    try { window.dispatchEvent(new Event('storage')); } catch (e) {}
     const btn = document.getElementById('topbarWaterAdd');
     if (btn) { btn.classList.add('flash'); setTimeout(() => btn.classList.remove('flash'), 220); }
     pushWaterMergedToSupabase(state);
@@ -335,6 +372,9 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     lockGestures();
     startModalLock();
     window.addEventListener('storage', render);
+    // The water panel fires this on every local change (unit toggle, log, etc.)
+    // so the bubble re-renders in the active unit instantly, same document.
+    window.addEventListener('water:changed', render);
     window.addEventListener('focus', render);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
     setInterval(render, 30 * 1000);

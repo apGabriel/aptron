@@ -11,7 +11,8 @@
 <!-- =============================================================
      EDIT THIS BLOCK TO MAKE THE APP YOURS.
      Other people who fork this repo only need to change the values
-     below — gyms, days, units, and starter exercises. Everything
+     below — gyms, units, and progression rule. Exercises come from the
+     routines you build in-app. Everything
      else (logs, edits, additions you make in the app) is saved to
      the browser's local storage on each device.
      ============================================================= -->
@@ -29,14 +30,6 @@ const CONFIG = {
     { id: "comm",  name: "Commercial Gym" }
   ],
 
-  // Training split. Most people use Push/Pull/Legs but you can rename
-  // these to "Upper", "Lower", "Full Body", "Day A", anything.
-  days: [
-    { id: "push", name: "Push" },
-    { id: "pull", name: "Pull" },
-    { id: "legs", name: "Legs" }
-  ],
-
   // Progression rule: hit this many reps on the top set → coach tells you
   // to add weight next session. Lower this to be more aggressive (e.g. 6),
   // raise it for more volume bias (e.g. 10).
@@ -50,31 +43,7 @@ const CONFIG = {
     enabled: true,
     yearsTraining: 1,        // 1 = beginner, 2 = intermediate, 3+ = advanced
     windowDays: 30           // window to compute weight + strength change
-  },
-
-  // Starter exercise list. Each one needs:
-  //   name        — what shows in the dropdown
-  //   gym         — one of the gym ids above, or "both"
-  //   day         — one of the day ids above
-  //   repMin      — bottom of your target rep range
-  //   repMax      — top of your target rep range
-  //   step        — how much weight you add when progressing (kg/lb)
-  //   startWeight — starting weight (ignored when bw: true)
-  //   bw          — true for bodyweight movements (logs reps only)
-  //
-  // First-run defaults. Once a user logs anything, they edit through
-  // the in-app + / gear buttons; this block stays as the seed.
-  defaultExercises: [
-    { name: "Bench press",     gym: "comm", day: "push", repMin: 5, repMax: 8,  step: 2.5, startWeight: 60 },
-    { name: "Overhead press",  gym: "comm", day: "push", repMin: 5, repMax: 8,  step: 2.5, startWeight: 35 },
-    { name: "Tricep pushdown", gym: "comm", day: "push", repMin: 8, repMax: 12, step: 2.5, startWeight: 25 },
-    { name: "Pull-ups",        gym: "both", day: "pull", repMin: 5, repMax: 10, step: 1,   startWeight: 0, bw: true },
-    { name: "Barbell row",     gym: "comm", day: "pull", repMin: 6, repMax: 10, step: 2.5, startWeight: 50 },
-    { name: "Bicep curl",      gym: "comm", day: "pull", repMin: 8, repMax: 12, step: 1.25,startWeight: 15 },
-    { name: "Back squat",      gym: "comm", day: "legs", repMin: 5, repMax: 8,  step: 5,   startWeight: 80 },
-    { name: "Romanian deadlift", gym: "comm", day: "legs", repMin: 6, repMax: 10, step: 5, startWeight: 60 },
-    { name: "Leg press",       gym: "comm", day: "legs", repMin: 8, repMax: 12, step: 5,   startWeight: 100 }
-  ]
+  }
 };
 </script>
 
@@ -227,8 +196,16 @@ const CONFIG = {
             <button class="po-w-btn" id="weightUpBtn" type="button">+</button>
           </div>
         </div>
-        <div class="po-field">
-          <label>Reps</label>
+        <div class="po-field" id="metricField">
+          <div class="po-field-head">
+            <label id="repsLabel">Reps</label>
+            <div class="po-metric-seg" id="metricSeg" role="group" aria-label="Tracking mode">
+              <button type="button" data-metric="reps" class="active" aria-pressed="true">Reps</button>
+              <button type="button" data-metric="time" aria-pressed="false">Time</button>
+            </div>
+          </div>
+          <!-- Same input is reused for reps OR seconds; renderForm() swaps the
+               label, bounds and placeholder based on the exercise's metric. -->
           <input type="number" id="repsInput" min="1" max="36" step="1" inputmode="numeric" placeholder="8" value="8">
         </div>
       </div>
@@ -772,10 +749,6 @@ const CONFIG = {
       <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Gym</label>
       <div class="po-modal-seg" id="exGymSeg"></div>
     </div>
-    <div class="po-field" id="exDayField">
-      <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Day</label>
-      <div class="po-modal-seg" id="exDaySeg"></div>
-    </div>
     <label class="po-bw-toggle">
       <input type="checkbox" id="exBw">
       Bodyweight (track reps only, no weight)
@@ -832,7 +805,18 @@ const CONFIG = {
   </div>
 </div>
 
-<script src="js/gym.js" defer></script>
+<!-- Gym module — split out of the former monolithic js/gym.js. The five Coach
+     modules share state via one window.GymApp namespace and MUST load in this
+     dependency order (defer preserves document order): core → storage → sync →
+     ui → actions (which calls GymApp.boot() last). The Routine Builder and the
+     normalized cloud layer are independent IIFEs (own closures, window bridges). -->
+<script src="js/gym/gym-core.js" defer></script>
+<script src="js/gym/gym-storage.js" defer></script>
+<script src="js/gym/gym-sync.js" defer></script>
+<script src="js/gym/gym-ui.js" defer></script>
+<script src="js/gym/gym-actions.js" defer></script>
+<script src="js/gym/gym-routine-builder.js" defer></script>
+<script src="js/gym/gym-cloud.js" defer></script>
 
 </body>
 </html>
