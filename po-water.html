@@ -773,6 +773,11 @@ html, body {
       // Never persist the transient migration marker into storage/sync.
       const { __migrated, ...clean } = state;
       localStorage.setItem(LS_KEY, JSON.stringify(clean));
+      // Notify the shared topbar (js/topbar.js) so its bubble re-renders in the
+      // active unit immediately. A dedicated event (not 'storage') so the page
+      // doesn't reload its own freshly-saved state. The embedded case also
+      // reaches the parent topbar via the native cross-frame storage event.
+      window.dispatchEvent(new CustomEvent('water:changed'));
     } catch (e) {}
   }
   let state = loadState();
@@ -1217,6 +1222,17 @@ html, body {
   function escape(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  // Absorb EXTERNAL writes to our key — the shared topbar's "+" button, the
+  // cloud-sync apply, or another tab/frame — by reloading state and re-rendering
+  // so the page never clobbers a change it didn't make. Guarded to our own key
+  // (manual same-document dispatches carry a null key and still pass). Our own
+  // saveState fires 'water:changed' instead, so this never self-triggers.
+  window.addEventListener('storage', (e) => {
+    if (e.key && e.key !== LS_KEY) return;
+    state = loadState();
+    renderAll();
+  });
 
   // BOOT — if loadState migrated v1→v2 in memory, persist the new ml-based
   // shape once now so localStorage (and therefore cloud sync) carries it even
