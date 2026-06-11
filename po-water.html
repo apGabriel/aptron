@@ -147,6 +147,24 @@ html, body {
 .water-row {
   display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;
 }
+/* The counter doubles as the bottles/glasses toggle. */
+#waterDisplayToggle {
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  user-select: none; border-radius: 12px; outline: none;
+  transition: opacity 0.15s;
+}
+#waterDisplayToggle:hover { opacity: 0.85; }
+#waterDisplayToggle:focus-visible { box-shadow: 0 0 0 2px rgba(110,231,183,0.40); }
+.water-unit-chip {
+  margin-left: auto; align-self: center;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+}
+.water-chip-swap { color: var(--info); font-size: 13px; line-height: 1; }
 .water-num {
   font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
   line-height: 1; font-variant-numeric: tabular-nums;
@@ -482,9 +500,17 @@ html, body {
 
   <div class="card">
     <div class="water-label" id="waterUnitLabel">BOTTLES DRANK TODAY</div>
-    <div class="water-row">
+    <!-- The counter itself is the toggle: tap to rotate the WHOLE view between
+         bottles and glasses. Purely a unit-of-measure switch — the stored ml is
+         untouched (see rotateDisplayUnit). -->
+    <div class="water-row" id="waterDisplayToggle" role="button" tabindex="0"
+         aria-label="Tap to switch between bottles and glasses" title="Tap to switch bottles / glasses">
       <span class="water-num" id="waterNum">0</span>
       <span class="water-target" id="waterTarget">/ 9</span>
+      <span class="water-unit-chip" id="waterUnitChip" aria-hidden="true">
+        <span class="water-chip-swap">⇄</span>
+        <span id="waterUnitChipLabel">Bottles</span>
+      </span>
     </div>
 
     <div class="water-bar-wrap">
@@ -577,6 +603,7 @@ html, body {
         <label>Show water as</label>
         <div class="seg" id="setUnit">
           <button data-u="bottle">Bottles</button>
+          <button data-u="glass">Glasses</button>
           <button data-u="ml">ml</button>
         </div>
       </div>
@@ -787,14 +814,24 @@ html, body {
     };
   }
 
-  // DISPLAY unit (how the big total/target reads) — bottles or raw ml.
+  // DISPLAY unit (how the big total/target reads) — bottles, glasses, or raw ml.
+  // The volume of ONE display unit, in ml. The absolute total is always stored
+  // in ml; this only changes how that total is divided up for display.
   function unitVolMl() {
     if (state.unit === 'bottle') return state.bottleMl || 500;
+    if (state.unit === 'glass')  return state.glassMl  || 250;
     return 1; // ml
   }
   function unitLabelPlural() {
     if (state.unit === 'bottle') return 'bottles';
+    if (state.unit === 'glass')  return 'glasses';
     return 'ml';
+  }
+  // Title-case label for the tap-to-switch chip (ml stays lowercase).
+  function unitLabelTitle() {
+    if (state.unit === 'glass') return 'Glasses';
+    if (state.unit === 'ml')    return 'ml';
+    return 'Bottles';
   }
   // INPUT mode (what one tap adds) — bottle or glass volume, in ml.
   function inputModeMl() {
@@ -803,9 +840,9 @@ html, body {
   function inputModeSingular() {
     return state.inputMode === 'glass' ? 'glass' : 'bottle';
   }
-  // Format a serving count: whole ml, or bottles to ≤1 decimal (trim ".0").
+  // Format a serving count: whole ml, or bottles/glasses to ≤1 decimal (trim ".0").
   function fmtUnits(n) {
-    if (state.unit !== 'bottle') return String(Math.round(n));
+    if (state.unit === 'ml') return String(Math.round(n));
     return String(Math.round(n * 10) / 10);
   }
   function fmtMl(ml) {
@@ -830,12 +867,14 @@ html, body {
     // Convert the absolute ml total into the chosen DISPLAY unit. Bottles can be
     // fractional now (e.g. 3 bottles + 1 glass → 3.5 bottles); ml stays whole.
     const display = ml / unitVolMl();
-    const targetUnits = state.unit === 'bottle'
-      ? Math.max(1, Math.ceil(targetMl / unitVolMl()))
-      : Math.round(targetMl);
+    // Bottles/glasses target rounds UP to whole servings; ml shows the raw total.
+    const targetUnits = state.unit === 'ml'
+      ? Math.round(targetMl)
+      : Math.max(1, Math.ceil(targetMl / unitVolMl()));
 
     renderInputMode();
     $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
+    $('waterUnitChipLabel').textContent = unitLabelTitle();
     $('waterNum').textContent = fmtUnits(display);
     $('waterTarget').textContent = '/ ' + targetUnits;
 
@@ -904,9 +943,9 @@ html, body {
   function renderHistory() {
     const list = $('histList');
     const targetMl = computeTargetMl().total;
-    const targetUnits = state.unit === 'bottle'
-      ? Math.max(1, Math.ceil(targetMl / unitVolMl()))
-      : Math.round(targetMl);
+    const targetUnits = state.unit === 'ml'
+      ? Math.round(targetMl)
+      : Math.max(1, Math.ceil(targetMl / unitVolMl()));
     // Last 7 days — logs hold ml; the displayed count tracks the display unit.
     const days = [];
     for (let i = 6; i >= 1; i--) {
@@ -983,6 +1022,23 @@ html, body {
       saveState();
       renderInputMode();
     });
+  });
+
+  // DISPLAY rotation — tapping the counter flips the whole view bottles ⇄
+  // glasses (entering from ml lands on bottles). This is strictly a unit-of-
+  // measure switch: the absolute ml total is never read or rewritten here, so
+  // nothing is converted in storage and sync stays byte-identical. The next
+  // renderWater() just re-divides the same ml by the new unit volume.
+  function rotateDisplayUnit() {
+    state.unit = (state.unit === 'bottle') ? 'glass' : 'bottle';
+    saveState();         // persists ONLY the chosen unit; logs are unchanged
+    renderWater();       // re-derives bottles/glasses from the stored ml
+    setSegActive('setUnit', state.unit);   // keep the settings seg in lockstep
+  }
+  $('waterDisplayToggle').addEventListener('click', rotateDisplayUnit);
+  // Keyboard access (the toggle is a role="button" div, not a native button).
+  $('waterDisplayToggle').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); rotateDisplayUnit(); }
   });
 
   $('whyToggle').addEventListener('click', () => {
