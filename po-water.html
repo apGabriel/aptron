@@ -604,7 +604,6 @@ html, body {
         <div class="seg" id="setUnit">
           <button data-u="bottle">Bottles</button>
           <button data-u="glass">Glasses</button>
-          <button data-u="ml">ml</button>
         </div>
       </div>
       <div class="field-row">
@@ -731,7 +730,14 @@ html, body {
   }
   function normalize(s) {
     s = s || {};
-    s.unit = s.unit || CONFIG.unit || 'bottle';
+    // The main view now shows ONLY bottles or glasses (raw ml was removed as a
+    // display option — it's tedious to track). Coerce any legacy value such as
+    // 'ml' or 'oz' to bottles. Storage stays in ml regardless; this is display.
+    const prevUnit = s.unit;
+    s.unit = (s.unit === 'glass') ? 'glass' : 'bottle';
+    // Persist the coercion at boot (reusing the migration flag) so the stored
+    // blob/sync stop carrying a dead 'ml' display unit. Skips fresh state.
+    if (prevUnit !== undefined && prevUnit !== s.unit) s.__migrated = true;
     s.bottleMl = s.bottleMl || CONFIG.bottleMl || 500;
     s.glassMl  = s.glassMl  || CONFIG.glassMl  || 250;
     // What each tap logs RIGHT NOW (independent of the display unit).
@@ -814,24 +820,17 @@ html, body {
     };
   }
 
-  // DISPLAY unit (how the big total/target reads) — bottles, glasses, or raw ml.
+  // DISPLAY unit (how the big total/target reads) — bottles or glasses only.
   // The volume of ONE display unit, in ml. The absolute total is always stored
   // in ml; this only changes how that total is divided up for display.
   function unitVolMl() {
-    if (state.unit === 'bottle') return state.bottleMl || 500;
-    if (state.unit === 'glass')  return state.glassMl  || 250;
-    return 1; // ml
+    return state.unit === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
   }
   function unitLabelPlural() {
-    if (state.unit === 'bottle') return 'bottles';
-    if (state.unit === 'glass')  return 'glasses';
-    return 'ml';
+    return state.unit === 'glass' ? 'glasses' : 'bottles';
   }
-  // Title-case label for the tap-to-switch chip (ml stays lowercase).
   function unitLabelTitle() {
-    if (state.unit === 'glass') return 'Glasses';
-    if (state.unit === 'ml')    return 'ml';
-    return 'Bottles';
+    return state.unit === 'glass' ? 'Glasses' : 'Bottles';
   }
   // INPUT mode (what one tap adds) — bottle or glass volume, in ml.
   function inputModeMl() {
@@ -840,11 +839,10 @@ html, body {
   function inputModeSingular() {
     return state.inputMode === 'glass' ? 'glass' : 'bottle';
   }
-  // Format a serving count: whole ml, or bottles/glasses to ≤1 decimal (trim ".0").
-  function fmtUnits(n) {
-    if (state.unit === 'ml') return String(Math.round(n));
-    return String(Math.round(n * 10) / 10);
-  }
+  // Serving count, always to ONE decimal so it reads cleanly during rotation
+  // ("2.0", "1.5", "12.0"). Fractions are intentional — half a bottle / half a
+  // glass stays visible so tracking is accurate but still easy to read.
+  function fmtUnits(n) { return (Number(n) || 0).toFixed(1); }
   function fmtMl(ml) {
     if (ml >= 1000) return (ml / 1000).toFixed(1) + ' L';
     return Math.round(ml) + ' ml';
@@ -867,16 +865,17 @@ html, body {
     // Convert the absolute ml total into the chosen DISPLAY unit. Bottles can be
     // fractional now (e.g. 3 bottles + 1 glass → 3.5 bottles); ml stays whole.
     const display = ml / unitVolMl();
-    // Bottles/glasses target rounds UP to whole servings; ml shows the raw total.
-    const targetUnits = state.unit === 'ml'
-      ? Math.round(targetMl)
-      : Math.max(1, Math.ceil(targetMl / unitVolMl()));
+    // Target in the SAME unit, kept fractional (e.g. 2.5 bottles / 10.0 glasses).
+    // Both numbers are just the stored ml re-divided by the current unit volume,
+    // so rotating units never changes the amount — only how it reads.
+    const targetUnits = targetMl / unitVolMl();
 
     renderInputMode();
     $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
     $('waterUnitChipLabel').textContent = unitLabelTitle();
     $('waterNum').textContent = fmtUnits(display);
-    $('waterTarget').textContent = '/ ' + targetUnits;
+    // e.g. "/ 2.5 Bottles" — no raw ml anywhere in the main readout.
+    $('waterTarget').textContent = '/ ' + fmtUnits(targetUnits) + ' ' + unitLabelTitle();
 
     // Progress bar runs on the ml ratio directly, so it's identical regardless
     // of display unit. Three zones: low (0-65%), healthy (65-100%), over (100%+).
@@ -943,9 +942,7 @@ html, body {
   function renderHistory() {
     const list = $('histList');
     const targetMl = computeTargetMl().total;
-    const targetUnits = state.unit === 'ml'
-      ? Math.round(targetMl)
-      : Math.max(1, Math.ceil(targetMl / unitVolMl()));
+    const targetUnits = targetMl / unitVolMl();   // fractional, in display unit
     // Last 7 days — logs hold ml; the displayed count tracks the display unit.
     const days = [];
     for (let i = 6; i >= 1; i--) {
@@ -962,7 +959,7 @@ html, body {
       return '<div class="hist-row">'
         + '<span class="hist-date">' + lbl + '</span>'
         + '<div class="hist-bar-wrap"><div class="hist-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div>'
-        + '<span class="hist-count">' + fmtUnits(ml / unitVolMl()) + '/' + targetUnits + '</span>'
+        + '<span class="hist-count">' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
         + '</div>';
     }).join('') || '<div style="text-align:center;font-size:12px;color:var(--text-3);padding:12px 0">No logs yet.</div>';
   }
@@ -1025,10 +1022,10 @@ html, body {
   });
 
   // DISPLAY rotation — tapping the counter flips the whole view bottles ⇄
-  // glasses (entering from ml lands on bottles). This is strictly a unit-of-
-  // measure switch: the absolute ml total is never read or rewritten here, so
-  // nothing is converted in storage and sync stays byte-identical. The next
-  // renderWater() just re-divides the same ml by the new unit volume.
+  // glasses. This is strictly a unit-of-measure switch: the absolute ml total is
+  // never read or rewritten here, so nothing is converted in storage and sync
+  // stays byte-identical. The next renderWater() just re-divides the same ml by
+  // the new unit volume.
   function rotateDisplayUnit() {
     state.unit = (state.unit === 'bottle') ? 'glass' : 'bottle';
     saveState();         // persists ONLY the chosen unit; logs are unchanged
