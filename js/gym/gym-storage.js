@@ -9,7 +9,7 @@
   'use strict';
   const G = window.GymApp;
   // Leaf helpers from core (defined earlier → safe to alias at load).
-  const { unit, workingSets, roundToStep } = G;
+  const { unit, workingSets, roundToStep, isTimeMetric, fmtDuration } = G;
 
   // ============================================================
   // STATE — all logs + edits live in browser localStorage. Each
@@ -83,6 +83,9 @@
         (idx[set.exId] = idx[set.exId] || []).push({
           weight: set.weight, reps: set.reps, date: set.date, session: sess.id,
           is_dropset: !!set.is_dropset,
+          // Carry the metric through so time sets render/track without the
+          // consumers re-reading the owning session.
+          metric: set.metric || 'reps', duration: set.duration,
         });
       });
     });
@@ -279,6 +282,7 @@
   // lifter ALSO hits it at 8 instead of grinding 12 reps before adding weight.
   function getRx(ex, logs) {
     if (!logs.length) return null;
+    if (isTimeMetric(ex)) return getRxTime(ex, logs);
     // Progress only off working sets — a trailing dropset must not be read as
     // the "last set" or counted in the stuck-streak (its lighter load would
     // wrongly trigger a deload).
@@ -304,6 +308,28 @@
     if (reps >= upgradeAt) return { type: 'up', weight: weight + step, reps: repMin, tag: 'Add weight', reason: 'You hit ' + reps + ' reps — time to add ' + step + unit() + '. Expect ' + repMin + '-' + (repMin + 1) + ' next session.' };
     if (reps >= repMin && reps < upgradeAt) return { type: 'hold', weight: weight, reps: reps + 1, tag: 'Add a rep', reason: reps + ' reps in target. Stay at ' + weight + unit() + ', push for ' + (reps + 1) + '.' };
     return { type: 'hold', weight: weight, reps: repMin, tag: 'Repeat', reason: reps + ' reps short of ' + repMin + '-' + upgradeAt + '. Repeat ' + weight + unit() + ' until you hit ' + repMin + '+ clean.' };
+  }
+
+  // Time-metric prescription — progressive overload on hold-duration instead of
+  // weight×reps. Add a fixed +5s each session; if the same duration repeats for
+  // 3+ sessions, nudge past the plateau. Weight (if any) is held constant.
+  function getRxTime(ex, logs) {
+    logs = workingSets(logs);
+    if (!logs.length) return null;
+    const last = logs[logs.length - 1];
+    const d = Number(last.duration) || 0;
+    const w = ex.bw ? 0 : (Number(last.weight) || 0);
+    const next = d + 5;
+    let stuck = 0;
+    for (let i = logs.length - 1; i >= 0; i--) {
+      if ((Number(logs[i].duration) || 0) === d) stuck++; else break;
+    }
+    if (stuck >= 3) {
+      return { type: 'hold', time: true, bw: ex.bw, weight: w, duration: next, tag: 'Break the plateau',
+        reason: 'Held ' + fmtDuration(d) + ' for ' + stuck + ' sessions. Push for ' + fmtDuration(next) + ' to move forward.' };
+    }
+    return { type: 'up', time: true, bw: ex.bw, weight: w, duration: next, tag: 'Add time',
+      reason: 'Held ' + fmtDuration(d) + ' — push for ' + fmtDuration(next) + ' next session.' };
   }
 
   // Expose the storage + model + routines API to the other modules.

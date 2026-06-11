@@ -1,0 +1,30 @@
+-- ============================================================================
+-- Migration 0002 — Time-based (duration) exercise tracking
+-- ----------------------------------------------------------------------------
+-- Exercises can now be tracked by HOLD DURATION (seconds) instead of reps
+-- (planks, dead hangs, farmer's carries, …). The metric is a per-exercise
+-- choice stored client-side on the exercise (`ex.metric = 'reps' | 'time'`).
+--
+-- NO SCHEMA CHANGE IS REQUIRED. Duration is carried in the existing freeform
+-- `exercise_logs.metadata` jsonb — the same place session id / unit already
+-- ride (see migration 0001) — rather than overloading the typed `reps` column:
+--
+--   • reps  (integer)  → stays NULL for time sets, so it never holds seconds
+--                        and existing reps-based analytics stay correct.
+--   • metadata.metric     → 'time'  (absent / 'reps' ⇒ a normal rep set)
+--   • metadata.duration_s → hold length in seconds (integer)
+--
+-- This keeps the typed columns clean, requires no DDL, and means the app_state
+-- blob sync (gym-sync.js) needs zero changes — a new set field rides along in
+-- the localStorage blob automatically.
+--
+-- This file is documentation-only: there is nothing to run. Should you later
+-- want SQL-side aggregation of durations, promote the value to a real column:
+--
+--   -- alter table public.exercise_logs add column duration_s integer;
+--   -- update public.exercise_logs
+--   --   set duration_s = (metadata->>'duration_s')::int
+--   --   where metadata->>'metric' = 'time';
+--
+-- …and update toLogRow / pullLogs in js/gym/gym-cloud.js to read/write it.
+-- ============================================================================

@@ -82,15 +82,24 @@
   }
   const logClientId = (exId, date) => exId + '|' + date;
   function toLogRow(l) {
+    const isTime = l.metric === 'time';
     return {
       client_id: logClientId(l.exId, l.date),
       exercise_name: l.name || l.exId,
       weight: (l.weight != null ? l.weight : null),
-      reps:   (l.reps   != null ? l.reps   : null),
+      // Time sets leave the typed `reps` column NULL so it never holds seconds —
+      // the duration lives in metadata.duration_s instead (kept clean & queryable
+      // separately). Rep sets are unchanged.
+      reps:   isTime ? null : (l.reps != null ? l.reps : null),
       timestamp: l.date,
-      // session id rides in metadata (jsonb) so no schema migration is required;
-      // an optional dedicated session_id column can be added later for analytics.
-      metadata: { exId: l.exId, unit: l.unit || null, session: l.session || null, is_dropset: !!l.is_dropset }
+      // session id + metric + duration ride in metadata (jsonb) so no schema
+      // migration is required; a dedicated column can be added later if wanted.
+      metadata: {
+        exId: l.exId, unit: l.unit || null, session: l.session || null,
+        is_dropset: !!l.is_dropset,
+        metric: isTime ? 'time' : 'reps',
+        duration_s: isTime ? (l.duration != null ? l.duration : null) : null
+      }
     };
   }
 
@@ -136,14 +145,18 @@
       if (error || !Array.isArray(data)) return;
       const byExId = {};
       data.forEach(row => {
-        const exId = row.metadata && row.metadata.exId;
+        const md = row.metadata || {};
+        const exId = md.exId;
         if (!exId) return;
+        const isTime = md.metric === 'time';
         (byExId[exId] = byExId[exId] || []).push({
           weight: row.weight != null ? Number(row.weight) : 0,
-          reps:   row.reps   != null ? Number(row.reps)   : 0,
+          reps:   isTime ? null : (row.reps != null ? Number(row.reps) : 0),
+          metric: isTime ? 'time' : 'reps',
+          duration: isTime ? (md.duration_s != null ? Number(md.duration_s) : 0) : null,
           date:   row.timestamp,
-          session: (row.metadata && row.metadata.session) || null,
-          is_dropset: !!(row.metadata && row.metadata.is_dropset)
+          session: md.session || null,
+          is_dropset: !!md.is_dropset
         });
       });
       if (window.__gymCoachMergeLogs) window.__gymCoachMergeLogs(byExId);
@@ -167,7 +180,8 @@
       Object.keys(logs).forEach(exId => {
         (logs[exId] || []).forEach(l => {
           if (l && l.date) rows.push(toLogRow({
-            exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date, unit: coach.units
+            exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps,
+            metric: l.metric, duration: l.duration, date: l.date, unit: coach.units
           }));
         });
       });

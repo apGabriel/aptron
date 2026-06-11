@@ -37,6 +37,21 @@
   }
   function roundToStep(v, s) { return Math.round(v / s) * s; }
 
+  // ── Tracking metric: reps (default) vs time (seconds) ────────
+  // Orthogonal to `bw`: an exercise can be weighted-or-bodyweight AND
+  // reps-or-time independently (e.g. weighted plank = bw:false + time).
+  // Absent/legacy `metric` reads as 'reps', so old data needs no migration.
+  function isTimeMetric(ex) { return !!(ex && ex.metric === 'time'); }
+  // Seconds → "45s" under a minute, "1:30" at/over a minute.
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.round(Number(sec) || 0));
+    if (sec < 60) return sec + 's';
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+  // The scalar a set progresses on: hold-seconds for time, reps otherwise.
+  // Lets the stats/PR/sparkline read one number without knowing the metric.
+  function metricVal(o, ex) { return isTimeMetric(ex) ? Number(o.duration) : Number(o.reps); }
+
   // ── Set rendering: single source of truth ────────────────────
   // Every place that prints a logged set (last-set chip, history rows, session
   // breakdown) routes through these two helpers so the value format and the
@@ -44,6 +59,11 @@
   // (bodyweight badge, banded, paused…) means extending setMarkersHtml() once,
   // not hunting down three near-identical ternaries.
   function fmtSetValue(set, ex) {
+    if (isTimeMetric(ex)) {
+      const dur = fmtDuration(set.duration);
+      // Bodyweight time = duration only; weighted time = "20kg · 1:30".
+      return (ex && ex.bw) ? dur : (set.weight + unit() + ' · ' + dur);
+    }
     return (ex && ex.bw) ? (set.reps + ' reps') : (set.weight + unit() + ' × ' + set.reps);
   }
   // Inline marker tags prefixed to a set's value. Order = render order.
@@ -58,6 +78,9 @@
   // Reps box bounds — shared by the ui render seed and the actions handlers.
   const REP_MIN = 1, REP_MAX = 36;
   function clampReps(n) { return Math.max(REP_MIN, Math.min(REP_MAX, n)); }
+  // Time box bounds (seconds): 1s … 1h. Same input element, different range.
+  const DUR_MIN = 1, DUR_MAX = 3600;
+  function clampDur(n) { return Math.max(DUR_MIN, Math.min(DUR_MAX, n)); }
 
   // ============================================================
   // BOOTSTRAP
@@ -89,6 +112,7 @@
   // Expose leaf helpers + constants for the other modules.
   Object.assign(G, {
     $, unit, uid, estimate1RM, workingSets, roundToStep,
-    fmtSetValue, setMarkersHtml, escape, clampReps, REP_MIN, REP_MAX
+    fmtSetValue, setMarkersHtml, escape, clampReps, REP_MIN, REP_MAX,
+    isTimeMetric, fmtDuration, metricVal, clampDur, DUR_MIN, DUR_MAX
   });
 })();

@@ -11,7 +11,8 @@
   const G = window.GymApp;
   // Core leaf helpers + storage API (all defined earlier → alias at load).
   const { $, escape, unit, fmtSetValue, setMarkersHtml, workingSets,
-          estimate1RM, roundToStep, clampReps, REP_MIN, REP_MAX } = G;
+          estimate1RM, roundToStep, clampReps, REP_MIN, REP_MAX,
+          isTimeMetric, fmtDuration, metricVal, clampDur, DUR_MIN, DUR_MAX } = G;
   const { ensureRoutineExercises, getRoutines, getCurrentRoutine, getFiltered,
           getCurrentEx, getLogs, getRx, getActiveSession, summarizeSession,
           saveState, rebuildLogIndex } = G;
@@ -80,18 +81,31 @@
     const wField = $('weightField');
     const oneRmLbl = $('oneRmLabel');
     const grid = $('logGrid');
+    const time = isTimeMetric(ex);
     $('weightLabel').textContent = 'Weight (' + unit() + ')';
     if (ex && ex.bw) {
       banner.classList.add('show');
       wField.style.display = 'none';
       grid.classList.add('po-bw-mode');
-      oneRmLbl.textContent = 'Best reps';
+      oneRmLbl.textContent = time ? 'Best time' : 'Best reps';
     } else {
       banner.classList.remove('show');
       wField.style.display = '';
       grid.classList.remove('po-bw-mode');
-      oneRmLbl.textContent = 'Est. 1RM';
+      oneRmLbl.textContent = time ? 'Best time' : 'Est. 1RM';
     }
+    // Adapt the reps/time field: same input, swapped label, bounds and hint.
+    const input = $('repsInput');
+    $('repsLabel').textContent = time ? 'Time (sec)' : 'Reps';
+    input.min = time ? DUR_MIN : REP_MIN;
+    input.max = time ? DUR_MAX : REP_MAX;
+    input.placeholder = time ? '30' : '8';
+    // Reflect the active metric on the toggle.
+    $('metricSeg').querySelectorAll('button').forEach(b => {
+      const on = (b.dataset.metric === 'time') === time;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
   function renderLastSet() {
     const wrap = $('lastSet');
@@ -114,21 +128,28 @@
     const ex = getCurrentEx();
     if (!ex) { wrap.innerHTML = '<div class="po-rx-empty">' + (getRoutines().length ? 'Pick a routine above.' : 'Create a routine in the Routine Builder below to get started.') + '</div>'; return; }
     const logs = getLogs();
+    const time = isTimeMetric(ex);
     const rx = getRx(ex, logs);
     if (!rx) {
       const sw = ex.startWeight, sr = ex.repMin;
-      const head = ex.bw
-        ? '<span class="po-accent">' + sr + '</span> reps'
-        : '<span class="po-accent">' + (sw || 0) + unit() + '</span> × ' + sr + ' reps';
-      const reason = ex.bw
-        ? 'Aim for ' + ex.repMin + '-' + ex.repMax + ' clean reps. Once you hit ' + ex.repMax + '+, push for more.'
-        : 'Hit ' + ex.repMin + '-' + ex.repMax + ' reps. Once logged, the coach will start prescribing.';
+      const head = time
+        ? '<span class="po-accent">Timed</span> hold'
+        : ex.bw
+          ? '<span class="po-accent">' + sr + '</span> reps'
+          : '<span class="po-accent">' + (sw || 0) + unit() + '</span> × ' + sr + ' reps';
+      const reason = time
+        ? 'Log your first hold — the coach starts prescribing longer times once it has history.'
+        : ex.bw
+          ? 'Aim for ' + ex.repMin + '-' + ex.repMax + ' clean reps. Once you hit ' + ex.repMax + '+, push for more.'
+          : 'Hit ' + ex.repMin + '-' + ex.repMax + ' reps. Once logged, the coach will start prescribing.';
       wrap.innerHTML = '<div class="po-rx-card"><div class="po-rx-label">' + escape(ex.name) + ' · starting point</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag hold">Start here</span><p class="po-rx-reason">' + reason + '</p></div>';
       return;
     }
-    const head = rx.bw
-      ? '<span class="po-accent">' + rx.reps + '</span> reps'
-      : '<span class="po-accent">' + rx.weight + unit() + '</span> × ' + rx.reps + ' reps';
+    const head = rx.time
+      ? '<span class="po-accent">' + fmtDuration(rx.duration) + '</span>' + (rx.bw ? '' : ' · ' + rx.weight + unit())
+      : rx.bw
+        ? '<span class="po-accent">' + rx.reps + '</span> reps'
+        : '<span class="po-accent">' + rx.weight + unit() + '</span> × ' + rx.reps + ' reps';
     wrap.innerHTML = '<div class="po-rx-card po-rx-' + rx.type + '"><div class="po-rx-label">' + escape(ex.name) + '</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag ' + rx.type + '">' + rx.tag + '</span><p class="po-rx-reason">' + rx.reason + '</p></div>';
   }
   // PR / Personal Record — heaviest weight ever logged (max reps for bodyweight
@@ -137,28 +158,37 @@
     const el = $('prStat');
     const ex = getCurrentEx();
     const logs = ex ? getLogs() : [];
+    const time = isTimeMetric(ex);
     const bw = ex && ex.bw;
-    const u = bw ? 'reps' : unit();
+    // Time PR = longest hold (shown formatted, no unit suffix); otherwise
+    // heaviest weight (or best reps for bodyweight).
+    const u = time ? '' : (bw ? 'reps' : unit());
     // A PR is a peak — dropsets (lighter, fatigued) are excluded.
     const vals = workingSets(logs)
-      .map(l => bw ? Number(l.reps) : Number(l.weight))
+      .map(l => time ? Number(l.duration) : (bw ? Number(l.reps) : Number(l.weight)))
       .filter(v => Number.isFinite(v) && v > 0);
-    const valHtml = vals.length ? String(Math.max.apply(null, vals)) : '--';
+    const peak = vals.length ? Math.max.apply(null, vals) : null;
+    const valHtml = peak == null ? '--' : (time ? fmtDuration(peak) : String(peak));
     el.classList.toggle('empty', !vals.length);
     el.innerHTML = valHtml + '<span class="po-unit" id="prUnit">' + u + '</span>';
   }
   function renderStats() {
     const ex = getCurrentEx();
     const logs = ex ? getLogs() : [];
+    const time = isTimeMetric(ex);
     if (!logs.length) {
-      $('oneRm').innerHTML = '—<span class="po-unit">' + unit() + '</span>';
+      $('oneRm').innerHTML = '—<span class="po-unit">' + (time ? 's' : unit()) + '</span>';
       $('bestSet').textContent = '—';
       $('sessionCount').textContent = '—';
       return;
     }
     // Peak metrics (1RM + best set) ignore dropsets; the set count is total.
     const peak = workingSets(logs);
-    if (ex.bw) {
+    if (time) {
+      // Time movements have no 1RM — the peak is the longest hold.
+      const bd = Math.max.apply(null, peak.map(l => Number(l.duration) || 0));
+      $('oneRm').innerHTML = fmtDuration(bd);
+    } else if (ex.bw) {
       const br = Math.max.apply(null, peak.map(l => l.reps));
       $('oneRm').innerHTML = br + '<span class="po-unit">reps</span>';
     } else {
@@ -167,11 +197,11 @@
     }
     let best = peak[0];
     peak.forEach(l => {
-      const cur = ex.bw ? l.reps : estimate1RM(l.weight, l.reps);
-      const bestVal = ex.bw ? best.reps : estimate1RM(best.weight, best.reps);
+      const cur = time ? (Number(l.duration) || 0) : ex.bw ? l.reps : estimate1RM(l.weight, l.reps);
+      const bestVal = time ? (Number(best.duration) || 0) : ex.bw ? best.reps : estimate1RM(best.weight, best.reps);
       if (cur > bestVal) best = l;
     });
-    $('bestSet').textContent = ex.bw ? (best.reps + 'r') : (best.weight + '×' + best.reps);
+    $('bestSet').textContent = time ? fmtDuration(best.duration) : ex.bw ? (best.reps + 'r') : (best.weight + '×' + best.reps);
     $('sessionCount').textContent = logs.length;
   }
   function renderSparkline() {
@@ -186,7 +216,7 @@
       return;
     }
     svg.style.display = 'block'; empty.style.display = 'none';
-    const vals = logs.map(l => ex.bw ? l.reps : estimate1RM(l.weight, l.reps));
+    const vals = logs.map(l => isTimeMetric(ex) ? (Number(l.duration) || 0) : ex.bw ? l.reps : estimate1RM(l.weight, l.reps));
     const min = Math.min.apply(null, vals);
     const max = Math.max.apply(null, vals);
     const range = max - min || 1;
@@ -306,14 +336,20 @@
     const input = document.getElementById('repsInput');
     if (!input) return;
     const ex = getCurrentEx();
-    let def = 8;
+    const time = isTimeMetric(ex);
+    const min = time ? DUR_MIN : REP_MIN;
+    const max = time ? DUR_MAX : REP_MAX;
+    let def = time ? 30 : 8;
     if (ex) {
       const logs = getLogs();
-      if (logs.length) def = logs[logs.length - 1].reps;
+      if (logs.length) {
+        const last = logs[logs.length - 1];
+        def = time ? (Number(last.duration) || def) : last.reps;
+      }
     }
     let cur = parseInt(input.value, 10);
-    if (isNaN(cur) || cur < REP_MIN || cur > REP_MAX) cur = def;
-    input.value = String(clampReps(cur));
+    if (isNaN(cur) || cur < min || cur > max) cur = def;
+    input.value = String(time ? clampDur(cur) : clampReps(cur));
   }
 
   function renderAll() {
@@ -365,9 +401,11 @@
     return '<ul class="po-tw-sets">' + lines.join('') + '</ul>';
   }
   function twRowHtml(e, u) {
-    const top = e.ex.bw
-      ? 'top ' + Math.max.apply(null, e.sets.map(s => s.reps)) + ' reps'
-      : 'top ' + Math.max.apply(null, e.sets.map(s => s.weight)) + u;
+    const top = isTimeMetric(e.ex)
+      ? 'top ' + fmtDuration(Math.max.apply(null, e.sets.map(s => Number(s.duration) || 0)))
+      : e.ex.bw
+        ? 'top ' + Math.max.apply(null, e.sets.map(s => s.reps)) + ' reps'
+        : 'top ' + Math.max.apply(null, e.sets.map(s => s.weight)) + u;
     const meta = e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top;
     return '<li class="po-tw-row">'
       + '<div class="po-tw-row-head">'

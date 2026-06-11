@@ -107,14 +107,39 @@ try {
   await page.waitForTimeout(150);
   ok('exercise switch did not error', true);
 
-  // 7. Settings modal open/close
+  // 7. Time-based tracking: toggle the (now-active) exercise to Time, log a
+  // 90s hold, and confirm it stores/renders as duration (1:30), not reps.
+  await page.click('#metricSeg button[data-metric="time"]');
+  await page.waitForFunction(() => document.getElementById('repsLabel')?.textContent === 'Time (sec)', { timeout: 4000 });
+  ok('metric toggle → label becomes Time (sec)', (await page.textContent('#repsLabel')) === 'Time (sec)');
+  ok('time input bound to 3600s max', (await page.getAttribute('#repsInput', 'max')) === '3600');
+  await page.fill('#weightInput', '20');
+  await page.fill('#repsInput', '90');
+  await page.click('#logBtn');
+  await page.waitForFunction(() => document.getElementById('poTwSetCount')?.textContent === '1', { timeout: 4000 });
+  ok('time set logged → new session count = 1', (await page.textContent('#poTwSetCount')) === '1');
+  ok('history renders duration 1:30', (await page.locator('#historyCard .po-hist-row').first().textContent())?.includes('1:30'));
+  ok('PR badge shows longest hold 1:30', (await page.textContent('#prStat'))?.includes('1:30'));
+  ok('last-set chip shows duration', (await page.textContent('#lastSetValue'))?.includes('1:30'));
+  // The set is stored as a time metric with no reps — never seconds in `reps`.
+  ok('time set stored as metric=time, reps null', await page.evaluate(() => {
+    const sess = window.GymApp.getActiveSession();
+    const st = sess && sess.sets[sess.sets.length - 1];
+    return !!st && st.metric === 'time' && st.duration === 90 && st.reps == null;
+  }));
+  // Toggle back to Reps so the field/label reset path is exercised too.
+  await page.click('#metricSeg button[data-metric="reps"]');
+  await page.waitForFunction(() => document.getElementById('repsLabel')?.textContent === 'Reps', { timeout: 4000 });
+  ok('metric toggle back → label becomes Reps', (await page.textContent('#repsLabel')) === 'Reps');
+
+  // 8. Settings modal open/close
   await page.click('#settingsBtn');
   await page.waitForTimeout(150);
   ok('settings modal opened', await page.locator('#setModalBg.show').count() === 1);
   ok('settings gyms rendered', await page.locator('#setGyms .po-set-row').count() >= 1);
   await page.click('#setModalClose');
 
-  // 8. Routine Builder catalog loaded (real fetch of exercises-data.json)
+  // 9. Routine Builder catalog loaded (real fetch of exercises-data.json)
   ok('routine builder initialised', await page.locator('#rbCard, #rbGrid').count() >= 1);
 
   await page.screenshot({ path: path.join(ROOT, 'tools/smoke/gym-smoke.png'), fullPage: true });

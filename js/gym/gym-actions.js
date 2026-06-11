@@ -10,7 +10,8 @@
 (function () {
   'use strict';
   const G = window.GymApp;
-  const { $, escape, unit, uid, clampReps, REP_MIN, REP_MAX } = G;
+  const { $, escape, unit, uid, clampReps, REP_MIN, REP_MAX,
+          isTimeMetric, clampDur, DUR_MIN } = G;
   const { getCurrentEx, getActiveSession, ensureActiveSession, closeActiveSession,
           startNewSession, dedupSessionSets, rebuildLogIndex, saveState, loadState,
           normalize, LS_KEY } = G;
@@ -92,16 +93,41 @@
     const w = parseFloat($('weightInput').value) || 0;
     $('weightInput').value = w + (ex.step || 2.5);
   });
-  // Reps box — clamp to 1–36 gracefully: snap back on commit, and stop an
-  // over-the-max value from lingering while the user is still typing.
+  // Reps/time box — clamp gracefully against the ACTIVE metric's bounds (reps
+  // 1–36, time 1–3600s): snap back on commit, and stop an over-the-max value
+  // from lingering while the user is still typing.
+  function metricBounds() {
+    const ex = getCurrentEx();
+    return isTimeMetric(ex) ? { min: DUR_MIN, clamp: clampDur } : { min: REP_MIN, clamp: clampReps };
+  }
   $('repsInput').addEventListener('change', () => {
+    const { min, clamp } = metricBounds();
     let n = parseInt($('repsInput').value, 10);
-    if (isNaN(n)) n = REP_MIN;
-    $('repsInput').value = String(clampReps(n));
+    if (isNaN(n)) n = min;
+    $('repsInput').value = String(clamp(n));
   });
   $('repsInput').addEventListener('input', () => {
     const v = $('repsInput').value;
-    if (v !== '' && parseInt(v, 10) > REP_MAX) $('repsInput').value = String(REP_MAX);
+    const { clamp } = metricBounds();
+    // Re-clamp only when the typed value already exceeds the max (clamp is a
+    // no-op below it), so mid-typing digits aren't fought.
+    if (v !== '' && clamp(parseInt(v, 10)) < parseInt(v, 10)) $('repsInput').value = String(clamp(parseInt(v, 10)));
+  });
+  // Metric toggle: flip the current exercise between reps and time. Sticky per
+  // exercise (stored like `bw`) and synced via the app_state blob.
+  $('metricSeg').querySelectorAll('button').forEach(b => {
+    b.addEventListener('click', () => {
+      const ex = getCurrentEx();
+      if (!ex) return;
+      const next = b.dataset.metric === 'time' ? 'time' : 'reps';
+      if ((ex.metric || 'reps') === next) return;
+      ex.metric = next;
+      // Reset the input so a stale reps value isn't read as seconds (or vice
+      // versa) — renderAll reseeds it from this metric's last set / default.
+      $('repsInput').value = '';
+      saveState();
+      renderAll();
+    });
   });
   // Dropset arming: when ON, the NEXT logged set is tagged is_dropset and chains
   // onto the working set above it. Auto-disarms after each log. A dropset can
@@ -125,9 +151,17 @@
   $('logBtn').addEventListener('click', () => {
     const ex = getCurrentEx();
     if (!ex) return;
-    let reps = parseInt($('repsInput').value, 10);
-    if (isNaN(reps) || reps < REP_MIN) { alert('Enter reps (1–36).'); return; }
-    reps = clampReps(reps);
+    const isTime = isTimeMetric(ex);
+    // Read the metric input: reps (1–36) or hold-duration in seconds (1–3600).
+    let reps = null, duration = null;
+    const raw = parseInt($('repsInput').value, 10);
+    if (isTime) {
+      if (isNaN(raw) || raw < DUR_MIN) { alert('Enter a duration in seconds.'); return; }
+      duration = clampDur(raw);
+    } else {
+      if (isNaN(raw) || raw < REP_MIN) { alert('Enter reps (1–36).'); return; }
+      reps = clampReps(raw);
+    }
     // Weight: bodyweight exercises log 0. Otherwise 0 is a VALID added load
     // (pull-ups, dips, push-ups) — only reject a negative or non-numeric value.
     let w;
@@ -145,7 +179,12 @@
     // A dropset only counts if a baseline set already anchors it. Arming DS on
     // the first set of an exercise falls back to a normal baseline (Set 1).
     const isDrop = dsArmed && exerciseHasBaseline(sess, ex.id);
-    const setObj = { exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso };
+    // Mutually exclusive: a time set carries `duration` (+ metric flag) and no
+    // `reps`; a rep set carries `reps` only. The set row structure is otherwise
+    // unchanged, so sessions/history stay intact.
+    const setObj = { exId: ex.id, name: ex.name, weight: w, date: iso };
+    if (isTime) { setObj.metric = 'time'; setObj.duration = duration; }
+    else { setObj.reps = reps; }
     if (isDrop) setObj.is_dropset = true;
     sess.sets.push(setObj);
     rebuildLogIndex();
@@ -156,7 +195,8 @@
     // session id rides in metadata so the row carries its session attribution.
     try {
       window.GymCloud && window.GymCloud.pushLog({
-        exId: ex.id, name: ex.name, weight: w, reps: reps, date: iso, unit: unit(), session: sess.id, is_dropset: isDrop
+        exId: ex.id, name: ex.name, weight: w, reps: reps, duration: duration,
+        metric: isTime ? 'time' : 'reps', date: iso, unit: unit(), session: sess.id, is_dropset: isDrop
       });
     } catch (e) {}
     // Tiny pulse on the button so the user feels the save

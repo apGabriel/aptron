@@ -251,7 +251,10 @@
             (G.state.sessions = G.state.sessions || []).push(sess);
           }
         }
-        sess.sets.push({ exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date, is_dropset: !!l.is_dropset });
+        const set = { exId, name: nameById[exId] || exId, weight: l.weight, reps: l.reps, date: l.date, is_dropset: !!l.is_dropset };
+        // Preserve the time metric coming back from the normalized store.
+        if (l.metric === 'time') { set.metric = 'time'; set.duration = l.duration; set.reps = null; }
+        sess.sets.push(set);
         changed = true;
       });
     });
