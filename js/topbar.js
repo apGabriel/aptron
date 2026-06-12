@@ -155,7 +155,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
       <span class="topbar-pill-dot"></span>
       <span class="topbar-pill-count" id="topbarWaterCount">0/0</span>
     </a>
-    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button">+</button>
+    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button">🍼</button>
   </div>
   <a href="wardrobe.html" class="topbar-wardrobe-btn" id="topbarWardrobe" aria-label="Smart Wardrobe">
     <span class="topbar-wardrobe-icon">👕</span>
@@ -218,6 +218,23 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   function unitVolMlFor(state) {
     return state.unit === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
   }
+  // Shared serving icons — kept identical to po-water.html so the +button, the
+  // bubble and the main panel all read as one design.
+  const UNIT_EMOJI = { bottle: '🍼', glass: '🥛', custom: '🍶' };
+  // Which serving the + button logs right now — mirrors the water app's
+  // inputMode. 'custom' only counts once the user has given it a size.
+  function inputModeOf(state) {
+    const m = state && state.inputMode;
+    if (m === 'glass') return 'glass';
+    if (m === 'custom' && (state.customMl || 0) > 0) return 'custom';
+    return 'bottle';
+  }
+  function inputModeMlFor(state) {
+    const m = inputModeOf(state);
+    if (m === 'glass')  return state.glassMl  || 250;
+    if (m === 'custom') return state.customMl || 500;
+    return state.bottleMl || 500;
+  }
   // Compact serving number for the small bubble: ≤1 decimal with a trailing
   // ".0" trimmed, so it stays tidy — bottles "1.6", glasses "8" / "8.5" / "12".
   function fmtUnit(n) {
@@ -230,7 +247,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   function getWaterProgress() {
     let state = null;
     try { state = JSON.parse(localStorage.getItem('po_water_v1')); } catch (e) {}
-    if (!state) return { unit: 'bottle', done: 0, total: 0 };
+    if (!state) return { unit: 'bottle', mode: 'bottle', done: 0, total: 0 };
     const todayKey = calendarDateKey();
     const doneMl = (state.logs || {})[todayKey] || 0;   // logs are absolute ml
     const p = state.profile || { weightKg: 75 };
@@ -249,7 +266,9 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     const unitVol = unitVolMlFor(state);
     const unit = state.unit === 'glass' ? 'glass' : 'bottle';
     // Divide the SAME stored ml by the unit volume → progress in the chosen unit.
-    return { unit, done: doneMl / unitVol, total: totalMl / unitVol };
+    // `mode` is the INPUT serving (drives the + button icon); `unit` is the
+    // display unit (drives the count) — they can differ.
+    return { unit, mode: inputModeOf(state), done: doneMl / unitVol, total: totalMl / unitVol };
   }
   function classifyStatus(done, total) {
     if (total <= 0) return 'idle';
@@ -271,11 +290,18 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     // Mirror the main panel: "<done>/<target>" in the active unit, no ml.
     if (countEl) countEl.textContent = w.total > 0 ? (fmtUnit(w.done) + '/' + fmtUnit(w.total)) : '0/0';
     setPillStatus(waterEl, classifyStatus(w.done, w.total));
+    // The + button wears the active serving's icon, so a one-tap log on any page
+    // is unambiguous about what it's adding.
+    const addBtn = document.getElementById('topbarWaterAdd');
+    if (addBtn) {
+      addBtn.textContent = UNIT_EMOJI[w.mode] || UNIT_EMOJI.bottle;
+      addBtn.setAttribute('aria-label', 'Log one ' + (w.mode === 'custom' ? 'serving' : w.mode) + ' of water');
+    }
   }
 
   function defaultWaterState() {
     return {
-      v: 2, unit: 'bottle', inputMode: 'bottle', bottleMl: 500, glassMl: 250, weightUnit: 'kg',
+      v: 2, unit: 'bottle', inputMode: 'bottle', bottleMl: 500, glassMl: 250, customMl: 0, customLabel: 'Custom', weightUnit: 'kg',
       profile: { weightKg: 75, age: 25, sex: 'm', activityHrsPerWeek: 5 },
       caffeineMgPerDay: 200, substances: [], logs: {}
     };
@@ -321,8 +347,8 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     state.logs = state.logs || {};
     const k = calendarDateKey();
     // Add one serving's worth of ml (matching the app's input mode), NOT "+1",
-    // since logs are absolute ml now.
-    const addMl = state.inputMode === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
+    // since logs are absolute ml now. Handles bottle/glass/custom.
+    const addMl = inputModeMlFor(state);
     state.logs[k] = Math.max(0, Math.round((state.logs[k] || 0) + addMl));
     try { localStorage.setItem('po_water_v1', JSON.stringify(state)); } catch (e) {}
     render();

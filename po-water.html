@@ -165,6 +165,9 @@ html, body {
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
 }
 .water-chip-swap { color: var(--info); font-size: 13px; line-height: 1; }
+.water-num-emoji {
+  font-size: 34px; line-height: 1; align-self: center;
+}
 .water-num {
   font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
   line-height: 1; font-variant-numeric: tabular-nums;
@@ -505,6 +508,7 @@ html, body {
          untouched (see rotateDisplayUnit). -->
     <div class="water-row" id="waterDisplayToggle" role="button" tabindex="0"
          aria-label="Tap to switch display unit" title="Tap to switch display unit">
+      <span class="water-num-emoji" id="waterNumEmoji" aria-hidden="true">🍼</span>
       <span class="water-num" id="waterNum">0</span>
       <span class="water-target" id="waterTarget">/ 9</span>
       <span class="water-unit-chip" id="waterUnitChip" aria-hidden="true">
@@ -870,9 +874,17 @@ html, body {
     if (u === 'custom') return (state.customLabel || 'Custom').toLowerCase();
     return 'bottle';
   }
+  // Serving icon per unit — identical set to js/topbar.js so the bubble, the
+  // + button and this panel all read as one design.
+  function emojiFor(u) {
+    if (u === 'glass')  return '🥛';
+    if (u === 'custom') return '🍶';
+    return '🍼';
+  }
   function unitVolMl()       { return volMlFor(state.unit); }
   function unitLabelPlural() { return pluralFor(state.unit); }
   function unitLabelTitle()  { return titleFor(state.unit); }
+  function unitEmoji()       { return emojiFor(state.unit); }
 
   // Display-unit rotation order. 'custom' only joins the cycle once it has a
   // size, so an unconfigured container never appears as a toggle destination.
@@ -925,8 +937,9 @@ html, body {
     const targetUnits = targetMl / unitVolMl();
 
     renderInputMode();
-    $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
+    $('waterUnitLabel').textContent = unitEmoji() + ' ' + unitLabelPlural().toUpperCase() + ' DRANK TODAY';
     $('waterUnitChipLabel').textContent = altUnitLabelTitle();
+    $('waterNumEmoji').textContent = unitEmoji();
     $('waterNum').textContent = fmtUnits(display);
     // e.g. "/ 2.5 Bottles" — no raw ml anywhere in the main readout.
     $('waterTarget').textContent = '/ ' + fmtUnits(targetUnits) + ' ' + unitLabelTitle();
@@ -968,16 +981,16 @@ html, body {
     const bBtn = seg.querySelector('[data-m="bottle"]');
     const gBtn = seg.querySelector('[data-m="glass"]');
     const cBtn = seg.querySelector('[data-m="custom"]');
-    bBtn.textContent = 'Bottle · ' + (state.bottleMl || 500) + 'ml';
-    gBtn.textContent = 'Glass · ' + (state.glassMl || 250) + 'ml';
+    bBtn.textContent = emojiFor('bottle') + ' Bottle · ' + (state.bottleMl || 500) + 'ml';
+    gBtn.textContent = emojiFor('glass') + ' Glass · ' + (state.glassMl || 250) + 'ml';
     // The custom input button only exists once a size is configured.
     const hasCustom = (state.customMl || 0) > 0;
     cBtn.style.display = hasCustom ? '' : 'none';
-    if (hasCustom) cBtn.textContent = (state.customLabel || 'Custom') + ' · ' + state.customMl + 'ml';
+    if (hasCustom) cBtn.textContent = emojiFor('custom') + ' ' + (state.customLabel || 'Custom') + ' · ' + state.customMl + 'ml';
     bBtn.classList.toggle('active', state.inputMode === 'bottle');
     gBtn.classList.toggle('active', state.inputMode === 'glass');
     cBtn.classList.toggle('active', state.inputMode === 'custom');
-    $('waterPlusLabel').textContent = 'Drank a ' + inputModeSingular();
+    $('waterPlusLabel').textContent = emojiFor(state.inputMode) + ' Drank a ' + inputModeSingular();
   }
 
   function renderWhy(calc, targetUnits) {
@@ -1011,6 +1024,7 @@ html, body {
       const k = dateKey(d);
       days.push({ date: d, key: k, ml: state.logs[k] || 0 });
     }
+    const emoji = unitEmoji();   // history reads in the active display unit
     list.innerHTML = days.map(({date, ml}) => {
       const dows = ['Sun','Mon','Tue','Wed','THU','Fri','Sat'];
       const lbl = dows[date.getDay()] + ' ' + (date.getMonth()+1) + '/' + date.getDate();
@@ -1019,7 +1033,7 @@ html, body {
       return '<div class="hist-row">'
         + '<span class="hist-date">' + lbl + '</span>'
         + '<div class="hist-bar-wrap"><div class="hist-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div>'
-        + '<span class="hist-count">' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
+        + '<span class="hist-count">' + emoji + ' ' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
         + '</div>';
     }).join('') || '<div style="text-align:center;font-size:12px;color:var(--text-3);padding:12px 0">No logs yet.</div>';
   }
