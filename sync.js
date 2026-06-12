@@ -11,6 +11,10 @@
     const syncedKeys = (config && config.syncedKeys) || [];
     const syncedPrefixes = (config && config.syncedPrefixes) || [];
     const onApplied = config && config.onApplied;
+    // Optional field-level merge: (key, localVal, remoteVal) => mergedVal.
+    // Lets a page reconcile a key instead of taking remote wholesale. Absent →
+    // pure last-write-wins (unchanged behavior for every other app).
+    const mergeRemote = config && config.mergeRemote;
     if (!appKey || !window.supabase) return;
     if (!SUPABASE_URL || !SUPABASE_KEY) return;
     if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) return;
@@ -56,10 +60,24 @@
       if (!remote || typeof remote !== 'object') return false;
       suppressSync = true;
       let changed = false;
+      let mergedDiverged = false;   // a merge kept MORE than remote → push it back
       try {
         for (const k of Object.keys(remote)) {
           if (!matches(k)) continue;
-          const incoming = JSON.stringify(remote[k]);
+          let value = remote[k];
+          if (typeof mergeRemote === 'function') {
+            let localVal = null;
+            const raw = localStorage.getItem(k);
+            if (raw != null) { try { localVal = JSON.parse(raw); } catch (e) { localVal = null; } }
+            try {
+              const merged = mergeRemote(k, localVal, remote[k]);
+              if (merged !== undefined) {
+                value = merged;
+                if (JSON.stringify(merged) !== JSON.stringify(remote[k])) mergedDiverged = true;
+              }
+            } catch (e) {}
+          }
+          const incoming = JSON.stringify(value);
           const local = localStorage.getItem(k);
           if (local !== incoming) { try { origSet(k, incoming); changed = true; } catch (e) {} }
         }
@@ -68,6 +86,9 @@
         }
       } finally { suppressSync = false; }
       if (changed && typeof onApplied === 'function') { try { onApplied(); } catch (e) {} }
+      // We merged in values the cloud doesn't have yet (lastSyncedJson was set to
+      // the bare remote upstream) — push so the other device converges too.
+      if (mergedDiverged) schedulePush();
       return changed;
     }
     async function pushNow() {
