@@ -261,6 +261,17 @@ img, video, canvas, svg { max-width: 100%; }
   font-size: 10.5px; color: var(--text-3); font-weight: 700;
   letter-spacing: 0.14em; text-transform: uppercase;
 }
+/* Desktop alignment: the Reps/Time column's header carries the metric toggle,
+   making it taller than the bare WEIGHT label. With the two columns side by
+   side that dropped the right input (and its whole column) a few px below the
+   left. Pin both header bands to one height and center them so the two inputs
+   share a single baseline. Only applies where the columns sit side by side —
+   below 480px they stack, so the bands are left at their natural height. */
+@media (min-width: 481px) {
+  .po-log-grid .po-field > label,
+  .po-log-grid .po-field-head { min-height: 30px; }
+  .po-log-grid .po-field > label { display: flex; align-items: center; }
+}
 /* Reps/Time field header: label on the left, metric toggle on the right. */
 .po-field-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
