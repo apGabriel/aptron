@@ -837,6 +837,12 @@ html, body {
   function unitLabelTitle() {
     return state.unit === 'glass' ? 'Glasses' : 'Bottles';
   }
+  // The OTHER unit — what tapping the toggle switches TO. The chip label invites
+  // the destination state (showing glasses ⇒ button reads "Bottles", and vice
+  // versa), so the action is self-describing.
+  function altUnitLabelTitle() {
+    return state.unit === 'glass' ? 'Bottles' : 'Glasses';
+  }
   // INPUT mode (what one tap adds) — bottle or glass volume, in ml.
   function inputModeMl() {
     return state.inputMode === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
@@ -877,7 +883,7 @@ html, body {
 
     renderInputMode();
     $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
-    $('waterUnitChipLabel').textContent = unitLabelTitle();
+    $('waterUnitChipLabel').textContent = altUnitLabelTitle();
     $('waterNum').textContent = fmtUnits(display);
     // e.g. "/ 2.5 Bottles" — no raw ml anywhere in the main readout.
     $('waterTarget').textContent = '/ ' + fmtUnits(targetUnits) + ' ' + unitLabelTitle();
