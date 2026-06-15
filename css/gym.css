@@ -1212,6 +1212,24 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-mini:disabled { opacity: 0.3; cursor: not-allowed; }
 .rb-mini.rb-del:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
 
+/* ----- Routine-template rest control (per-exercise countdown duration) ----- */
+.rb-rest {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02); border-radius: 10px;
+}
+.rb-rest-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.rb-rest-ctr { display: flex; align-items: center; gap: 8px; }
+.rb-rest-val {
+  min-width: 52px; text-align: center; font-family: var(--font-mono);
+  font-size: 14px; font-weight: 700; color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.rb-rest-btn { width: 30px; height: 26px; font-size: 15px; }
+
 /* ----- Routine-template row actions ----- */
 .rb-ex-actions { display: flex; gap: 8px; }
 .rb-ex-actions button {
@@ -1276,3 +1294,77 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-hist-set { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); text-align: right; }
 .rb-hist-best { color: var(--good); font-size: 11px; font-weight: 800; }
 .rb-hist-empty { font-size: 12px; color: var(--text-4); font-style: italic; padding: 8px 0; }
+
+/* ============================================================
+   Rest Timer overlay — between-sets countdown (gym-rest-timer.js)
+   ============================================================ */
+.po-rest {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0,0,0,0.78); backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+.po-rest.is-open { display: flex; animation: poRestIn 0.2s ease; }
+@keyframes poRestIn { from { opacity: 0; } to { opacity: 1; } }
+
+.po-rest-card {
+  display: flex; flex-direction: column; align-items: center; gap: 26px;
+  width: 100%; max-width: 320px; text-align: center;
+}
+.po-rest-eyebrow {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.18em;
+  color: var(--text-3); text-transform: uppercase;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.po-rest-ring-wrap { position: relative; width: 220px; height: 220px; }
+.po-rest-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.po-rest-ring-bg { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 6; }
+.po-rest-ring-fg {
+  fill: none; stroke: var(--good); stroke-width: 6; stroke-linecap: round;
+  transition: stroke-dashoffset 0.25s linear, stroke 0.3s ease;
+}
+.po-rest-time {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 54px; font-weight: 700;
+  color: var(--text-1); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+
+.po-rest-actions { display: flex; align-items: center; gap: 12px; }
+.po-rest-skip {
+  padding: 13px 30px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 700; color: #0a0a0b;
+  border: 1px solid rgba(255,255,255,0.85);
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  -webkit-tap-highlight-color: transparent;
+}
+.po-rest-skip:active { transform: scale(0.96); }
+.po-rest-adjust {
+  padding: 13px 16px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  font-size: 13px; font-weight: 700; color: var(--text-2);
+  border: 1px solid var(--border-strong); background: rgba(255,255,255,0.04);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.po-rest-adjust:hover { background: rgba(255,255,255,0.10); color: var(--text-1); }
+.po-rest-adjust:active { transform: scale(0.94); }
+
+/* Finish cue at 0:00 — green flash on the backdrop + a pulse on the card,
+   alongside the audio beep and haptic buzz fired from JS. */
+.po-rest.is-done { animation: poRestFlash 0.5s ease 2; }
+.po-rest.is-done .po-rest-time { color: var(--good); }
+.po-rest.is-done .po-rest-card { animation: poRestDone 0.5s ease; }
+@keyframes poRestFlash {
+  0%, 100% { background: rgba(0,0,0,0.78); }
+  50%      { background: rgba(60,120,90,0.55); }
+}
+@keyframes poRestDone {
+  0%, 100% { transform: scale(1); }
+  30%      { transform: scale(1.06); }
+}
+
+@media (max-width: 600px) {
+  .po-rest-ring-wrap { width: 200px; height: 200px; }
+  .po-rest-time { font-size: 48px; }
+}

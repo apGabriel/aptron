@@ -805,6 +805,27 @@ const CONFIG = {
   </div>
 </div>
 
+<!-- Rest Timer overlay — between-sets countdown. Triggered by GymRestTimer
+     after each logged set; the duration is the active routine's per-exercise
+     rest. Fully self-contained: no session state lives here. -->
+<div class="po-rest" id="poRest" role="dialog" aria-label="Rest timer" aria-hidden="true">
+  <div class="po-rest-card">
+    <div class="po-rest-eyebrow" id="poRestEyebrow">REST</div>
+    <div class="po-rest-ring-wrap">
+      <svg class="po-rest-ring" viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="po-rest-ring-bg" cx="60" cy="60" r="54"></circle>
+        <circle class="po-rest-ring-fg" id="poRestRing" cx="60" cy="60" r="54"></circle>
+      </svg>
+      <div class="po-rest-time" id="poRestTime">0:00</div>
+    </div>
+    <div class="po-rest-actions">
+      <button class="po-rest-adjust" id="poRestMinus" type="button">−15s</button>
+      <button class="po-rest-skip" id="poRestSkip" type="button">Skip</button>
+      <button class="po-rest-adjust" id="poRestPlus" type="button">+15s</button>
+    </div>
+  </div>
+</div>
+
 <!-- Gym module — split out of the former monolithic js/gym.js. The five Coach
      modules share state via one window.GymApp namespace and MUST load in this
      dependency order (defer preserves document order): core → storage → sync →
@@ -817,6 +838,7 @@ const CONFIG = {
 <script src="js/gym/gym-actions.js" defer></script>
 <script src="js/gym/gym-routine-builder.js" defer></script>
 <script src="js/gym/gym-cloud.js" defer></script>
+<script src="js/gym/gym-rest-timer.js" defer></script>
 
 </body>
 </html>

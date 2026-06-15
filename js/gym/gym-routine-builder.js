@@ -244,6 +244,10 @@
     if (dupGuard('addex_' + exId)) return;                    // swallow double-tap
     current.exercises.push({
       exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl,
+      // Rest between sets (seconds) — surfaced as the live countdown after each
+      // logged set. 0 = no timer. Per-routine: the same movement can rest
+      // differently in a strength routine vs. a hypertrophy one.
+      rest: DEFAULTS.rest,
       // Set-by-set log: seed with a few blank sets the user can fill in.
       sets: Array.from({ length: DEFAULTS.sets }, () => blankSet()),
     });
@@ -286,6 +290,32 @@
     if (now - (_dupTimes[key] || 0) < (ms || 350)) return true;
     _dupTimes[key] = now;
     return false;
+  }
+
+  // Rest seconds → compact label: "45s" under a minute, "1:30" / "2 min" above.
+  function fmtRest(s) {
+    s = Math.max(0, Math.round(Number(s) || 0));
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60), r = s % 60;
+    return r ? (m + ':' + String(r).padStart(2, '0')) : (m + ' min');
+  }
+
+  // Per-exercise rest stepper (−/+ in 15s steps, 0–600s). Mutates it.rest in
+  // place; the value is deep-cloned into the saved routine on Save. Legacy rows
+  // saved before this field existed are backfilled to the default on render.
+  function restControl(it) {
+    if (typeof it.rest !== 'number' || isNaN(it.rest) || it.rest < 0) it.rest = DEFAULTS.rest;
+    const wrap = document.createElement('div'); wrap.className = 'rb-rest';
+    const lbl = document.createElement('span'); lbl.className = 'rb-rest-label'; lbl.textContent = 'Rest between sets';
+    const ctr = document.createElement('div'); ctr.className = 'rb-rest-ctr';
+    const val = document.createElement('span'); val.className = 'rb-rest-val';
+    const paint = () => { val.textContent = it.rest === 0 ? 'Off' : fmtRest(it.rest); };
+    const dec = mini('−', () => { it.rest = Math.max(0,   it.rest - 15); paint(); }, 'rb-rest-btn');
+    const inc = mini('+', () => { it.rest = Math.min(600, it.rest + 15); paint(); }, 'rb-rest-btn');
+    paint();
+    ctr.append(dec, val, inc);
+    wrap.append(lbl, ctr);
+    return wrap;
   }
 
   function move(idx, dir) {
@@ -335,7 +365,7 @@
     });
     actions.append(removeEx);
 
-    li.append(head, actions);
+    li.append(head, restControl(it), actions);
     return li;
   }
 

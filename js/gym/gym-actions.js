@@ -204,6 +204,14 @@
     btn.style.transition = 'transform 0.15s';
     btn.style.transform = 'scale(0.96)';
     setTimeout(() => { btn.style.transform = ''; }, 160);
+    // Kick off the between-sets rest countdown for this exercise. The duration
+    // is the rest planned for this movement in the ACTIVE routine (0 = off).
+    // The timer is a self-contained overlay (window.GymRestTimer) that holds no
+    // session state, so it never disturbs the logging flow it sits on top of.
+    try {
+      const rest = G.getRestSeconds(ex.id);
+      if (rest > 0 && window.GymRestTimer) window.GymRestTimer.start(rest, ex.name);
+    } catch (e) {}
   });
 
   // ============================================================
