@@ -1,0 +1,9 @@
+{
+  "name": "aptron-preview-skill",
+  "private": true,
+  "type": "module",
+  "description": "Tooling for the /preview skill — drives the static dashboards in cached Chromium. node_modules here is gitignored.",
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}
