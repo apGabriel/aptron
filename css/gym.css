@@ -1473,8 +1473,22 @@ img, video, canvas, svg { max-width: 100%; }
   background: rgba(255,255,255,0.04); border: 1px solid var(--border);
   border-radius: 9px; color: var(--text-1); font-family: inherit; font-size: 12.5px; font-weight: 600;
   cursor: pointer;
+  /* Force the native popup (and its options) to render dark so the option
+     text isn't white-on-white in Chromium/Windows. */
+  color-scheme: dark;
 }
 .po-cal-filter:focus { outline: none; border-color: var(--accent); }
+/* Explicit dark background + light text for the dropdown list items — some
+   engines ignore color-scheme and paint options on a system-light surface. */
+.po-cal-filter option {
+  background-color: #16161a;
+  color: var(--text-1);
+}
+.po-cal-filter option:checked,
+.po-cal-filter option:hover {
+  background-color: #23232a;
+  color: var(--text-1);
+}
 
 .po-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .po-cal-dow {
