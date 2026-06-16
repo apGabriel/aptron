@@ -184,7 +184,12 @@ function parseFilename(filename) {
     return { error: `could not extract a name from: ${filename}` };
   }
 
-  const name = words.join(' ');
+  // The display name may arrive percent-encoded in the source filenames (e.g.
+  // "45%C2%B0-Side-Bend" → words ["45%C2%B0","Side","Bend"]). Decode it to clean
+  // human-readable text ("45° Side Bend"). The id is deliberately left derived
+  // from the RAW words so existing ids (e.g. "45c2b0_side_bend") stay stable and
+  // don't orphan exId references in saved routines on regeneration.
+  const name = safeDecode(words.join(' '));
   const id   = words.join('_').toLowerCase().replace(/[^a-z0-9_]/g, '');
 
   let muscleGroup, unmappedMuscle = null;
@@ -209,6 +214,13 @@ function parseFilename(filename) {
 
 function titleCase(s) {
   return s.split(/[-\s]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// Decode percent-encoded text safely: idempotent for raw names, and on a
+// malformed "%" run (not valid encoding) it returns the original untouched.
+function safeDecode(s) {
+  if (s.indexOf('%') === -1) return s;
+  try { return decodeURIComponent(s); } catch (_) { return s; }
 }
 
 // Build a single, correctly percent-encoded path segment for the storage URL.

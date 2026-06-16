@@ -100,6 +100,28 @@ body::before {
   background: rgba(224, 118, 88, 0.18); color: var(--text-primary);
 }
 
+/* ---------- Live weather (Open-Meteo) ---------- */
+.wr-head-controls {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  flex-shrink: 0;
+}
+.wr-weather { display: inline-flex; align-items: center; gap: 8px; }
+.wr-weather-loc {
+  border: 1px solid var(--border-soft); background: var(--bg-secondary);
+  color: var(--text-secondary); cursor: pointer; font-family: inherit;
+  font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 999px;
+  white-space: nowrap; transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+.wr-weather-loc:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+.wr-weather-loc.is-loading { opacity: 0.55; pointer-events: none; }
+.wr-weather-chip {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; font-weight: 700; color: var(--text-primary);
+  background: rgba(224, 118, 88, 0.14); border: 1px solid var(--border-soft);
+  padding: 6px 11px; border-radius: 999px; font-variant-numeric: tabular-nums;
+}
+.wr-weather-chip[hidden] { display: none; }
+
 /* ---------- Dashboard grid (two main sections) ---------- */
 .wr-grid {
   display: grid;

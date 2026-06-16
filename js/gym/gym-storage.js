@@ -276,6 +276,30 @@
   }
   function getLogs() { return (G.state.logs[G.state.currentEx] || []).slice(); }
 
+  // Rest-between-sets (seconds) for the ACTIVE routine — surfaced as the live
+  // countdown after each logged set. The rest is now routine-wide (one value
+  // for every movement), configured in the Routine Builder.
+  //   New model:  routine.restEnabled (bool) + routine.rest (seconds).
+  //               restEnabled === false → 0 (timer off).
+  //   Legacy:     routines saved before this change have per-exercise `rest`
+  //               and no routine-level fields → fall back to that exercise's
+  //               value so old data keeps timing correctly.
+  // Accepts either the coach id ('rt_<exId>') or the raw exId. Defaults to 90s.
+  function getRestSeconds(exId) {
+    const r = getCurrentRoutine();
+    if (!r) return 90;
+    if (typeof r.restEnabled === 'boolean') {
+      if (!r.restEnabled) return 0;
+      const rv = Number(r.rest);
+      return Number.isFinite(rv) && rv >= 0 ? rv : 90;
+    }
+    // Legacy per-exercise rest.
+    const raw = String(exId || '').replace(/^rt_/, '');
+    const it = (r.exercises || []).find(e => String(e.exId) === raw);
+    const v = it ? Number(it.rest) : NaN;
+    return Number.isFinite(v) && v >= 0 ? v : 90;
+  }
+
   // Prescription engine — "what should I do next session?"
   // Upgrade trigger: hits CONFIG.upgradeAtReps (default 8) OR the exercise's
   // repMax, whichever fires first. So a 5-8 lifter hits upgrade at 8; a 6-12
@@ -339,6 +363,6 @@
     uidSession, buildLogIndex, rebuildLogIndex, logSetKey, dedupSessionSets, migrateSessions,
     currentSessionLabel, getActiveSession, ensureActiveSession, closeActiveSession,
     startNewSession, summarizeSession,
-    getRoutines, getCurrentRoutine, ensureRoutineExercises, getFiltered, getCurrentEx, getLogs, getRx
+    getRoutines, getCurrentRoutine, ensureRoutineExercises, getFiltered, getCurrentEx, getLogs, getRestSeconds, getRx
   });
 })();

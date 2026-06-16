@@ -18,7 +18,41 @@
   let activeMuscle = 'All';          // coarse pill filter ('All' or a muscleGroup)
   let activeSub    = null;           // precise sub-muscle from the body map (e.g. 'Calves')
   let search       = '';
-  let current      = { id: null, name: '', exercises: [] }; // routine being built
+  // Routine being built. Rest is now routine-wide: `restEnabled` master switch
+  // + `rest` (seconds) shared by every exercise. New routines default to a 90s
+  // rest enabled (the previous per-exercise default).
+  function freshRoutine() { return { id: null, name: '', exercises: [], restEnabled: true, rest: DEFAULTS.rest }; }
+  let current      = freshRoutine();
+
+  // ── Rest model helpers ────────────────────────────────────────
+  // Seconds → "MM:SS" (zero-padded). 90 → "01:30".
+  function secToMMSS(s) {
+    s = Math.max(0, Math.round(Number(s) || 0));
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+  // "MM:SS" | "M:SS" | bare seconds → seconds, or null if malformed. Seconds
+  // field must be 0–59. Returns null (not 0) on invalid so the caller can flag it.
+  function parseMMSS(str) {
+    str = String(str || '').trim();
+    if (str === '') return null;
+    if (/^\d+$/.test(str)) return parseInt(str, 10);          // bare seconds
+    const m = str.match(/^(\d{1,2}):([0-5]?\d)$/);
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+  }
+  const clampRest = s => Math.max(0, Math.min(600, Math.round(Number(s) || 0)));
+  // Backfill the routine-wide rest fields on routines saved under the old
+  // per-exercise model so editing them shows a sane switch + value.
+  function ensureRestModel(r) {
+    if (typeof r.restEnabled !== 'boolean') {
+      const vals = (r.exercises || []).map(e => Number(e.rest)).filter(v => Number.isFinite(v));
+      const on = vals.some(v => v > 0);
+      r.restEnabled = on;
+      r.rest = on ? (vals.find(v => v > 0) || DEFAULTS.rest) : DEFAULTS.rest;
+    }
+    if (!Number.isFinite(Number(r.rest))) r.rest = DEFAULTS.rest;
+    r.rest = clampRest(r.rest);
+    return r;
+  }
 
   // ── Persistence ───────────────────────────────────────────────
   function loadRoutines() {
@@ -32,6 +66,17 @@
     try { window.GymCloud && window.GymCloud.pushRoutines(arr); } catch (e) {}
   }
   const clone = obj => JSON.parse(JSON.stringify(obj));
+
+  // Some catalog entries arrived percent-encoded (e.g. "45%C2%B0 Side Bend")
+  // — decode for display so users see "45° Side Bend". Guarded: no '%' →
+  // return as-is (fast path); a malformed sequence → return the original
+  // string instead of throwing. Safe to run on names and on gif URLs (a
+  // decoded URL is re-encoded identically by the browser on request).
+  function decodeName(s) {
+    s = s == null ? '' : String(s);
+    if (s.indexOf('%') === -1) return s;
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
 
   // ── Library filtering ─────────────────────────────────────────
   // Multi-level pill bar. At the root it shows the coarse groups; once an
@@ -244,7 +289,8 @@
     if (dupGuard('addex_' + exId)) return;                    // swallow double-tap
     current.exercises.push({
       exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl,
-      // Set-by-set log: seed with a few blank sets the user can fill in.
+      // Rest is routine-wide now (current.restEnabled / current.rest) — no
+      // per-exercise rest field. Set-by-set log: seed a few blank sets.
       sets: Array.from({ length: DEFAULTS.sets }, () => blankSet()),
     });
     renderRoutine();
@@ -266,6 +312,7 @@
     $('rbRoutineEmpty').style.display = current.exercises.length ? 'none' : 'block';
     current.exercises.forEach((it, idx) => list.appendChild(routineRow(it, idx)));
     if ($('rbRoutineName').value !== current.name) $('rbRoutineName').value = current.name;
+    syncRestUI();
   }
 
   function mini(label, fn, cls) {
@@ -288,6 +335,20 @@
     return false;
   }
 
+  // Reflect current.restEnabled / current.rest into the global rest config UI.
+  function syncRestUI() {
+    const toggle = $('rbRestToggle');
+    const field  = $('rbRestField');
+    const input  = $('rbRestInput');
+    const err     = $('rbRestErr');
+    if (!toggle || !field || !input) return;
+    toggle.checked = !!current.restEnabled;
+    field.hidden = !current.restEnabled;
+    // Don't stomp what the user is mid-typing.
+    if (document.activeElement !== input) input.value = secToMMSS(current.rest);
+    if (err) err.hidden = true;
+  }
+
   function move(idx, dir) {
     const j = idx + dir;
     if (j < 0 || j >= current.exercises.length) return;
@@ -307,12 +368,12 @@
     const head = document.createElement('div'); head.className = 'rb-row-head';
 
     const thumb = document.createElement('img');
-    thumb.className = 'rb-row-thumb'; thumb.loading = 'lazy'; thumb.src = it.gifUrl;
-    thumb.alt = it.name; thumb.title = 'Preview';
+    thumb.className = 'rb-row-thumb'; thumb.loading = 'lazy'; thumb.src = decodeName(it.gifUrl);
+    thumb.alt = decodeName(it.name); thumb.title = 'Preview';
     thumb.addEventListener('click', () => openGif(it));
 
     const main = document.createElement('div'); main.className = 'rb-row-main';
-    const nm = document.createElement('div'); nm.className = 'rb-row-name'; nm.textContent = it.name;
+    const nm = document.createElement('div'); nm.className = 'rb-row-name'; nm.textContent = decodeName(it.name);
     const mus = document.createElement('div'); mus.className = 'rb-row-muscle'; mus.textContent = it.muscleGroup;
     main.append(nm, mus);
 
@@ -359,17 +420,17 @@
       const editBtn = document.createElement('button');
       editBtn.type = 'button'; editBtn.className = 'po-btn-secondary rb-saved-edit'; editBtn.textContent = 'Edit';
       editBtn.addEventListener('click', () => {
-        current = clone(r);
+        current = ensureRestModel(clone(r));   // backfill rest model for legacy routines
         renderRoutine(); renderGrid();
         $('rbCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
 
       const delBtn = mini('×', () => {
-        if (!confirm('¿Estás seguro de que quieres eliminar esta rutina? Se borrará de todos tus dispositivos.')) return;
+        if (!confirm('Are you sure you want to delete this routine? It will be removed from all your devices.')) return;
         // Immediate local update — drop it from rb_routines_v1. saveRoutines()
         // also fires the 'rb:routines-changed' event so the coach refreshes.
         saveRoutines(loadRoutines().filter(x => x.id !== r.id));
-        if (current.id === r.id) { current = { id: null, name: '', exercises: [] }; renderRoutine(); renderGrid(); }
+        if (current.id === r.id) { current = freshRoutine(); renderRoutine(); renderGrid(); }
         renderSaved();
         // Background cloud delete — removes the routine from every other device.
         try { window.GymCloud && window.GymCloud.deleteRoutine(r.id); } catch (e) {}
@@ -452,9 +513,9 @@
   // ── GIF preview modal ─────────────────────────────────────────
   function openGif(e) {
     const exId = e.exId || e.id;
-    $('rbGifTitle').textContent = e.name;
+    $('rbGifTitle').textContent = decodeName(e.name);
     $('rbGifMuscle').textContent = e.muscleGroup;
-    const img = $('rbGifImg'); img.src = e.gifUrl; img.alt = e.name;
+    const img = $('rbGifImg'); img.src = decodeName(e.gifUrl); img.alt = decodeName(e.name);
     const u = coachUnit();
     renderPr(exId, u);
     renderHist(exId, u);
@@ -474,15 +535,41 @@
   $('rbMore').addEventListener('click', () => { visible += PAGE; renderGrid(); });
   $('rbRoutineName').addEventListener('input', () => { current.name = $('rbRoutineName').value; });
 
+  // ── Global rest config ────────────────────────────────────────
+  $('rbRestToggle').addEventListener('change', (e) => {
+    current.restEnabled = e.target.checked;
+    // First time it's switched on with no value, seed the default.
+    if (current.restEnabled && !(Number(current.rest) > 0)) current.rest = DEFAULTS.rest;
+    syncRestUI();
+    if (current.restEnabled) { const i = $('rbRestInput'); i.focus(); i.select(); }
+  });
+  // Validate as the user types; flag bad input, store seconds when valid.
+  $('rbRestInput').addEventListener('input', () => {
+    const secs = parseMMSS($('rbRestInput').value);
+    const ok = secs !== null && secs >= 0 && secs <= 600;
+    $('rbRestErr').hidden = ok || $('rbRestInput').value.trim() === '';
+    if (ok) current.rest = clampRest(secs);
+  });
+  // On blur, normalise the field back to canonical MM:SS (or last good value).
+  $('rbRestInput').addEventListener('blur', () => {
+    const secs = parseMMSS($('rbRestInput').value);
+    if (secs !== null && secs >= 0 && secs <= 600) current.rest = clampRest(secs);
+    $('rbRestInput').value = secToMMSS(current.rest);
+    $('rbRestErr').hidden = true;
+  });
+
   $('rbClearBtn').addEventListener('click', () => {
     if (current.exercises.length && !confirm('Clear the current routine?')) return;
-    current = { id: null, name: '', exercises: [] };
+    current = freshRoutine();
     renderRoutine(); renderGrid();
   });
 
   $('rbSaveBtn').addEventListener('click', () => {
     if (!current.exercises.length) { alert('Add at least one exercise before saving.'); return; }
     current.name = ($('rbRoutineName').value || '').trim() || 'Routine ' + new Date().toLocaleDateString();
+    // Flush any value still focused in the rest field, then normalise.
+    { const secs = parseMMSS($('rbRestInput').value); if (secs !== null && secs >= 0 && secs <= 600) current.rest = clampRest(secs); }
+    if (!current.restEnabled) current.rest = current.rest || DEFAULTS.rest; // keep a sane stored value even when off
     current.updated_at = new Date().toISOString(); // stamp for cross-device last-write-wins
     const routines = loadRoutines();
     if (current.id) {
@@ -495,7 +582,7 @@
     saveRoutines(routines);
     // clone() above deep-copies each exercise's `sets` array (weight + reps
     // per set) into the saved routine. Now wipe the workspace to free it up.
-    current = { id: null, name: '', exercises: [] };
+    current = freshRoutine();
     renderRoutine(); renderGrid(); renderSaved();
   });
 
@@ -509,6 +596,14 @@
       const res = await fetch('js/exercises-data.json', { cache: 'no-cache' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       catalog = await res.json();
+      // Normalise any percent-encoded names/URLs once at the source, so the
+      // library, search, GIF modal and routines saved from here all carry
+      // clean human-readable text.
+      (Array.isArray(catalog) ? catalog : []).forEach(e => {
+        if (!e || typeof e !== 'object') return;
+        if (e.name)   e.name   = decodeName(e.name);
+        if (e.gifUrl) e.gifUrl = decodeName(e.gifUrl);
+      });
     } catch {
       catalog = [];
     }

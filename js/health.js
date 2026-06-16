@@ -1,33 +1,11 @@
-<!--
-=====================================================
-© 2026 Rowan Thistlebrooke — All Rights Reserved
+/* =============================================================
+   health.js — all logic for health.html (Daily Stack + Water).
+   Loaded with `defer`, so the DOM is parsed before this runs.
+   Three sections: CONFIG (water defaults), the Daily Stack IIFE,
+   the Water Tracker IIFE, and the unified cloud-sync wiring.
+   ============================================================= */
 
-Personal & Educational Use Only.
-You may view and run this code locally for learning.
-You may NOT use this code or data in a commercial
-product, redistribute it, or republish it as your own.
-
-Unauthorized use may be subject to copyright enforcement.
-Contact: rowan.wisere@gmail.com
-=====================================================
--->
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0b">
-<title>Water Coach</title>
-<link rel="icon" href="img/logo.ico" type="image/x-icon">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="sync.js" defer></script>
-<script src="js/topbar.js" defer></script>
-
-<!-- =============================================================
-     EDIT THIS BLOCK TO MAKE THE APP YOURS.
-     Most settings are also editable in-app via the gear icon.
-     ============================================================= -->
-<script>
+// ===================== Water Tracker config (edit to taste) =====================
 const CONFIG = {
   appTitle: "Water Coach",
 
@@ -57,629 +35,523 @@ const CONFIG = {
   // narrow-therapeutic-window safety bumps).
   defaultSubstances: []
 };
-</script>
 
-<style>
-:root {
-  --bg: #0a0a0b;
-  --bg-card: #111113;
-  --text-1: #ffffff;
-  --text-2: rgba(255,255,255,0.6);
-  --text-3: rgba(255,255,255,0.4);
-  --text-4: rgba(255,255,255,0.25);
-  --border: rgba(255,255,255,0.06);
-  --border-strong: rgba(255,255,255,0.14);
-  --good: #6ee7b7;
-  --warn: #fbbf24;
-  --bad: #ff8a8a;
-  --info: #7DD3FC;
-  --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, SF Mono, Menlo, Consolas, monospace;
-}
-* { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0;
-  background: radial-gradient(ellipse 80% 60% at 50% 0%, #14141a 0%, #0a0a0b 60%);
-  color: var(--text-1);
-  font-family: var(--font);
-  -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
-}
-.shell { max-width: 720px; margin: 0 auto; padding: 24px 16px 80px; }
+// ===================== Daily Stack =====================
+(() => {
+  'use strict';
 
-/* ----- Top day pill + header ----- */
-.day-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.10em;
-  text-transform: uppercase; margin-bottom: 10px;
-  -webkit-tap-highlight-color: transparent;
-}
-.day-pill .day-sep { color: var(--text-4); }
+  const storeGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+  const storeSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-.header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 18px;
-}
-.title { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; margin: 0; }
-.icon-btn {
-  width: 38px; height: 38px;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 10px; color: var(--text-2); cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: background 0.18s, color 0.18s;
-}
-.icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-1); }
+  function getActiveDate() {
+    const now = new Date();
+    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
 
-/* ----- Eyebrow divider ----- */
-.divider {
-  display: flex; align-items: center; gap: 16px; margin-bottom: 14px;
-}
-.divider::before, .divider::after {
-  content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.10);
-}
-.divider span {
-  font-size: 11px; letter-spacing: 0.22em; font-weight: 600;
-  color: rgba(255,255,255,0.85);
-}
+  const TEMPLATE_VERSION = 5;
 
-/* ----- Card ----- */
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 22px 20px 18px;
-  margin-bottom: 14px;
-}
+  const STACK_DEFAULTS = [
+    { id: 'm1', name: 'XXXXX - Supplement of choice', dose: '', window: 'morning', note: 'how much MG, meal times, any data below', tag: null,    ordered: true  },
+    { id: 'm2', name: 'XXXXX - Supplement of choice', dose: '', window: 'morning', note: 'how much MG, meal times, any data below', tag: 'stack', ordered: true  },
+    { id: 'm3', name: 'XXXXX - Supplement of choice', dose: '', window: 'morning', note: 'how much MG, meal times, any data below', tag: null,    ordered: true  },
+    { id: 'l1', name: 'XXXXX - Supplement of choice', dose: '', window: 'lunch',   note: 'how much MG, meal times, any data below', tag: null,    ordered: true  },
+    { id: 'l2', name: 'XXXXX - Supplement of choice', dose: '', window: 'lunch',   note: 'how much MG, meal times, any data below', tag: null,    ordered: true  },
+    { id: 'e1', name: 'XXXXX - Supplement of choice', dose: '', window: 'evening', note: 'how much MG, meal times, any data below', tag: null,    ordered: true  },
+    { id: 'e2', name: 'XXXXX - Supplement of choice', dose: '', window: 'evening', note: 'how much MG, meal times, any data below', tag: 'not-ordered', ordered: false },
+    { id: 'e3', name: 'XXXXX - Supplement of choice', dose: '', window: 'evening', note: 'how much MG, meal times, any data below', tag: null,    ordered: true  },
+  ];
 
-/* ----- Water hero ----- */
-.water-label {
-  font-size: 10px; letter-spacing: 0.20em; font-weight: 700;
-  color: var(--text-3); margin-bottom: 8px; text-transform: uppercase;
-}
-.water-row {
-  display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;
-}
-/* The counter doubles as the bottles/glasses toggle. */
-#waterDisplayToggle {
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
-  user-select: none; border-radius: 12px; outline: none;
-  transition: opacity 0.15s;
-}
-#waterDisplayToggle:hover { opacity: 0.85; }
-#waterDisplayToggle:focus-visible { box-shadow: 0 0 0 2px rgba(110,231,183,0.40); }
-.water-unit-chip {
-  margin-left: auto; align-self: center;
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 10px; border-radius: 999px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-}
-.water-chip-swap { color: var(--info); font-size: 13px; line-height: 1; }
-.water-num-emoji {
-  font-size: 34px; line-height: 1; align-self: center;
-}
-.water-num {
-  font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
-  line-height: 1; font-variant-numeric: tabular-nums;
-}
-.water-target {
-  font-size: 18px; color: var(--text-3); font-weight: 500;
-}
+  const STACK_WINDOWS = [
+    { key: 'morning', icon: '🌅', title: 'Morning', time: '7–10 AM', cutoffHour: 10 },
+    { key: 'lunch',   icon: '🍽️', title: 'Lunch',   time: '12–2 PM', cutoffHour: 14 },
+    { key: 'evening', icon: '🌙', title: 'Evening', time: '9–11 PM', cutoffHour: 23 },
+    { key: 'anytime', icon: '⏱️', title: 'Anytime', time: 'No fixed window', cutoffHour: null },
+  ];
 
-/* Progress bar */
-.water-bar-wrap { position: relative; margin: 14px 0 22px; }
-.water-bar-track {
-  position: relative; height: 28px; border-radius: 14px;
-  background: rgba(255,255,255,0.04);
-  overflow: hidden;
-}
-.water-bar-fill {
-  position: absolute; top: 0; bottom: 0; left: 0;
-  border-radius: 14px;
-  background: linear-gradient(90deg, var(--info), var(--good));
-  transition: width 0.4s ease;
-  box-shadow: 0 0 18px rgba(110,231,183,0.18);
-}
-.water-bar-fill.over {
-  background: linear-gradient(90deg, var(--good), var(--warn));
-}
-.water-bar-zone {
-  position: absolute; top: 0; bottom: 0;
-  width: 1px; background: rgba(255,255,255,0.18);
-}
-.water-bar-labels {
-  display: flex; justify-content: space-between;
-  margin-top: 6px;
-  font-size: 10px; color: var(--text-3);
-  font-family: var(--font-mono);
-}
-.water-bar-labels .water-zone-name {
-  color: var(--good); font-weight: 700; letter-spacing: 0.10em;
-  text-transform: lowercase;
-}
+  // ====== SUPPLEMENT DATABASE — researched defaults ======
+  const SUPPLEMENT_DB = [
+    { name: 'Creatine monohydrate', dose: '5g', window: 'anytime', note: 'Daily — consistency matters more than timing', icon: '🏋️', aliases: ['creatine'] },
+    { name: 'Beta-alanine', dose: '2–5g', window: 'morning', note: 'Pre-workout — split doses to avoid tingles', icon: '🏋️', aliases: ['beta alanine'] },
+    { name: 'L-citrulline', dose: '6–8g', window: 'morning', note: '~30 min pre-workout for pump', icon: '🏋️', aliases: ['citrulline'] },
+    { name: 'BCAAs', dose: '5–10g', window: 'anytime', note: 'Around workout window', icon: '🏋️', aliases: ['bcaa'] },
+    { name: 'Whey protein', dose: '25–40g', window: 'anytime', note: 'Post-workout or to hit daily target', icon: '🥤', aliases: ['whey'] },
+    { name: 'Casein protein', dose: '25–40g', window: 'evening', note: 'Before bed for slow overnight aminos', icon: '🥤', aliases: ['casein'] },
+    { name: 'L-carnitine', dose: '1–2g', window: 'morning', note: 'With carbs for best uptake', icon: '🏋️', aliases: ['carnitine'] },
+    { name: 'Acetyl-L-carnitine', dose: '500mg–2g', window: 'morning', note: 'Cognitive variant — crosses BBB', icon: '🧠', aliases: ['alcar'] },
+    { name: 'HMB', dose: '3g', window: 'anytime', note: 'Split 3x daily — muscle preservation', icon: '🏋️', aliases: ['hmb'] },
+    { name: 'Glutamine', dose: '5g', window: 'anytime', note: 'Recovery — post-workout or before bed', icon: '🏋️', aliases: ['l-glutamine'] },
+    { name: 'Vitamin D3', dose: '2000–5000 IU', window: 'lunch', note: 'Fat-soluble — take with biggest meal', icon: '☀️', aliases: ['vit d', 'vitamin d', 'd3', 'cholecalciferol'] },
+    { name: 'Vitamin K2 (MK-7)', dose: '100–200 mcg', window: 'lunch', note: 'Pairs with D3 — same meal', icon: '💊', aliases: ['vit k', 'vitamin k', 'k2', 'mk7'] },
+    { name: 'Vitamin C', dose: '500–1000mg', window: 'morning', note: 'Water-soluble — split if over 500mg', icon: '🍊', aliases: ['vit c', 'ascorbic acid'] },
+    { name: 'Vitamin B12', dose: '500–1000mcg', window: 'morning', note: 'Methylcobalamin form preferred', icon: '⚡', aliases: ['b12', 'methylcobalamin'] },
+    { name: 'B-complex', dose: '1 cap', window: 'morning', note: 'All B vitamins — energy', icon: '⚡', aliases: ['b complex', 'b vitamins'] },
+    { name: 'Vitamin A', dose: '5000 IU', window: 'lunch', note: 'Fat-soluble — with fat', icon: '💊', aliases: ['vit a', 'retinol'] },
+    { name: 'Vitamin E', dose: '400 IU', window: 'lunch', note: 'Fat-soluble — with fat', icon: '💊', aliases: ['vit e', 'tocopherol'] },
+    { name: 'Folate', dose: '400–800mcg', window: 'morning', note: 'Methylfolate preferred', icon: '💊', aliases: ['folic acid', 'b9', 'methylfolate'] },
+    { name: 'Biotin', dose: '30mcg–5mg', window: 'anytime', note: 'Hair, skin, nails', icon: '💅', aliases: ['biotin', 'b7'] },
+    { name: 'Multivitamin', dose: '1 serving', window: 'lunch', note: 'Take with food', icon: '💊', aliases: ['multi', 'multivitamin'] },
+    { name: 'Magnesium glycinate', dose: '200–400mg', window: 'evening', note: '30–60 min before bed — sleep helper', icon: '🌙', aliases: ['magnesium', 'mag glycinate', 'bisglycinate'] },
+    { name: 'Magnesium L-threonate', dose: '144mg elemental', window: 'evening', note: 'Cognitive variant — crosses BBB', icon: '🧠', aliases: ['magtein', 'threonate'] },
+    { name: 'Magnesium citrate', dose: '200–400mg', window: 'evening', note: 'Also supports digestion', icon: '🌙', aliases: ['mag citrate'] },
+    { name: 'Zinc', dose: '15–30mg', window: 'evening', note: 'With food — not with calcium or iron', icon: '💊', aliases: ['zinc'] },
+    { name: 'Iron', dose: '18–65mg', window: 'morning', note: 'Empty stomach with vit C', icon: '💊', aliases: ['iron'] },
+    { name: 'Calcium', dose: '500mg', window: 'evening', note: 'With food — not with iron', icon: '🦴', aliases: ['calcium'] },
+    { name: 'Selenium', dose: '100–200mcg', window: 'anytime', note: 'Thyroid + antioxidant', icon: '💊', aliases: ['selenium'] },
+    { name: 'Iodine', dose: '150mcg', window: 'morning', note: 'Thyroid support', icon: '💊', aliases: ['iodine'] },
+    { name: 'Omega-3 (Fish oil)', dose: '2–3g EPA+DHA', window: 'lunch', note: 'With biggest fatty meal', icon: '🐟', aliases: ['omega 3', 'omega3', 'fish oil', 'epa', 'dha'] },
+    { name: 'Krill oil', dose: '500–1000mg', window: 'lunch', note: 'More absorbable than fish oil', icon: '🐟', aliases: ['krill'] },
+    { name: 'MCT oil', dose: '1–2 tbsp', window: 'morning', note: 'Fast energy — start low', icon: '🥥', aliases: ['mct'] },
+    { name: 'Flaxseed oil', dose: '1–2g', window: 'lunch', note: 'Plant omega-3 — with food', icon: '🌱', aliases: ['flax', 'flaxseed'] },
+    { name: 'L-theanine', dose: '100–200mg', window: 'morning', note: 'Stacks with caffeine 2:1', icon: '🧠', aliases: ['theanine'] },
+    { name: 'Caffeine', dose: '100–200mg', window: 'morning', note: 'Stack with L-theanine for cleaner focus', icon: '☕', aliases: ['caffeine'] },
+    { name: 'Rhodiola rosea', dose: '200–400mg', window: 'morning', note: 'Adaptogen — energy and stress', icon: '🌿', aliases: ['rhodiola'] },
+    { name: 'Lion\'s mane', dose: '500–1000mg', window: 'morning', note: 'Cognitive support — daily', icon: '🍄', aliases: ['lions mane', 'hericium'] },
+    { name: 'Bacopa monnieri', dose: '300–600mg', window: 'morning', note: 'With fat — long-term memory', icon: '🌿', aliases: ['bacopa'] },
+    { name: 'Ginkgo biloba', dose: '120–240mg', window: 'morning', note: 'Circulation and cognition', icon: '🌿', aliases: ['ginkgo'] },
+    { name: 'Alpha-GPC', dose: '300–600mg', window: 'morning', note: 'Choline — focus and learning', icon: '🧠', aliases: ['alpha gpc'] },
+    { name: 'Phosphatidylserine', dose: '100–300mg', window: 'evening', note: 'Cortisol regulation', icon: '🧠', aliases: ['ps'] },
+    { name: 'NAC', dose: '600–1800mg', window: 'morning', note: 'Glutathione precursor — split doses', icon: '💊', aliases: ['nac', 'n-acetyl cysteine'] },
+    { name: 'Melatonin', dose: '0.3–3mg', window: 'evening', note: '30–60 min before bed — start low', icon: '🌙', aliases: ['melatonin'] },
+    { name: 'Glycine', dose: '3g', window: 'evening', note: 'Body temp drop = better sleep onset', icon: '🌙', aliases: ['glycine'] },
+    { name: 'Apigenin', dose: '50mg', window: 'evening', note: 'From chamomile — before bed', icon: '🌙', aliases: ['apigenin'] },
+    { name: 'Ashwagandha', dose: '300–600mg', window: 'evening', note: 'KSM-66 form — stress and cortisol', icon: '🌿', aliases: ['ashwagandha', 'ksm-66'] },
+    { name: 'L-tryptophan', dose: '500mg–1g', window: 'evening', note: 'Serotonin precursor — sleep onset', icon: '🌙', aliases: ['tryptophan'] },
+    { name: 'GABA', dose: '500–750mg', window: 'evening', note: 'Calming — before bed', icon: '🌙', aliases: ['gaba'] },
+    { name: 'Valerian root', dose: '300–600mg', window: 'evening', note: 'Sleep onset support', icon: '🌙', aliases: ['valerian'] },
+    { name: 'Probiotics', dose: '10–50 billion CFU', window: 'morning', note: 'Empty stomach or with food', icon: '🦠', aliases: ['probiotic'] },
+    { name: 'Quercetin', dose: '500–1000mg', window: 'anytime', note: 'Pairs well with vitamin C', icon: '🌿', aliases: ['quercetin'] },
+    { name: 'Curcumin', dose: '500–1000mg', window: 'lunch', note: 'With black pepper + fat', icon: '🌿', aliases: ['curcumin', 'turmeric'] },
+    { name: 'Resveratrol', dose: '250–500mg', window: 'morning', note: 'With fat for absorption', icon: '🍇', aliases: ['resveratrol'] },
+    { name: 'CoQ10 / Ubiquinol', dose: '100–200mg', window: 'lunch', note: 'Fat-soluble — with biggest meal', icon: '💊', aliases: ['coq10', 'ubiquinol'] },
+    { name: 'Alpha lipoic acid', dose: '300–600mg', window: 'morning', note: 'Empty stomach for absorption', icon: '💊', aliases: ['ala', 'alpha lipoic'] },
+    { name: 'Glutathione', dose: '250–1000mg', window: 'morning', note: 'Liposomal form for absorption', icon: '💊', aliases: ['glutathione'] },
+    { name: 'Astaxanthin', dose: '4–12mg', window: 'lunch', note: 'Fat-soluble — with fatty meal', icon: '💊', aliases: ['astaxanthin'] },
+    { name: 'Berberine', dose: '500mg', window: 'lunch', note: 'Before meals — glucose support', icon: '💊', aliases: ['berberine'] },
+    { name: 'Milk thistle', dose: '200–400mg', window: 'anytime', note: 'Silymarin — liver support', icon: '🌿', aliases: ['milk thistle', 'silymarin'] },
+    { name: 'Spirulina', dose: '3–5g', window: 'morning', note: 'Algae — protein and antioxidants', icon: '🌱', aliases: ['spirulina'] },
+    { name: 'Chlorella', dose: '2–4g', window: 'morning', note: 'Algae — detox support', icon: '🌱', aliases: ['chlorella'] },
+    { name: 'Tongkat ali', dose: '200–400mg', window: 'morning', note: 'Cycle 8 weeks on/off', icon: '🌿', aliases: ['tongkat', 'longjack'] },
+    { name: 'Fadogia agrestis', dose: '600mg', window: 'morning', note: 'Cycle 8 weeks on/off', icon: '🌿', aliases: ['fadogia'] },
+    { name: 'DHEA', dose: '25–50mg', window: 'morning', note: 'Hormonal — consult doctor', icon: '💊', aliases: ['dhea'] },
+    { name: 'Pregnenolone', dose: '10–50mg', window: 'morning', note: 'Hormonal — consult doctor', icon: '💊', aliases: ['pregnenolone'] },
+    { name: 'Tribulus terrestris', dose: '250–750mg', window: 'morning', note: 'Libido and energy', icon: '🌿', aliases: ['tribulus'] },
+    { name: 'Maca root', dose: '1.5–3g', window: 'morning', note: 'Adaptogen — energy and libido', icon: '🌿', aliases: ['maca'] },
+    { name: 'Collagen peptides', dose: '10–20g', window: 'anytime', note: 'With vitamin C for synthesis', icon: '💅', aliases: ['collagen'] },
+    { name: 'Glucosamine', dose: '1500mg', window: 'lunch', note: 'With food', icon: '🦴', aliases: ['glucosamine'] },
+    { name: 'Chondroitin', dose: '1200mg', window: 'lunch', note: 'Often paired with glucosamine', icon: '🦴', aliases: ['chondroitin'] },
+    { name: 'MSM', dose: '1–3g', window: 'anytime', note: 'Joint support', icon: '🦴', aliases: ['msm'] },
+    { name: 'Hyaluronic acid', dose: '120–200mg', window: 'anytime', note: 'Skin and joint hydration', icon: '💅', aliases: ['hyaluronic', 'ha'] },
+    { name: 'Cordyceps', dose: '1–3g', window: 'morning', note: 'Energy and endurance', icon: '🍄', aliases: ['cordyceps'] },
+    { name: 'Reishi', dose: '1–2g', window: 'evening', note: 'Calming adaptogen', icon: '🍄', aliases: ['reishi', 'ganoderma'] },
+    { name: 'Chaga', dose: '1–2g', window: 'morning', note: 'Antioxidant and immune', icon: '🍄', aliases: ['chaga'] },
+  ];
 
-/* Input-mode toggle (Bottle vs Glass) */
-.water-mode-seg { margin-bottom: 12px; }
-.water-mode-seg button { padding: 11px; font-size: 13px; font-weight: 700; }
+  let todayKey = `stack:taken:${getActiveDate()}`;
 
-/* Action row */
-.water-actions {
-  display: grid; grid-template-columns: 56px 1fr; gap: 10px; align-items: stretch;
-}
-.water-minus-btn {
-  background: rgba(255,255,255,0.06);
-  border: none; border-radius: 16px;
-  color: var(--text-1);
-  font-size: 22px; font-weight: 700;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.water-minus-btn:hover { background: rgba(255,255,255,0.10); }
-.water-minus-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.water-plus-btn {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b; border: none; border-radius: 16px;
-  font-family: inherit; font-size: 16px; font-weight: 700;
-  cursor: pointer; padding: 16px;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  -webkit-tap-highlight-color: transparent;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 4px 14px rgba(0,0,0,0.40);
-}
-.water-plus-btn:hover { transform: translateY(-1px); }
-.water-plus-btn:active { transform: scale(0.98); }
+  function getItems() {
+    const storedVersion = storeGet('stack:version');
+    const stored = storeGet('stack:items');
+    if (!stored || !Array.isArray(stored) || !stored.length || storedVersion !== TEMPLATE_VERSION) {
+      const fresh = JSON.parse(JSON.stringify(STACK_DEFAULTS));
+      storeSet('stack:items', fresh);
+      storeSet('stack:version', TEMPLATE_VERSION);
+      return fresh;
+    }
+    return stored;
+  }
+  function setItems(items) { storeSet('stack:items', items); }
+  function getTaken() { return storeGet(todayKey) || {}; }
+  function setTaken(map) { storeSet(todayKey, map); }
+  function getLow() { return storeGet('stack:low') || []; }
+  function setLow(arr) { storeSet('stack:low', arr); }
 
-.water-helper {
-  text-align: center; font-size: 12px;
-  color: var(--text-3); margin-top: 12px;
-  font-style: italic;
-}
-.water-helper.good { color: var(--good); font-style: normal; }
+  function toggleTaken(id) {
+    const taken = getTaken();
+    if (taken[id]) delete taken[id]; else taken[id] = Date.now();
+    setTaken(taken); render();
+  }
+  function toggleLow(id) {
+    const low = getLow();
+    if (low.includes(id)) setLow(low.filter(x => x !== id));
+    else { low.push(id); setLow(low); }
+    render();
+  }
+  function deleteItem(id) {
+    setItems(getItems().filter(i => i.id !== id));
+    const taken = getTaken();
+    delete taken[id];
+    setTaken(taken);
+    setLow(getLow().filter(x => x !== id));
+    render();
+  }
+  function addItem(name, dose, windowKey, note = '') {
+    const v = String(name || '').trim();
+    if (!v) return;
+    const items = getItems();
+    const id = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    items.push({
+      id, name: v,
+      dose: String(dose || '').trim(),
+      window: ['morning','lunch','evening','anytime'].includes(windowKey) ? windowKey : 'anytime',
+      note: String(note || '').trim(),
+      tag: null, ordered: true
+    });
+    setItems(items);
+    render();
+  }
+  function updateItem(id, field, value) {
+    const items = getItems();
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    item[field] = value;
+    setItems(items);
+  }
 
-/* ----- Why this target? collapsible ----- */
-.why-toggle {
-  width: 100%; display: flex; align-items: center; justify-content: space-between;
-  background: transparent; border: 1px solid var(--border);
-  color: var(--text-2); border-radius: 10px;
-  padding: 11px 14px; cursor: pointer; margin-top: 14px;
-  font-family: inherit; font-size: 12px; font-weight: 600;
-  letter-spacing: 0.04em;
-  -webkit-tap-highlight-color: transparent;
-}
-.why-toggle:hover { background: rgba(255,255,255,0.04); color: var(--text-1); }
-.why-arrow { transition: transform 0.2s; font-size: 14px; }
-.why-toggle[aria-expanded="true"] .why-arrow { transform: rotate(180deg); }
-.why-body {
-  margin-top: 8px;
-  padding: 14px 16px;
-  background: rgba(255,255,255,0.025);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  display: none;
-}
-.why-body.show { display: block; }
-.why-row {
-  display: flex; justify-content: space-between; align-items: baseline;
-  font-size: 13px; padding: 4px 0;
-  font-variant-numeric: tabular-nums;
-}
-.why-row .why-label { color: var(--text-2); }
-.why-row .why-val   { color: var(--text-1); font-weight: 600; font-family: var(--font-mono); }
-.why-row.total {
-  border-top: 1px solid var(--border);
-  margin-top: 8px; padding-top: 10px;
-}
-.why-row.total .why-label { color: var(--good); font-weight: 700; }
-.why-row.total .why-val   { color: var(--good); }
+  function render() {
+    const items = getItems();
+    const taken = getTaken();
+    const low = getLow();
+    const totalCount = items.length;
+    const takenCount = items.filter(i => taken[i.id]).length;
+    document.getElementById('stackProgressText').textContent =
+      `${takenCount} / ${totalCount} taken today · resets at 6 AM`;
+    const pct = totalCount === 0 ? 0 : (takenCount / totalCount) * 100;
+    document.getElementById('stackProgressBar').style.width = pct + '%';
 
-/* ----- History ----- */
-.hist-row {
-  display: grid; grid-template-columns: 70px 1fr auto; gap: 10px;
-  padding: 10px 0; align-items: center;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-.hist-row:last-child { border-bottom: none; }
-.hist-date { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
-.hist-bar-wrap {
-  height: 8px; background: rgba(255,255,255,0.04); border-radius: 4px; overflow: hidden;
-}
-.hist-bar-fill {
-  height: 100%; background: linear-gradient(90deg, var(--info), var(--good));
-  border-radius: 4px;
-}
-.hist-bar-fill.miss { background: rgba(255,138,138,0.4); }
-.hist-count {
-  font-family: var(--font-mono); font-size: 12px;
-  color: var(--text-2); font-variant-numeric: tabular-nums;
-}
+    const groupsEl = document.getElementById('stackGroups');
+    groupsEl.innerHTML = '';
 
-/* ----- Mini chart for last 14 days ----- */
-.spark-wrap { padding: 6px 0; }
-.spark-svg { width: 100%; height: 70px; display: block; }
-.spark-bar { fill: var(--good); }
-.spark-bar.miss { fill: rgba(255,138,138,0.5); }
-.spark-target {
-  stroke: rgba(255,255,255,0.20);
-  stroke-width: 1; stroke-dasharray: 3 3;
-  vector-effect: non-scaling-stroke;
-}
+    const now = new Date();
+    const nowHour = now.getHours() + (now.getMinutes() / 60);
 
-/* ----- Modal ----- */
-.modal-bg {
-  display: none; position: fixed; inset: 0;
-  background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
-  z-index: 100; align-items: center; justify-content: center; padding: 20px;
-}
-.modal-bg.show { display: flex; }
-.modal {
-  width: 100%; max-width: 480px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-strong);
-  border-radius: 16px;
-  padding: 22px; max-height: 88vh; overflow-y: auto;
-}
-.modal h3 {
-  margin: 0 0 14px; font-size: 17px; font-weight: 700;
-}
-.set-section { margin-bottom: 22px; }
-.set-section h4 {
-  margin: 0 0 8px; font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--text-3);
-}
+    STACK_WINDOWS.forEach(win => {
+      const winItems = items.filter(i => (i.window || 'anytime') === win.key);
+      if (winItems.length === 0) return;
 
-/* ----- Form fields ----- */
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-.field label {
-  font-size: 11px; color: var(--text-3); font-weight: 700;
-  letter-spacing: 0.06em; text-transform: uppercase;
-}
-.field input[type="number"], .field input[type="text"], .field select {
-  background: rgba(0,0,0,0.28);
-  border: 1px solid var(--border);
-  color: var(--text-1);
-  font-family: inherit; font-size: 14px;
-  padding: 10px 12px; border-radius: 10px; outline: none;
-  -moz-appearance: textfield;
-}
-.field input[type="number"]::-webkit-outer-spin-button,
-.field input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.field input:focus, .field select:focus {
-  border-color: rgba(110,231,183,0.40);
-  box-shadow: 0 0 0 2px rgba(110,231,183,0.10);
-}
-.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.seg {
-  display: flex; gap: 4px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border);
-  border-radius: 10px; padding: 3px;
-}
-.seg button {
-  flex: 1; padding: 9px; border: none; background: transparent;
-  color: var(--text-3); border-radius: 7px;
-  font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.seg button.active {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b;
-}
+      const group = document.createElement('div');
+      group.className = 'stack-window';
+      group.innerHTML = `
+        <div class="stack-window-header">
+          <span class="stack-window-icon">${win.icon}</span>
+          <span class="stack-window-title">${win.title}</span>
+          <span class="stack-window-time">${win.time}</span>
+        </div>`;
 
-/* ----- Stimulant search ----- */
-.search-wrap { position: relative; }
-.search-input {
-  width: 100%; background: rgba(0,0,0,0.28);
-  border: 1px solid var(--border);
-  color: var(--text-1); font-family: inherit; font-size: 14px;
-  padding: 11px 14px; border-radius: 10px; outline: none;
-}
-.search-input:focus { border-color: rgba(110,231,183,0.40); }
-.search-results {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-  background: var(--bg-card);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px; padding: 4px;
-  max-height: 240px; overflow-y: auto;
-  z-index: 5;
-  display: none;
-}
-.search-results.show { display: block; }
-.search-result {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 9px 12px; border-radius: 7px;
-  cursor: pointer; font-size: 13px;
-  -webkit-tap-highlight-color: transparent;
-}
-.search-result:hover { background: rgba(255,255,255,0.05); }
-.search-result-name { color: var(--text-1); font-weight: 600; }
-.search-result-meta {
-  font-size: 10.5px; color: var(--text-3);
-  font-family: var(--font-mono);
-}
-.search-result-add { color: var(--good); }
+      const isPastCutoff = win.cutoffHour !== null && nowHour > win.cutoffHour;
 
-.subs-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.sub-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px;
-  background: rgba(255,255,255,0.025);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  flex-wrap: wrap;
-}
-.sub-row-info { flex: 1; min-width: 140px; }
-.sub-row-name { font-size: 13px; font-weight: 600; color: var(--text-1); }
-.sub-row-meta {
-  font-size: 11px; color: var(--text-3);
-  font-variant-numeric: tabular-nums; font-family: var(--font-mono);
-  margin-top: 2px;
-}
-.sub-row-dose {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(0,0,0,0.30);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 8px;
-}
-.sub-row-dose .sub-dose-input {
-  width: 56px; background: transparent; border: none; outline: none;
-  color: var(--text-1); font-family: inherit; font-size: 13px;
-  font-weight: 600; text-align: center;
-  font-variant-numeric: tabular-nums;
-  -moz-appearance: textfield;
-}
-.sub-row-dose .sub-dose-input::-webkit-outer-spin-button,
-.sub-row-dose .sub-dose-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.sub-row-dose .sub-dose-unit {
-  font-size: 11px; color: var(--text-3);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
-.sub-row-del {
-  background: transparent; border: none; color: var(--text-4);
-  font-size: 16px; cursor: pointer; padding: 4px 8px;
-  -webkit-tap-highlight-color: transparent;
-}
-.sub-row-del:hover { color: var(--bad); }
+      winItems.forEach(item => {
+        const isTaken = !!taken[item.id];
+        const isLow = low.includes(item.id);
+        const isMissed = !isTaken && isPastCutoff;
 
-/* ----- Buttons ----- */
-.btn-primary {
-  width: 100%; padding: 13px;
-  border: none;
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b; border-radius: 12px;
-  font-family: inherit; font-size: 14px; font-weight: 700;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 4px 14px rgba(0,0,0,0.40);
-  -webkit-tap-highlight-color: transparent;
-}
-.btn-secondary {
-  padding: 11px 16px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.04);
-  color: var(--text-1); border-radius: 10px;
-  font-family: inherit; font-size: 13px; font-weight: 600;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.btn-secondary:hover { background: rgba(255,255,255,0.10); }
-.modal-actions {
-  display: flex; gap: 8px; margin-top: 16px;
-}
-.modal-actions .btn-primary { flex: 1; }
+        const row = document.createElement('div');
+        row.className = 'stack-item' + (isTaken ? ' taken' : '') + (isMissed ? ' missed' : '');
 
-@media (max-width: 480px) {
-  .shell { padding: 16px 12px 60px; }
-  .water-num { font-size: 48px; }
-}
-</style>
-</head>
-<body>
+        let tagHtml = '';
+        if (item.tag === 'stack') tagHtml = '<span class="stack-item-tag tag-stack">stack</span>';
+        else if (item.tag === 'not-ordered') tagHtml = '<span class="stack-item-tag tag-not-ordered">not ordered</span>';
 
-<div class="shell">
-
-  <button class="day-pill" id="dayPill" type="button">
-    <span id="dayPillLabel">—</span>
-  </button>
-
-  <div class="header">
-    <h1 class="title" id="appTitle">Water Coach</h1>
-    <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    </button>
-  </div>
-
-  <div class="divider"><span>WATER</span></div>
-
-  <div class="card">
-    <div class="water-label" id="waterUnitLabel">BOTTLES DRANK TODAY</div>
-    <!-- The counter itself is the toggle: tap to rotate the WHOLE view between
-         bottles and glasses. Purely a unit-of-measure switch — the stored ml is
-         untouched (see rotateDisplayUnit). -->
-    <div class="water-row" id="waterDisplayToggle" role="button" tabindex="0"
-         aria-label="Tap to switch display unit" title="Tap to switch display unit">
-      <span class="water-num-emoji" id="waterNumEmoji" aria-hidden="true">🍼</span>
-      <span class="water-num" id="waterNum">0</span>
-      <span class="water-target" id="waterTarget">/ 9</span>
-      <span class="water-unit-chip" id="waterUnitChip" aria-hidden="true">
-        <span class="water-chip-swap">⇄</span>
-        <span id="waterUnitChipLabel">Bottles</span>
-      </span>
-    </div>
-
-    <div class="water-bar-wrap">
-      <div class="water-bar-track">
-        <div class="water-bar-fill" id="waterBarFill" style="width:0%"></div>
-        <div class="water-bar-zone" id="waterBarZoneStart" style="left:55%"></div>
-        <div class="water-bar-zone" id="waterBarZoneEnd"   style="left:80%"></div>
-      </div>
-      <div class="water-bar-labels">
-        <span id="waterBarMin">0</span>
-        <span class="water-zone-name">healthy zone</span>
-        <span id="waterBarMax">12+</span>
-      </div>
-    </div>
-
-    <!-- Input-mode rotation: pick what you're drinking from right now. This is
-         purely an input choice — switching never alters today's stored ml. -->
-    <div class="seg water-mode-seg" id="waterModeSeg" role="group" aria-label="What are you drinking?">
-      <button type="button" data-m="bottle">Bottle</button>
-      <button type="button" data-m="glass">Glass</button>
-      <button type="button" data-m="custom" id="waterModeCustomBtn" style="display:none">Custom</button>
-    </div>
-
-    <div class="water-actions">
-      <button class="water-minus-btn" id="waterMinusBtn" type="button" aria-label="Undo last">−</button>
-      <button class="water-plus-btn" id="waterPlusBtn" type="button">
-        <span id="waterPlusLabel">Drank a bottle</span>
-        <span>↑</span>
-      </button>
-    </div>
-    <div class="water-helper" id="waterHelper">Start the day — first one in.</div>
-
-    <button class="why-toggle" id="whyToggle" type="button" aria-expanded="false">
-      <span>Why this target?</span>
-      <span class="why-arrow">▾</span>
-    </button>
-    <div class="why-body" id="whyBody"></div>
-  </div>
-
-  <div class="card">
-    <div class="water-label">LAST 14 DAYS</div>
-    <div class="spark-wrap">
-      <svg class="spark-svg" id="sparkSvg" viewBox="0 0 280 70" preserveAspectRatio="none"></svg>
-    </div>
-    <div id="histList" style="margin-top:14px"></div>
-  </div>
-</div>
-
-<!-- Settings modal -->
-<div class="modal-bg" id="setModalBg">
-  <div class="modal">
-    <h3>Settings</h3>
-
-    <div class="set-section">
-      <h4>Profile</h4>
-      <div class="field-row">
-        <div class="field">
-          <label>Weight</label>
-          <input type="number" id="setWeight" step="0.5" min="20" max="300">
-        </div>
-        <div class="field">
-          <label>Weight unit</label>
-          <div class="seg" id="setWeightUnit">
-            <button data-u="kg">kg</button>
-            <button data-u="lb">lb</button>
+        row.innerHTML = `
+          <button class="stack-check ${isTaken ? 'checked' : ''}" data-action="toggle" data-id="${item.id}" aria-label="Mark taken">${isTaken ? '✓' : ''}</button>
+          <div class="stack-item-body">
+            <div class="stack-item-name" data-edit="name" data-id="${item.id}">
+              <span class="stack-item-name-text">${escapeHtml(item.name)}</span>${tagHtml}
+            </div>
+            <div class="stack-item-meta" data-edit="meta" data-id="${item.id}">${escapeHtml(metaText(item))}</div>
           </div>
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Age</label>
-          <input type="number" id="setAge" min="13" max="100">
-        </div>
-        <div class="field">
-          <label>Sex</label>
-          <div class="seg" id="setSex">
-            <button data-s="m">Male</button>
-            <button data-s="f">Female</button>
+          <button class="stack-low-btn ${isLow ? 'is-low' : ''}" data-action="low" data-id="${item.id}">↓ Running low</button>
+          <button class="stack-item-del" data-action="del" data-id="${item.id}" aria-label="Delete">×</button>`;
+
+        group.appendChild(row);
+      });
+
+      groupsEl.appendChild(group);
+    });
+
+    if (groupsEl.children.length === 0) {
+      groupsEl.innerHTML = `<div class="stack-window-empty">No items yet — add one below to start your stack.</div>`;
+    }
+
+    // Sync ticker after every render
+    renderTicker();
+  }
+
+  // ====== TICKER ======
+  let tickerIndex = 0;
+  let tickerInterval = null;
+  let cachedIssues = [];
+
+  function getStackIssues() {
+    const items = getItems();
+    const taken = getTaken();
+    const low = getLow();
+    const now = new Date();
+    const nowHour = now.getHours() + (now.getMinutes() / 60);
+
+    const missed = [];
+    const lowList = [];
+
+    items.forEach(item => {
+      const win = STACK_WINDOWS.find(w => w.key === (item.window || 'anytime'));
+      const isPastCutoff = win && win.cutoffHour !== null && nowHour > win.cutoffHour;
+      const isTaken = !!taken[item.id];
+      if (isPastCutoff && !isTaken) {
+        missed.push({
+          type: 'missed',
+          text: `${item.name} — missed ${win.title.toLowerCase()} dose`
+        });
+      }
+      if (low.includes(item.id)) {
+        lowList.push({
+          type: 'low',
+          text: `${item.name} — running low, reorder soon`
+        });
+      }
+    });
+
+    return [...missed, ...lowList];
+  }
+
+  function renderTicker() {
+    const issues = getStackIssues();
+    const tickerEl = document.getElementById('stackTicker');
+    const msgEl = document.getElementById('stackTickerMsg');
+    const countEl = document.getElementById('stackTickerCount');
+    const totalItems = getItems().length;
+
+    cachedIssues = issues;
+
+    if (issues.length === 0) {
+      msgEl.textContent = 'All caught up — keep it rolling';
+      tickerEl.classList.remove('status-low', 'status-missed');
+      countEl.textContent = `0/${totalItems}`;
+      tickerIndex = 0;
+      return;
+    }
+
+    const hasMissed = issues.some(i => i.type === 'missed');
+    tickerEl.classList.remove('status-low', 'status-missed');
+    tickerEl.classList.add(hasMissed ? 'status-missed' : 'status-low');
+
+    if (tickerIndex >= issues.length) tickerIndex = 0;
+    msgEl.textContent = issues[tickerIndex].text;
+    countEl.textContent = `${issues.length}/${totalItems}`;
+  }
+
+  function cycleTicker() {
+    if (cachedIssues.length <= 1) {
+      renderTicker();
+      return;
+    }
+    const msgEl = document.getElementById('stackTickerMsg');
+    msgEl.classList.add('is-fading');
+    setTimeout(() => {
+      tickerIndex++;
+      renderTicker();
+      msgEl.classList.remove('is-fading');
+    }, 280);
+  }
+
+  function startTicker() {
+    if (tickerInterval) clearInterval(tickerInterval);
+    tickerInterval = setInterval(cycleTicker, 5000);
+  }
+
+  function metaText(item) {
+    const parts = [];
+    if (item.dose) parts.push(item.dose);
+    if (item.note) parts.push(item.note);
+    return parts.join(' · ');
+  }
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  document.getElementById('stackGroups').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    e.stopPropagation();
+    const id = btn.dataset.id;
+    if (btn.dataset.action === 'toggle') toggleTaken(id);
+    else if (btn.dataset.action === 'low') toggleLow(id);
+    else if (btn.dataset.action === 'del') deleteItem(id);
+  });
+  document.getElementById('stackGroups').addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('[data-action="del"]');
+    if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    deleteItem(btn.dataset.id);
+  });
+  document.getElementById('stackGroups').addEventListener('click', (e) => {
+    const editEl = e.target.closest('[data-edit]');
+    if (!editEl) return;
+    if (e.target.closest('[data-action]')) return;
+    if (editEl.getAttribute('contenteditable') === 'true') return;
+    startEdit(editEl);
+  });
+
+  function startEdit(el) {
+    const id = el.dataset.id;
+    const field = el.dataset.edit;
+    if (field === 'name') {
+      const textSpan = el.querySelector('.stack-item-name-text');
+      if (!textSpan) return;
+      textSpan.setAttribute('contenteditable', 'true');
+      textSpan.style.outline = '1px solid rgba(255,255,255,0.25)';
+      textSpan.style.outlineOffset = '4px';
+      textSpan.style.borderRadius = '4px';
+      textSpan.focus();
+      placeCaretAtEnd(textSpan);
+      const finish = (commit) => {
+        textSpan.removeAttribute('contenteditable');
+        textSpan.style.outline = ''; textSpan.style.outlineOffset = '';
+        if (commit) {
+          const newVal = textSpan.textContent.trim();
+          if (newVal) updateItem(id, 'name', newVal); else render();
+        } else render();
+      };
+      textSpan.addEventListener('blur', () => finish(true), { once: true });
+      textSpan.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); textSpan.blur(); }
+        if (e.key === 'Escape') { textSpan.blur(); render(); }
+      });
+    }
+    if (field === 'meta') {
+      el.setAttribute('contenteditable', 'true');
+      el.focus(); placeCaretAtEnd(el);
+      const finish = (commit) => {
+        el.removeAttribute('contenteditable');
+        if (commit) {
+          const text = el.textContent.trim();
+          const parts = text.split(/\s*·\s*/);
+          updateItem(id, 'dose', parts[0] || '');
+          updateItem(id, 'note', parts.slice(1).join(' · '));
+        }
+        render();
+      };
+      el.addEventListener('blur', () => finish(true), { once: true });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Escape') { el.blur(); render(); }
+      });
+    }
+  }
+
+  function placeCaretAtEnd(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // ====== ADD FORM + SEARCH AUTOCOMPLETE ======
+  const nameInput = document.getElementById('stackAddName');
+  const doseInput = document.getElementById('stackAddDose');
+  const winSelect = document.getElementById('stackAddWindow');
+  const addBtn = document.getElementById('stackAddBtn');
+  const resultsEl = document.getElementById('stackSearchResults');
+
+  let pendingNote = ''; // hidden note auto-filled when a DB result is selected
+
+  function searchSupplements(q) {
+    const query = q.toLowerCase().trim();
+    if (!query) return [];
+    const starts = [];
+    const contains = [];
+    SUPPLEMENT_DB.forEach(s => {
+      const nameLC = s.name.toLowerCase();
+      const aliases = (s.aliases || []).map(a => a.toLowerCase());
+      const allNames = [nameLC, ...aliases];
+      if (allNames.some(n => n.startsWith(query))) starts.push(s);
+      else if (allNames.some(n => n.includes(query))) contains.push(s);
+    });
+    return [...starts, ...contains].slice(0, 6);
+  }
+
+  function renderSearchResults(q) {
+    const matches = searchSupplements(q);
+    if (!q.trim() || matches.length === 0) {
+      resultsEl.hidden = true;
+      resultsEl.innerHTML = '';
+      return;
+    }
+    resultsEl.hidden = false;
+    resultsEl.innerHTML = matches.map(s => {
+      const winMeta = STACK_WINDOWS.find(w => w.key === s.window) || STACK_WINDOWS[3];
+      return `
+        <button class="stack-result" data-name="${escapeHtml(s.name)}" data-dose="${escapeHtml(s.dose)}" data-window="${s.window}" data-note="${escapeHtml(s.note)}">
+          <div class="stack-result-icon">${s.icon || '💊'}</div>
+          <div class="stack-result-body">
+            <div class="stack-result-name">${escapeHtml(s.name)}</div>
+            <div class="stack-result-meta">${escapeHtml(s.dose)} · ${winMeta.icon} ${winMeta.title.toLowerCase()} · ${escapeHtml(s.note)}</div>
           </div>
-        </div>
-      </div>
-      <div class="field">
-        <label>Activity (training hours per week)</label>
-        <input type="number" id="setActivity" min="0" max="40" step="0.5">
-      </div>
-    </div>
+        </button>`;
+    }).join('');
+  }
 
-    <div class="set-section">
-      <h4>Display</h4>
-      <div class="field">
-        <label>Show water as</label>
-        <div class="seg" id="setUnit">
-          <button data-u="bottle">Bottles</button>
-          <button data-u="glass">Glasses</button>
-          <button data-u="custom" id="setUnitCustomBtn">Custom</button>
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Bottle size (ml)</label>
-          <input type="number" id="setBottleMl" min="100" max="2000" step="50">
-        </div>
-        <div class="field">
-          <label>Glass size (ml)</label>
-          <input type="number" id="setGlassMl" min="50" max="1000" step="10">
-        </div>
-      </div>
-      <!-- Optional third container. Leave size blank/0 to hide it everywhere. -->
-      <div class="field-row">
-        <div class="field">
-          <label>Custom container label</label>
-          <input type="text" id="setCustomLabel" maxlength="16" placeholder="e.g. Termo, Taza">
-        </div>
-        <div class="field">
-          <label>Custom size (ml)</label>
-          <input type="number" id="setCustomMl" min="0" max="3000" step="50" placeholder="0 = off">
-        </div>
-      </div>
-    </div>
+  nameInput.addEventListener('input', () => {
+    renderSearchResults(nameInput.value);
+    pendingNote = ''; // reset note if user is typing manually
+  });
+  nameInput.addEventListener('focus', () => {
+    if (nameInput.value.trim()) renderSearchResults(nameInput.value);
+  });
 
-    <div class="set-section">
-      <h4>Caffeine</h4>
-      <div class="field">
-        <label>Average caffeine per day (mg)</label>
-        <input type="number" id="setCaffeine" min="0" max="1000" step="10">
-        <div style="font-size:11px;color:var(--text-3);margin-top:4px;line-height:1.4">
-          ~1 cup of coffee = 95mg · espresso shot = 75mg · energy drink = 160mg.
-          Above 200mg/day starts to add a small water requirement.
-        </div>
-      </div>
-    </div>
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.stack-name-wrap')) resultsEl.hidden = true;
+  });
 
-    <div class="set-section">
-      <h4>Stimulants & meds</h4>
-      <div class="field">
-        <label>Search to add</label>
-        <div class="search-wrap">
-          <input type="text" class="search-input" id="subSearch" placeholder="Type a name (Adderall, Concerta, Lithium…)" autocomplete="off">
-          <div class="search-results" id="subResults"></div>
-        </div>
-        <div style="font-size:11px;color:var(--text-3);margin-top:4px;line-height:1.4">
-          Each substance bumps your daily water target. Includes ADHD stims,
-          diuretics, decongestants, nicotine, alcohol, and a few others.
-        </div>
-      </div>
-      <div class="subs-list" id="subsList"></div>
-    </div>
+  resultsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.stack-result');
+    if (!btn) return;
+    nameInput.value = btn.dataset.name;
+    doseInput.value = btn.dataset.dose;
+    winSelect.value = btn.dataset.window;
+    pendingNote = btn.dataset.note;
+    resultsEl.hidden = true;
+    addBtn.focus();
+  });
 
-    <div class="set-section">
-      <h4>Data</h4>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn-secondary" id="setExport">Export JSON</button>
-        <button class="btn-secondary" id="setImport">Import JSON</button>
-        <button class="btn-secondary" id="setReset" style="color:var(--bad);border-color:rgba(255,138,138,0.3)">Reset all</button>
-      </div>
-      <input type="file" id="setImportFile" accept=".json" style="display:none">
-    </div>
+  addBtn.addEventListener('click', () => {
+    addItem(nameInput.value, doseInput.value, winSelect.value, pendingNote);
+    nameInput.value = '';
+    doseInput.value = '';
+    pendingNote = '';
+    resultsEl.hidden = true;
+    nameInput.focus();
+  });
 
-    <div class="modal-actions">
-      <button class="btn-primary" id="setClose">Done</button>
-    </div>
-  </div>
-</div>
+  [nameInput, doseInput].forEach(i => {
+    i.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        // If search dropdown is open with matches, pick the first one
+        if (!resultsEl.hidden && i === nameInput) {
+          const firstResult = resultsEl.querySelector('.stack-result');
+          if (firstResult) { e.preventDefault(); firstResult.click(); return; }
+        }
+        addBtn.click();
+      }
+      if (e.key === 'Escape') resultsEl.hidden = true;
+    });
+  });
 
-<script>
+  setInterval(() => {
+    const newKey = `stack:taken:${getActiveDate()}`;
+    if (newKey !== todayKey) todayKey = newKey;
+    render();
+  }, 60 * 1000);
+
+  render();
+  startTicker();
+})();
+
+// ===================== Water Tracker =====================
 (function() {
   const $ = (id) => document.getElementById(id);
 
@@ -1337,41 +1209,18 @@ html, body {
   if (state.__migrated) { delete state.__migrated; saveState(); }
   renderAll();
 })();
-</script>
-<style>
-/* === iPhone bottom-safe-area fix ===
-   The Done button in the settings modal + the bottom of the page were
-   getting blocked by the iPhone home indicator. These rules add
-   safe-area padding so nothing sits under it. */
-.shell {
-  padding-bottom: calc(80px + env(safe-area-inset-bottom));
-}
-.modal-bg {
-  padding-bottom: max(20px, env(safe-area-inset-bottom));
-  padding-top: max(20px, env(safe-area-inset-top));
-}
-.modal {
-  max-height: calc(88vh - env(safe-area-inset-bottom));
-}
-.water-plus-btn,
-.water-minus-btn {
-  margin-bottom: max(0px, env(safe-area-inset-bottom));
-}
-</style>
-<script>
+
+// ===================== Unified Supabase 'health' app-state sync =====================
+// One initCloudSync for the whole page: it mirrors the Daily Stack keys AND the
+// water blob. The water key gets a per-day field-level merge so two devices
+// logging on the same day can't overwrite each other (daily ml is monotonic →
+// keep the higher value per date). Stack keys keep plain last-write-wins.
 document.addEventListener('DOMContentLoaded', function () {
-  try { if (window.self !== window.top) return; } catch (e) { return; }
   if (typeof initCloudSync !== 'function') return;
   initCloudSync({
     appKey: 'health',
-    syncedKeys: ['po_water_v1'],
-    // Per-day intelligent merge. The whole-blob last-write-wins used to let a
-    // stale device clobber one that was ahead — e.g. log on your phone, then a
-    // laptop holding an older blob overwrites it. Daily ml totals only grow, so
-    // reconcile the logs map by taking the HIGHER value per date; settings keep
-    // last-write-wins (remote, as before). Caveat: a cross-device undo (lowering
-    // a day) can be out-voted by the higher stale value — acceptable for a
-    // hydration tracker, and a clean win over losing whole increments.
+    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'po_water_v1'],
+    syncedPrefixes: ['stack:taken:'],
     mergeRemote: function (key, local, remote) {
       if (key !== 'po_water_v1') return undefined;            // only the water blob
       if (!remote || typeof remote !== 'object') return undefined;
@@ -1388,7 +1237,3 @@ document.addEventListener('DOMContentLoaded', function () {
     onApplied: function () { window.dispatchEvent(new Event('storage')); }
   });
 });
-</script>
-
-</body>
-</html>

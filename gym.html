@@ -157,7 +157,10 @@ const CONFIG = {
       </div>
       <div class="po-seg-row">
         <span class="po-seg-label">Routine</span>
-        <div class="po-seg-control" id="daySeg"></div>
+        <!-- Searchable combobox — replaces the old wrapping button list so a
+             large routine library never overflows. Built/refreshed by
+             renderRoutineCombo() in gym-ui.js. -->
+        <div class="po-combo" id="daySeg"></div>
       </div>
     </div>
 
@@ -702,6 +705,28 @@ const CONFIG = {
     <input type="text" id="rbRoutineName" class="rb-name-input" placeholder="Routine name (e.g. Push Day A)" autocomplete="off">
     <ul class="rb-routine-list" id="rbRoutineList"></ul>
     <div class="rb-routine-empty" id="rbRoutineEmpty">No exercises yet — add some from the library above.</div>
+
+    <!-- GLOBAL REST CONFIG — one rest value for the whole routine. Replaces the
+         per-exercise stepper rows. The MM:SS field accepts manual typing
+         (validated) as well as the live timer's ±15s once a set is logged. -->
+    <div class="rb-rest-global" id="rbRestGlobal">
+      <label class="rb-rest-switch">
+        <input type="checkbox" id="rbRestToggle">
+        <span class="rb-rest-switch-track"><span class="rb-rest-switch-thumb"></span></span>
+        <span class="rb-rest-switch-label">Add rest between sets?</span>
+      </label>
+      <div class="rb-rest-field" id="rbRestField" hidden>
+        <label for="rbRestInput">Rest between sets · MM:SS</label>
+        <div class="rb-rest-field-row">
+          <input type="text" id="rbRestInput" class="rb-rest-input" inputmode="numeric"
+                 placeholder="01:30" value="01:30" autocomplete="off" maxlength="5"
+                 aria-describedby="rbRestErr">
+          <span class="rb-rest-hint" id="rbRestHint">for all sets</span>
+        </div>
+        <span class="rb-rest-err" id="rbRestErr" hidden>Invalid format — use MM:SS (max 10:00).</span>
+      </div>
+    </div>
+
     <div class="rb-routine-actions">
       <button class="po-btn-secondary" id="rbClearBtn" type="button">Clear</button>
       <button class="po-btn-primary" id="rbSaveBtn" type="button">Save routine</button>
@@ -769,6 +794,18 @@ const CONFIG = {
   </div>
 </div>
 
+<!-- Calendar day modal — opened from a marked day in the Past-workouts
+     calendar. Shows every session logged that day + per-exercise breakdown. -->
+<div class="po-modal-bg" id="poCalModalBg">
+  <div class="po-modal">
+    <h3 id="poCalModalTitle">Workout</h3>
+    <div id="poCalModalBody"></div>
+    <div class="po-modal-actions">
+      <button class="po-btn-primary" id="poCalModalClose" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Settings Modal -->
 <div class="po-modal-bg" id="setModalBg">
   <div class="po-modal" style="max-width: 480px;">
@@ -805,6 +842,27 @@ const CONFIG = {
   </div>
 </div>
 
+<!-- Rest Timer overlay — between-sets countdown. Triggered by GymRestTimer
+     after each logged set; the duration is the active routine's per-exercise
+     rest. Fully self-contained: no session state lives here. -->
+<div class="po-rest" id="poRest" role="dialog" aria-label="Rest timer" aria-hidden="true">
+  <div class="po-rest-card">
+    <div class="po-rest-eyebrow" id="poRestEyebrow">REST</div>
+    <div class="po-rest-ring-wrap">
+      <svg class="po-rest-ring" viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="po-rest-ring-bg" cx="60" cy="60" r="54"></circle>
+        <circle class="po-rest-ring-fg" id="poRestRing" cx="60" cy="60" r="54"></circle>
+      </svg>
+      <div class="po-rest-time" id="poRestTime">0:00</div>
+    </div>
+    <div class="po-rest-actions">
+      <button class="po-rest-adjust" id="poRestMinus" type="button">−15s</button>
+      <button class="po-rest-skip" id="poRestSkip" type="button">Skip</button>
+      <button class="po-rest-adjust" id="poRestPlus" type="button">+15s</button>
+    </div>
+  </div>
+</div>
+
 <!-- Gym module — split out of the former monolithic js/gym.js. The five Coach
      modules share state via one window.GymApp namespace and MUST load in this
      dependency order (defer preserves document order): core → storage → sync →
@@ -817,6 +875,7 @@ const CONFIG = {
 <script src="js/gym/gym-actions.js" defer></script>
 <script src="js/gym/gym-routine-builder.js" defer></script>
 <script src="js/gym/gym-cloud.js" defer></script>
+<script src="js/gym/gym-rest-timer.js" defer></script>
 
 </body>
 </html>

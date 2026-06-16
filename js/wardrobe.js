@@ -675,7 +675,10 @@
     }
     function activeSeason() {
       const s = Store.settings().season;
-      return s && s !== 'auto' ? s : autoSeason();
+      if (s && s !== 'auto') return s;          // explicit user choice always wins
+      const wx = cached();                       // 'auto' → prefer live temperature
+      if (wx && Number.isFinite(wx.tempC)) return refineSeason(wx.tempC);
+      return autoSeason();                        // offline / not fetched yet
     }
     // Target garment warmth for the active season (drives layer-stacking).
     function targetWarmth(season) {
@@ -692,16 +695,108 @@
       return true;
     }
 
-    /* PLACEHOLDER SEAM — live weather.
-       Wire a real endpoint (Open-Meteo, OpenWeather, or the project's
-       proxy) here; returns { tempC, condition }. Falls back to season. */
-    async function fetchLive(/* lat, lon */) {
-      // const r = await fetch(`https://api.open-meteo.com/v1/forecast?...`);
-      // return (await r.json()).current;
-      return { tempC: null, condition: activeSeason() };
+    // ── Live weather (Open-Meteo — free, no API key, CORS-enabled) ─────────
+    // The reading is device- and location-specific + transient, so it lives in
+    // its own localStorage key (NOT a 'wardrobe:' key) and is never synced
+    // cross-device. Cached with a TTL; everything degrades gracefully to the
+    // calendar-month heuristic when offline or before the first fetch.
+    const WX_KEY = 'wx_cache_v1';
+    const WX_TTL = 3 * 60 * 60 * 1000;   // re-fetch at most every 3 hours
+
+    function cached() {
+      try { return JSON.parse(localStorage.getItem(WX_KEY)) || null; } catch (e) { return null; }
+    }
+    // Map a live temperature to one of the four seasons so targetWarmth() and
+    // suitsSeason() reflect actual conditions, not just the month.
+    function refineSeason(tempC) {
+      if (!Number.isFinite(tempC)) return autoSeason();
+      if (tempC <= 5)  return 'winter';
+      if (tempC <= 14) return 'autumn';
+      if (tempC <= 22) return 'spring';
+      return 'summer';
+    }
+    // WMO weather_code → coarse condition label (display only).
+    function codeToCondition(code) {
+      code = Number(code);
+      if (code === 0) return 'clear';
+      if (code <= 3) return 'clouds';
+      if (code >= 45 && code <= 48) return 'fog';
+      if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return 'rain';
+      if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) return 'snow';
+      if (code >= 95) return 'storm';
+      return 'clear';
     }
 
-    return { ORDER, ICON, autoSeason, activeSeason, targetWarmth, suitsSeason, fetchLive };
+    // Live reading from Open-Meteo. Resolves { tempC, condition }; throws on a
+    // network/HTTP failure so refresh() can keep the cached value.
+    async function fetchLive(lat, lon) {
+      const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat +
+        '&longitude=' + lon + '&current=temperature_2m,weather_code';
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) throw new Error('weather HTTP ' + r.status);
+      const c = (await r.json()).current || {};
+      return { tempC: Number(c.temperature_2m), condition: codeToCondition(c.weather_code) };
+    }
+    // Free Open-Meteo geocoder — resolves the manual `location` setting → coords.
+    async function geocode(name) {
+      const url = 'https://geocoding-api.open-meteo.com/v1/search?count=1&name=' +
+        encodeURIComponent(name);
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) throw new Error('geocode HTTP ' + r.status);
+      const hit = ((await r.json()).results || [])[0];
+      return hit ? { lat: hit.latitude, lon: hit.longitude } : null;
+    }
+    // Browser Geolocation (free, built-in; needs HTTPS + a user grant). Never
+    // rejects — resolves null on denial/unavailable so callers stay simple.
+    function browserCoords() {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) return resolve(null);
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          () => resolve(null),
+          { timeout: 6000, maximumAge: 30 * 60 * 1000 }
+        );
+      });
+    }
+    // Coords priority. allowPrompt gates the GPS permission prompt so it only
+    // fires from a user gesture (the step-2 "use my location" control), never
+    // on page load. Falls back to the manual location setting, then last coords.
+    async function resolveCoords(allowPrompt) {
+      if (allowPrompt) {
+        const geo = await browserCoords();
+        if (geo) return geo;
+      }
+      const loc = (Store.settings().location || '').trim();
+      if (loc) { try { const g = await geocode(loc); if (g) return g; } catch (e) {} }
+      const wx = cached();
+      return wx && Number.isFinite(wx.lat) ? { lat: wx.lat, lon: wx.lon } : null;
+    }
+
+    // Refresh the cached reading (honors TTL unless forced). Best-effort and
+    // non-throwing: on offline / denied permission / error it keeps whatever is
+    // cached, so activeSeason() simply falls back to the month heuristic. On a
+    // successful update it emits a Store change so the UI re-renders live.
+    async function refresh(force, allowPrompt) {
+      const wx = cached();
+      if (!force && wx && (Date.now() - wx.fetchedAt) < WX_TTL) return wx;
+      let coords = null;
+      try { coords = await resolveCoords(allowPrompt); } catch (e) {}
+      if (!coords) return wx;
+      try {
+        const live = await fetchLive(coords.lat, coords.lon);
+        if (!Number.isFinite(live.tempC)) return wx;
+        const next = { tempC: live.tempC, condition: live.condition,
+                       lat: coords.lat, lon: coords.lon, fetchedAt: Date.now() };
+        try { localStorage.setItem(WX_KEY, JSON.stringify(next)); } catch (e) {}
+        Store.emit();   // re-render with the live-driven season
+        return next;
+      } catch (e) { return wx; }
+    }
+    // Current cached reading (temp + condition) for UI display, or null.
+    function current() { return cached(); }
+
+    return { ORDER, ICON, autoSeason, activeSeason, targetWarmth, suitsSeason,
+             fetchLive, geocode, refresh, refineSeason, current };
   })();
 
   // ----------------------------------------------------------------
@@ -1343,13 +1438,34 @@
         '</div>').join('');
     }
 
-    // ---- season toggle ----
+    // ---- season toggle + live-weather chip ----
+    const WX_ICON = { clear: '☀️', clouds: '☁️', rain: '🌧️', snow: '❄️', fog: '🌫️', storm: '⛈️' };
+    function renderWeather() {
+      const chip = document.getElementById('wrWeatherChip');
+      if (!chip) return;
+      const wx = Weather.current();
+      if (wx && Number.isFinite(wx.tempC)) {
+        chip.hidden = false;
+        chip.textContent = (WX_ICON[wx.condition] || '🌡️') + ' ' + Math.round(wx.tempC) + '°C';
+        chip.title = 'Live: ' + (wx.condition || 'weather') + ' · drives the “auto” season';
+      } else {
+        chip.hidden = true;
+      }
+    }
     function renderSeason() {
       const wrap = document.getElementById('wrSeason');
       if (!wrap) return;
       const active = Store.settings().season;
       wrap.querySelectorAll('button').forEach((b) =>
         b.classList.toggle('active', b.dataset.season === active));
+      // Surface the live-resolved season on the "auto" pill so users see what
+      // "auto" currently maps to (live weather when available, else by date).
+      const autoBtn = wrap.querySelector('[data-season="auto"]');
+      if (autoBtn) {
+        autoBtn.title = 'Auto — ' + Weather.activeSeason() +
+          (Weather.current() ? ' (live weather)' : ' (by date)');
+      }
+      renderWeather();
     }
 
     function wire() {
@@ -1358,6 +1474,24 @@
       seasonWrap && seasonWrap.addEventListener('click', (e) => {
         const b = e.target.closest('button'); if (!b) return;
         const s = Store.settings(); s.season = b.dataset.season; Store.setSettings(s);
+        renderSeason();
+      });
+      // live weather — the ONLY place we prompt for GPS (user gesture). Forces
+      // "auto" so the live reading drives the season, then refreshes.
+      const locBtn = document.getElementById('wrWeatherLoc');
+      locBtn && locBtn.addEventListener('click', async () => {
+        locBtn.classList.add('is-loading');
+        const label = locBtn.textContent;
+        locBtn.textContent = '📍 Locating…';
+        if (Store.settings().season !== 'auto') {
+          const s = Store.settings(); s.season = 'auto'; Store.setSettings(s);
+        }
+        let res = null;
+        try { res = await Weather.refresh(true, true); } catch (e) {}
+        locBtn.classList.remove('is-loading');
+        locBtn.textContent = label;
+        if (res && Number.isFinite(res.tempC)) Toast.show('Live weather updated · ' + Math.round(res.tempC) + '°C');
+        else Toast.show('Couldn’t get live weather — check location permission.');
         renderSeason();
       });
       // generate
@@ -1394,7 +1528,7 @@
       renderSaved();
     }
 
-    return { wire, renderAll, openUpload, openItem, renderOutfits, renderRecs, renderSaved, generate };
+    return { wire, renderAll, renderSeason, openUpload, openItem, renderOutfits, renderRecs, renderSaved, generate };
   })();
 
   // expose UI for Closet's inline handlers
@@ -1410,8 +1544,14 @@
     // auto-calculate baseline undertone / faceShape / style as the defaults.
     const p = Store.profile();
     if (!p.undertone && !p.faceShape && !p.style) { Profile.autoProfile(false); }
-    // re-render when cloud sync applies remote changes (storage event)
-    Store.onChange(() => { Closet.render(); Profile.render(); });
+    // Non-prompting live-weather refresh: only fetches if a location is saved
+    // or coords were cached on a prior visit — never triggers the GPS prompt on
+    // load (that's reserved for the explicit "use my location" control). On
+    // success it emits a Store change and the season-driven views re-render.
+    Weather.refresh(false, false);
+    // re-render when cloud sync applies remote changes (storage event) or when
+    // a live-weather refresh emits — keep the season pill + chip in sync.
+    Store.onChange(() => { Closet.render(); Profile.render(); UI.renderSeason(); });
     window.addEventListener('storage', () => UI.renderAll());
     window.addEventListener('wardrobe-changed', () => UI.renderAll());
   }

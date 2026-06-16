@@ -18,6 +18,16 @@
           saveState, rebuildLogIndex } = G;
   void roundToStep; // (kept in alias set for parity; not used directly here)
 
+  // A few catalog/routine entries carry percent-encoded names (e.g.
+  // "45%C2%B0 Side Bend") which the coach mirrors verbatim. Decode for display
+  // so the UI reads "45° Side Bend". Guarded: no '%' → return as-is; malformed
+  // sequence → return the original (never throws). Pair with escape() for HTML.
+  function decodeName(s) {
+    s = s == null ? '' : String(s);
+    if (s.indexOf('%') === -1) return s;
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+
   // ============================================================
   // RENDER
   // ============================================================
@@ -25,25 +35,9 @@
     $('gymSeg').innerHTML = G.state.gyms.map(g =>
       '<button class="po-seg-btn ' + (g.id === G.state.filterGym ? 'active' : '') + '" data-gym="' + g.id + '">' + escape(g.name) + '</button>'
     ).join('');
-    // Routine segment — replaces the old Push/Pull/Legs day filter. Lists the
-    // user's saved routines; selecting one drives the exercise flow.
-    const routines = getRoutines();
-    const daySeg = $('daySeg');
-    if (!routines.length) {
-      daySeg.innerHTML = '<span class="po-seg-empty">No routines yet — build one in the <strong>Routine Builder</strong> below to start logging.</span>';
-    } else {
-      const cur = getCurrentRoutine();
-      daySeg.innerHTML = routines.map(r =>
-        '<button class="po-seg-btn ' + (cur && r.id === cur.id ? 'active' : '') + '" data-routine="' + r.id + '">' + escape(r.name) + '</button>'
-      ).join('');
-      daySeg.querySelectorAll('.po-seg-btn').forEach(b => {
-        b.addEventListener('click', () => {
-          G.state.filterRoutine = b.dataset.routine;
-          G.state.currentEx = null;
-          saveState(); renderAll();
-        });
-      });
-    }
+    // Routine combobox — searchable dropdown replacing the old wrapping button
+    // list, so a large routine library never overflows.
+    renderRoutineCombo();
     // Adding bespoke exercises now happens in the Routine Builder, so the
     // inline "+" no longer fits the routine-driven model.
     $('addExBtn').style.display = 'none';
@@ -51,6 +45,97 @@
       b.addEventListener('click', () => { G.state.filterGym = b.dataset.gym; G.state.currentEx = null; saveState(); renderAll(); });
     });
   }
+
+  // ── Routine combobox ──────────────────────────────────────────
+  // Built once into #daySeg, then only refreshed (label + list) on subsequent
+  // renders so the ~8s sync poll can't yank an open dropdown shut mid-search.
+  let comboElemsBound = false;   // reset whenever the skeleton is rebuilt
+  let comboDocBound   = false;   // document-level handlers bound exactly once
+
+  function closeCombo() {
+    const pop = $('daySegPop'); if (pop) pop.hidden = true;
+    const t = $('daySegTrigger'); if (t) t.setAttribute('aria-expanded', 'false');
+  }
+  function openCombo() {
+    const pop = $('daySegPop'); if (!pop) return;
+    pop.hidden = false;
+    $('daySegTrigger').setAttribute('aria-expanded', 'true');
+    const s = $('daySegSearch'); s.value = ''; buildComboList('');
+    setTimeout(() => { try { s.focus(); } catch (e) {} }, 0);
+  }
+  function buildComboList(query) {
+    const list = $('daySegList'); if (!list) return;
+    const routines = getRoutines();
+    const cur = getCurrentRoutine();
+    const q = (query || '').trim().toLowerCase();
+    const matches = routines.filter(r => !q || (r.name || '').toLowerCase().includes(q));
+    $('daySegEmpty').hidden = matches.length > 0;
+    list.innerHTML = matches.map(r => {
+      const active = cur && r.id === cur.id;
+      const sets = (r.exercises || []).length;
+      return '<li class="po-combo-opt' + (active ? ' is-active' : '') + '" role="option"'
+        + ' data-routine="' + escape(r.id) + '"' + (active ? ' aria-selected="true"' : '') + '>'
+        + '<span class="po-combo-opt-name">' + escape(r.name) + '</span>'
+        + '<span class="po-combo-opt-meta">' + sets + ' ex</span>'
+        + (active ? '<span class="po-combo-check" aria-hidden="true">✓</span>' : '')
+        + '</li>';
+    }).join('');
+  }
+  function renderRoutineCombo() {
+    const daySeg = $('daySeg');
+    const routines = getRoutines();
+    if (!routines.length) {
+      daySeg.className = 'po-seg-control';
+      daySeg.innerHTML = '<span class="po-seg-empty">No routines yet — build one in the <strong>Routine Builder</strong> below to start logging.</span>';
+      comboElemsBound = false;
+      return;
+    }
+    // Build the skeleton once (or after it was torn down for the empty state).
+    if (!daySeg.querySelector('#daySegTrigger')) {
+      daySeg.className = 'po-combo';
+      daySeg.innerHTML =
+        '<button type="button" class="po-combo-trigger" id="daySegTrigger" aria-haspopup="listbox" aria-expanded="false">'
+        +   '<span class="po-combo-current" id="daySegCurrent">—</span>'
+        +   '<svg class="po-combo-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>'
+        + '</button>'
+        + '<div class="po-combo-pop" id="daySegPop" hidden>'
+        +   '<input type="text" class="po-combo-search" id="daySegSearch" placeholder="Search routines…" autocomplete="off" aria-label="Search routines">'
+        +   '<ul class="po-combo-list" id="daySegList" role="listbox" aria-label="Routines"></ul>'
+        +   '<div class="po-combo-empty" id="daySegEmpty" hidden>No routines match.</div>'
+        + '</div>';
+      comboElemsBound = false;
+    }
+    const cur = getCurrentRoutine();
+    $('daySegCurrent').textContent = cur ? cur.name : 'Select routine';
+    // Keep an open list fresh (routine added/renamed elsewhere mid-search).
+    if (!$('daySegPop').hidden) buildComboList($('daySegSearch').value);
+
+    if (!comboElemsBound) {
+      $('daySegTrigger').addEventListener('click', () => {
+        $('daySegPop').hidden ? openCombo() : closeCombo();
+      });
+      $('daySegSearch').addEventListener('input', (e) => buildComboList(e.target.value));
+      $('daySegList').addEventListener('click', (e) => {
+        const li = e.target.closest('.po-combo-opt'); if (!li) return;
+        G.state.filterRoutine = li.dataset.routine;
+        G.state.currentEx = null;
+        closeCombo();
+        saveState(); renderAll();
+      });
+      comboElemsBound = true;
+    }
+    if (!comboDocBound) {
+      document.addEventListener('click', (e) => {
+        const daySeg = $('daySeg');
+        if (daySeg && !daySeg.contains(e.target)) closeCombo();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { const p = $('daySegPop'); if (p && !p.hidden) closeCombo(); }
+      });
+      comboDocBound = true;
+    }
+  }
+
   function renderSelect() {
     const sel = $('exSelect');
     const f = getFiltered();
@@ -72,7 +157,7 @@
     sel.innerHTML = f.map(e => {
       const wLbl = e.bw ? ' · BW' : (e.startWeight ? ' · ' + e.startWeight + unit() : '');
       const sh = e.gym === 'both' ? ' ★' : '';
-      return '<option value="' + e.id + '"' + (e.id === G.state.currentEx ? ' selected' : '') + '>' + escape(e.name) + wLbl + sh + '</option>';
+      return '<option value="' + e.id + '"' + (e.id === G.state.currentEx ? ' selected' : '') + '>' + escape(decodeName(e.name)) + wLbl + sh + '</option>';
     }).join('');
   }
   function renderForm() {
@@ -142,7 +227,7 @@
         : ex.bw
           ? 'Aim for ' + ex.repMin + '-' + ex.repMax + ' clean reps. Once you hit ' + ex.repMax + '+, push for more.'
           : 'Hit ' + ex.repMin + '-' + ex.repMax + ' reps. Once logged, the coach will start prescribing.';
-      wrap.innerHTML = '<div class="po-rx-card"><div class="po-rx-label">' + escape(ex.name) + ' · starting point</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag hold">Start here</span><p class="po-rx-reason">' + reason + '</p></div>';
+      wrap.innerHTML = '<div class="po-rx-card"><div class="po-rx-label">' + escape(decodeName(ex.name)) + ' · starting point</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag hold">Start here</span><p class="po-rx-reason">' + reason + '</p></div>';
       return;
     }
     const head = rx.time
@@ -150,7 +235,7 @@
       : rx.bw
         ? '<span class="po-accent">' + rx.reps + '</span> reps'
         : '<span class="po-accent">' + rx.weight + unit() + '</span> × ' + rx.reps + ' reps';
-    wrap.innerHTML = '<div class="po-rx-card po-rx-' + rx.type + '"><div class="po-rx-label">' + escape(ex.name) + '</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag ' + rx.type + '">' + rx.tag + '</span><p class="po-rx-reason">' + rx.reason + '</p></div>';
+    wrap.innerHTML = '<div class="po-rx-card po-rx-' + rx.type + '"><div class="po-rx-label">' + escape(decodeName(ex.name)) + '</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag ' + rx.type + '">' + rx.tag + '</span><p class="po-rx-reason">' + rx.reason + '</p></div>';
   }
   // PR / Personal Record — heaviest weight ever logged (max reps for bodyweight
   // movements). Reads the same getLogs() history as the stats.
@@ -243,8 +328,8 @@
     const ex = getCurrentEx();
     const url = ex && ex.gifUrl;
     if (!url) { img.style.display = 'none'; img.removeAttribute('src'); return; }
-    img.src = url;
-    img.alt = ex.name || '';
+    img.src = decodeName(url);
+    img.alt = decodeName(ex.name || '');
     img.style.display = 'block';
     img.onerror = () => { img.style.display = 'none'; };
   }
@@ -409,7 +494,7 @@
     const meta = e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top;
     return '<li class="po-tw-row">'
       + '<div class="po-tw-row-head">'
-      +   '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
+      +   '<span class="po-tw-row-name">' + escape(decodeName(e.ex.name)) + '</span>'
       +   '<span class="po-tw-row-meta">' + meta + '</span>'
       + '</div>'
       + setLinesHtml(e)
@@ -461,48 +546,132 @@
     btn.style.opacity = btn.disabled ? '0.4' : '';
   }
 
-  function renderPastWorkouts() {
+  // ── Past-workouts calendar ────────────────────────────────────
+  // Replaces the linear list with a monthly grid. Days that hold ≥1 completed
+  // session are marked; tapping one opens a day modal. A routine-type filter
+  // narrows the grid by session label (the routine name captured at log time).
+  let calYear = null, calMonth = null;   // displayed month (lazy-init to latest)
+  let calRoutineFilter = 'all';
+  const CAL_DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const CAL_MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const pad2 = n => String(n).padStart(2, '0');
+
+  function pastSessions() {
     // Only CLOSED sessions that actually hold ≥1 set — empty "ghost" sessions
-    // are filtered out so the list stays meaningful. (normalize() also prunes
-    // them from state on load.)
-    const past = (G.state.sessions || [])
-      .filter(s => s.endedAt && (s.sets || []).length > 0)
-      .slice()
-      .sort((a, b) => (b.endedAt || b.startedAt || '').localeCompare(a.endedAt || a.startedAt || ''));
+    // are pruned (normalize() also drops them from state on load).
+    return (G.state.sessions || []).filter(s => s.endedAt && (s.sets || []).length > 0);
+  }
+  function sessionDateKey(s) { return (s.endedAt || s.startedAt || '').slice(0, 10); }
+
+  function renderPastWorkouts() {
+    const past = pastSessions();
     $('poTwPastCount').textContent = past.length;
     const body = $('poTwPastBody');
     if (!past.length) {
       body.innerHTML = '<div class="po-tw-past-empty">No past sessions yet.</div>';
       return;
     }
-    body.innerHTML = past.slice(0, 40).map(sess => {
-      const sum = summarizeSession(sess);
-      const dk = (sess.endedAt || sess.startedAt || '').slice(0, 10);
-      return '<div class="po-tw-past-day" data-session="' + escape(sess.id) + '">'
-        + '<div class="po-tw-past-day-h">'
-        +   '<span class="po-tw-past-day-date">' + escape(sess.label || 'Workout') + ' · ' + fmtPastDate(dk) + '</span>'
-        +   '<span class="po-tw-past-day-right">'
-        +     '<span class="po-tw-past-day-summary">'
-        +       sum.totalSets + ' sets'
-        +       ' <span class="po-tw-past-day-done">DONE</span>'
-        +     '</span>'
-        +     '<button class="po-hist-del po-tw-past-del" type="button" data-del="' + escape(sess.id) + '" aria-label="Delete session" title="Delete this session">×</button>'
+    // Lazy-init the displayed month to the most recent session.
+    if (calYear == null) {
+      const latest = past.slice().sort((a, b) =>
+        (b.endedAt || b.startedAt || '').localeCompare(a.endedAt || a.startedAt || ''))[0];
+      const [y, m] = sessionDateKey(latest).split('-').map(Number);
+      calYear = y; calMonth = m - 1;
+    }
+    // Drop a filter that no longer matches any session.
+    const labels = Array.from(new Set(past.map(s => s.label || 'Workout'))).sort((a, b) => a.localeCompare(b));
+    if (calRoutineFilter !== 'all' && !labels.includes(calRoutineFilter)) calRoutineFilter = 'all';
+
+    const visible = calRoutineFilter === 'all' ? past : past.filter(s => (s.label || 'Workout') === calRoutineFilter);
+    const byDay = {};
+    visible.forEach(s => { (byDay[sessionDateKey(s)] = byDay[sessionDateKey(s)] || []).push(s); });
+
+    // ── Header: month nav + routine-type filter ──
+    let html = '<div class="po-cal-head">'
+      + '<div class="po-cal-nav">'
+      +   '<button type="button" class="po-cal-navbtn" data-cal="prev" aria-label="Previous month">‹</button>'
+      +   '<span class="po-cal-title">' + CAL_MON[calMonth] + ' ' + calYear + '</span>'
+      +   '<button type="button" class="po-cal-navbtn" data-cal="next" aria-label="Next month">›</button>'
+      + '</div>'
+      + '<select class="po-cal-filter" id="poCalFilter" aria-label="Filter by routine type">'
+      +   '<option value="all"' + (calRoutineFilter === 'all' ? ' selected' : '') + '>All routines</option>'
+      +   labels.map(l => '<option value="' + escape(l) + '"' + (calRoutineFilter === l ? ' selected' : '') + '>' + escape(l) + '</option>').join('')
+      + '</select>'
+      + '</div>';
+
+    // ── Grid ──
+    html += '<div class="po-cal-grid">';
+    html += CAL_DOW.map(d => '<div class="po-cal-dow">' + d + '</div>').join('');
+    const firstDow = new Date(calYear, calMonth, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const today = new Date();
+    const todayKey = today.getFullYear() + '-' + pad2(today.getMonth() + 1) + '-' + pad2(today.getDate());
+    for (let i = 0; i < firstDow; i++) html += '<div class="po-cal-cell is-empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dk = calYear + '-' + pad2(calMonth + 1) + '-' + pad2(d);
+      const sess = byDay[dk] || [];
+      const has = sess.length > 0;
+      const sets = sess.reduce((a, s) => a + (s.sets || []).length, 0);
+      html += '<div class="po-cal-cell">'
+        + '<button type="button" class="po-cal-day'
+        +   (has ? ' has-workout' : '') + (dk === todayKey ? ' is-today' : '') + '"'
+        +   (has ? ' data-cal-day="' + dk + '"' : ' disabled')
+        +   (has ? ' title="' + sets + ' set' + (sets === 1 ? '' : 's') + ' · ' + sess.length + ' session' + (sess.length === 1 ? '' : 's') + '"' : '') + '>'
+        +   '<span class="po-cal-daynum">' + d + '</span>'
+        +   (has ? '<span class="po-cal-dot" aria-hidden="true"></span>' : '')
+        + '</button>'
+        + '</div>';
+    }
+    html += '</div>';
+    body.innerHTML = html;
+
+    // ── Wire header + days ──
+    body.querySelectorAll('[data-cal]').forEach(b => b.addEventListener('click', () => {
+      calMonth += (b.dataset.cal === 'next' ? 1 : -1);
+      if (calMonth < 0) { calMonth = 11; calYear--; }
+      else if (calMonth > 11) { calMonth = 0; calYear++; }
+      renderPastWorkouts();
+    }));
+    const filter = $('poCalFilter');
+    if (filter) filter.addEventListener('change', () => { calRoutineFilter = filter.value; renderPastWorkouts(); });
+    body.querySelectorAll('[data-cal-day]').forEach(b =>
+      b.addEventListener('click', () => openCalDay(b.dataset.calDay)));
+  }
+
+  // Open the day modal for a date key, listing every session logged that day.
+  function openCalDay(dk) {
+    const u = G.state.units;
+    const sess = pastSessions().filter(s => sessionDateKey(s) === dk)
+      .filter(s => calRoutineFilter === 'all' || (s.label || 'Workout') === calRoutineFilter);
+    if (!sess.length) return;
+    $('poCalModalTitle').textContent = fmtPastDate(dk);
+    $('poCalModalBody').innerHTML = sess.map(s => {
+      const sum = summarizeSession(s);
+      return '<div class="po-cal-sess" data-session="' + escape(s.id) + '">'
+        + '<div class="po-cal-sess-h">'
+        +   '<span class="po-cal-sess-name">' + escape(s.label || 'Workout') + '</span>'
+        +   '<span class="po-cal-sess-right">'
+        +     '<span class="po-cal-sess-sum">' + sum.totalSets + ' set' + (sum.totalSets === 1 ? '' : 's')
+        +       ' <span class="po-tw-past-day-done">DONE</span></span>'
+        +     '<button class="po-hist-del po-cal-sess-del" type="button" data-del="' + escape(s.id) + '" aria-label="Delete session" title="Delete this session">×</button>'
         +   '</span>'
         + '</div>'
+        + '<ul class="po-tw-list">' + sum.perEx.map(e => twRowHtml(e, u)).join('') + '</ul>'
         + '</div>';
     }).join('');
-
-    body.querySelectorAll('.po-tw-past-del').forEach(b => {
+    $('poCalModalBody').querySelectorAll('.po-cal-sess-del').forEach(b => {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = b.dataset.del;
-        const sess = (G.state.sessions || []).find(s => s.id === id);
-        const n = sess ? (sess.sets || []).length : 0;
+        const s = (G.state.sessions || []).find(x => x.id === id);
+        const n = s ? (s.sets || []).length : 0;
         if (!confirm('Delete this session' + (n ? ' and its ' + n + ' set' + (n === 1 ? '' : 's') : '')
           + '? This removes it from all your devices.')) return;
+        $('poCalModalBg').classList.remove('show');   // re-render happens via deleteSession
         G.deleteSession(id);   // defined in gym-actions.js
       });
     });
+    $('poCalModalBg').classList.add('show');
   }
 
   // ============================================================
@@ -876,6 +1045,11 @@
   });
   // Tap the right-hand "other" photo to cycle through comparison targets
   $('wtCmpSideB').addEventListener('click', cycleCompareTarget);
+
+  // Calendar day modal — close on button, backdrop click, or Escape.
+  $('poCalModalClose').addEventListener('click', () => $('poCalModalBg').classList.remove('show'));
+  $('poCalModalBg').addEventListener('click', e => { if (e.target === $('poCalModalBg')) $('poCalModalBg').classList.remove('show'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $('poCalModalBg').classList.remove('show'); });
 
   // Expose the render entry points + photo reload/render the other modules call.
   Object.assign(G, {

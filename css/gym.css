@@ -261,6 +261,17 @@ img, video, canvas, svg { max-width: 100%; }
   font-size: 10.5px; color: var(--text-3); font-weight: 700;
   letter-spacing: 0.14em; text-transform: uppercase;
 }
+/* Desktop alignment: the Reps/Time column's header carries the metric toggle,
+   making it taller than the bare WEIGHT label. With the two columns side by
+   side that dropped the right input (and its whole column) a few px below the
+   left. Pin both header bands to one height and center them so the two inputs
+   share a single baseline. Only applies where the columns sit side by side —
+   below 480px they stack, so the bands are left at their natural height. */
+@media (min-width: 481px) {
+  .po-log-grid .po-field > label,
+  .po-log-grid .po-field-head { min-height: 30px; }
+  .po-log-grid .po-field > label { display: flex; align-items: center; }
+}
 /* Reps/Time field header: label on the left, metric toggle on the right. */
 .po-field-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -1201,6 +1212,56 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-mini:disabled { opacity: 0.3; cursor: not-allowed; }
 .rb-mini.rb-del:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
 
+/* ----- Routine-wide rest config (single global block) ----- */
+.rb-rest-global {
+  margin-top: 14px; padding: 14px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+}
+.rb-rest-switch {
+  display: flex; align-items: center; gap: 11px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rb-rest-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.rb-rest-switch-track {
+  flex: none; position: relative; width: 42px; height: 24px; border-radius: 999px;
+  background: rgba(255,255,255,0.10); border: 1px solid var(--border);
+  transition: background 0.18s;
+}
+.rb-rest-switch-thumb {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--text-2);
+  transition: transform 0.18s, background 0.18s;
+}
+.rb-rest-switch input:checked + .rb-rest-switch-track {
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+}
+.rb-rest-switch input:checked + .rb-rest-switch-track .rb-rest-switch-thumb {
+  transform: translateX(18px); background: #0a0a0b;
+}
+.rb-rest-switch-label {
+  font-size: 13px; font-weight: 600; color: var(--text-1); line-height: 1.35;
+}
+.rb-rest-field { margin-top: 13px; }
+.rb-rest-field[hidden] { display: none; }
+.rb-rest-field > label {
+  display: block; margin-bottom: 7px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.rb-rest-field-row { display: flex; align-items: center; gap: 10px; }
+.rb-rest-input {
+  width: 96px; padding: 10px 12px; text-align: center;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong);
+  border-radius: 10px; color: var(--text-1);
+  font-family: var(--font-mono); font-size: 17px; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
+}
+.rb-rest-input:focus { outline: none; border-color: var(--accent); }
+.rb-rest-hint { font-size: 12px; color: var(--text-3); }
+.rb-rest-err { display: block; margin-top: 7px; font-size: 11.5px; color: var(--bad); }
+.rb-rest-err[hidden] { display: none; }
+
 /* ----- Routine-template row actions ----- */
 .rb-ex-actions { display: flex; gap: 8px; }
 .rb-ex-actions button {
@@ -1265,3 +1326,206 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-hist-set { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); text-align: right; }
 .rb-hist-best { color: var(--good); font-size: 11px; font-weight: 800; }
 .rb-hist-empty { font-size: 12px; color: var(--text-4); font-style: italic; padding: 8px 0; }
+
+/* ============================================================
+   Rest Timer overlay — between-sets countdown (gym-rest-timer.js)
+   ============================================================ */
+.po-rest {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0,0,0,0.78); backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+.po-rest.is-open { display: flex; animation: poRestIn 0.2s ease; }
+@keyframes poRestIn { from { opacity: 0; } to { opacity: 1; } }
+
+.po-rest-card {
+  display: flex; flex-direction: column; align-items: center; gap: 26px;
+  width: 100%; max-width: 320px; text-align: center;
+}
+.po-rest-eyebrow {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.18em;
+  color: var(--text-3); text-transform: uppercase;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.po-rest-ring-wrap { position: relative; width: 220px; height: 220px; }
+.po-rest-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.po-rest-ring-bg { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 6; }
+.po-rest-ring-fg {
+  fill: none; stroke: var(--good); stroke-width: 6; stroke-linecap: round;
+  transition: stroke-dashoffset 0.25s linear, stroke 0.3s ease;
+}
+.po-rest-time {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 54px; font-weight: 700;
+  color: var(--text-1); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+
+.po-rest-actions { display: flex; align-items: center; gap: 12px; }
+.po-rest-skip {
+  padding: 13px 30px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 700; color: #0a0a0b;
+  border: 1px solid rgba(255,255,255,0.85);
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  -webkit-tap-highlight-color: transparent;
+}
+.po-rest-skip:active { transform: scale(0.96); }
+.po-rest-adjust {
+  padding: 13px 16px; border-radius: 12px; cursor: pointer; font-family: inherit;
+  font-size: 13px; font-weight: 700; color: var(--text-2);
+  border: 1px solid var(--border-strong); background: rgba(255,255,255,0.04);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.po-rest-adjust:hover { background: rgba(255,255,255,0.10); color: var(--text-1); }
+.po-rest-adjust:active { transform: scale(0.94); }
+
+/* Finish cue at 0:00 — green flash on the backdrop + a pulse on the card,
+   alongside the audio beep and haptic buzz fired from JS. */
+.po-rest.is-done { animation: poRestFlash 0.5s ease 2; }
+.po-rest.is-done .po-rest-time { color: var(--good); }
+.po-rest.is-done .po-rest-card { animation: poRestDone 0.5s ease; }
+@keyframes poRestFlash {
+  0%, 100% { background: rgba(0,0,0,0.78); }
+  50%      { background: rgba(60,120,90,0.55); }
+}
+@keyframes poRestDone {
+  0%, 100% { transform: scale(1); }
+  30%      { transform: scale(1.06); }
+}
+
+@media (max-width: 600px) {
+  .po-rest-ring-wrap { width: 200px; height: 200px; }
+  .po-rest-time { font-size: 48px; }
+}
+
+/* ============================================================
+   ROUTINE COMBOBOX — searchable dropdown for the active routine
+   ============================================================ */
+.po-combo { position: relative; flex: 1; }
+.po-combo-trigger {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 14px; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text-1); font-family: inherit; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.po-combo-trigger:hover { background: rgba(255,255,255,0.06); }
+.po-combo-trigger[aria-expanded="true"] { border-color: var(--border-strong); }
+.po-combo-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.po-combo-chev { flex: none; color: var(--text-3); transition: transform 0.2s; }
+.po-combo-trigger[aria-expanded="true"] .po-combo-chev { transform: rotate(180deg); }
+
+.po-combo-pop {
+  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0;
+  background: #16161a; border: 1px solid var(--border-strong);
+  border-radius: 12px; padding: 8px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+}
+.po-combo-pop[hidden] { display: none; }
+.po-combo-search {
+  width: 100%; padding: 9px 11px; margin-bottom: 6px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 9px; color: var(--text-1); font-family: inherit; font-size: 13px;
+}
+.po-combo-search:focus { outline: none; border-color: var(--accent); }
+.po-combo-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.po-combo-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 11px; border-radius: 9px; cursor: pointer;
+  font-size: 13.5px; color: var(--text-2); transition: background 0.12s, color 0.12s;
+}
+.po-combo-opt:hover { background: rgba(255,255,255,0.05); color: var(--text-1); }
+.po-combo-opt-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.po-combo-opt-meta { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.po-combo-opt.is-active {
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  color: #0a0a0b;
+}
+.po-combo-opt.is-active .po-combo-opt-meta { color: rgba(10,10,11,0.55); }
+.po-combo-check { flex: none; font-size: 13px; font-weight: 800; color: #0a0a0b; }
+.po-combo-empty { padding: 12px; text-align: center; font-size: 12px; color: var(--text-3); font-style: italic; }
+
+/* ============================================================
+   PAST-WORKOUTS CALENDAR
+   ============================================================ */
+.po-cal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 4px 0 12px; flex-wrap: wrap;
+}
+.po-cal-nav { display: flex; align-items: center; gap: 6px; }
+.po-cal-navbtn {
+  width: 30px; height: 30px; flex: none;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-1); font-size: 17px; line-height: 1;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.po-cal-navbtn:hover { background: rgba(255,255,255,0.07); }
+.po-cal-title {
+  min-width: 132px; text-align: center;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--text-1);
+}
+.po-cal-filter {
+  flex: 1; min-width: 140px; max-width: 220px; padding: 8px 10px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 9px; color: var(--text-1); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  /* Force the native popup (and its options) to render dark so the option
+     text isn't white-on-white in Chromium/Windows. */
+  color-scheme: dark;
+}
+.po-cal-filter:focus { outline: none; border-color: var(--accent); }
+/* Explicit dark background + light text for the dropdown list items — some
+   engines ignore color-scheme and paint options on a system-light surface. */
+.po-cal-filter option {
+  background-color: #16161a;
+  color: var(--text-1);
+}
+.po-cal-filter option:checked,
+.po-cal-filter option:hover {
+  background-color: #23232a;
+  color: var(--text-1);
+}
+
+.po-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.po-cal-dow {
+  text-align: center; padding-bottom: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-4);
+}
+.po-cal-cell { aspect-ratio: 1; }
+.po-cal-cell.is-empty { aspect-ratio: 1; }
+.po-cal-day {
+  position: relative; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.02); border: 1px solid transparent;
+  border-radius: 9px; color: var(--text-3);
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  cursor: default; -webkit-tap-highlight-color: transparent;
+}
+.po-cal-day[disabled] { opacity: 0.45; }
+.po-cal-day.has-workout {
+  cursor: pointer; color: #0a0a0b;
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 10px rgba(0,0,0,0.3);
+}
+.po-cal-day.has-workout:hover { filter: brightness(1.05); }
+.po-cal-day.is-today { border-color: var(--border-strong); }
+.po-cal-day.has-workout.is-today { border-color: rgba(10,10,11,0.4); }
+.po-cal-dot {
+  position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--good);
+}
+
+/* Calendar day modal — session breakdown */
+.po-cal-sess { margin-bottom: 14px; }
+.po-cal-sess:last-child { margin-bottom: 0; }
+.po-cal-sess-h {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 8px;
+}
+.po-cal-sess-name { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.po-cal-sess-right { display: flex; align-items: center; gap: 8px; }
+.po-cal-sess-sum { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
