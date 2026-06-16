@@ -67,6 +67,17 @@
   }
   const clone = obj => JSON.parse(JSON.stringify(obj));
 
+  // Some catalog entries arrived percent-encoded (e.g. "45%C2%B0 Side Bend")
+  // — decode for display so users see "45° Side Bend". Guarded: no '%' →
+  // return as-is (fast path); a malformed sequence → return the original
+  // string instead of throwing. Safe to run on names and on gif URLs (a
+  // decoded URL is re-encoded identically by the browser on request).
+  function decodeName(s) {
+    s = s == null ? '' : String(s);
+    if (s.indexOf('%') === -1) return s;
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+
   // ── Library filtering ─────────────────────────────────────────
   // Multi-level pill bar. At the root it shows the coarse groups; once an
   // area with sub-muscles is in focus (via a pill OR a body-map click) it
@@ -357,12 +368,12 @@
     const head = document.createElement('div'); head.className = 'rb-row-head';
 
     const thumb = document.createElement('img');
-    thumb.className = 'rb-row-thumb'; thumb.loading = 'lazy'; thumb.src = it.gifUrl;
-    thumb.alt = it.name; thumb.title = 'Preview';
+    thumb.className = 'rb-row-thumb'; thumb.loading = 'lazy'; thumb.src = decodeName(it.gifUrl);
+    thumb.alt = decodeName(it.name); thumb.title = 'Preview';
     thumb.addEventListener('click', () => openGif(it));
 
     const main = document.createElement('div'); main.className = 'rb-row-main';
-    const nm = document.createElement('div'); nm.className = 'rb-row-name'; nm.textContent = it.name;
+    const nm = document.createElement('div'); nm.className = 'rb-row-name'; nm.textContent = decodeName(it.name);
     const mus = document.createElement('div'); mus.className = 'rb-row-muscle'; mus.textContent = it.muscleGroup;
     main.append(nm, mus);
 
@@ -502,9 +513,9 @@
   // ── GIF preview modal ─────────────────────────────────────────
   function openGif(e) {
     const exId = e.exId || e.id;
-    $('rbGifTitle').textContent = e.name;
+    $('rbGifTitle').textContent = decodeName(e.name);
     $('rbGifMuscle').textContent = e.muscleGroup;
-    const img = $('rbGifImg'); img.src = e.gifUrl; img.alt = e.name;
+    const img = $('rbGifImg'); img.src = decodeName(e.gifUrl); img.alt = decodeName(e.name);
     const u = coachUnit();
     renderPr(exId, u);
     renderHist(exId, u);
@@ -585,6 +596,14 @@
       const res = await fetch('js/exercises-data.json', { cache: 'no-cache' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       catalog = await res.json();
+      // Normalise any percent-encoded names/URLs once at the source, so the
+      // library, search, GIF modal and routines saved from here all carry
+      // clean human-readable text.
+      (Array.isArray(catalog) ? catalog : []).forEach(e => {
+        if (!e || typeof e !== 'object') return;
+        if (e.name)   e.name   = decodeName(e.name);
+        if (e.gifUrl) e.gifUrl = decodeName(e.gifUrl);
+      });
     } catch {
       catalog = [];
     }

@@ -187,18 +187,29 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   }
 
   function injectStyleAndHTML() {
-    if (document.getElementById('topbar') || document.getElementById('bottombar')) return;
     if (!shouldShowChrome()) return;
-    const style = document.createElement('style');
-    style.id = 'topbar-style';
-    style.textContent = css;
-    document.head.appendChild(style);
-    const topWrap = document.createElement('div');
-    topWrap.innerHTML = topbarHtml.trim();
-    document.body.insertBefore(topWrap.firstChild, document.body.firstChild);
-    const bottomWrap = document.createElement('div');
-    bottomWrap.innerHTML = bottombarHtml.trim();
-    document.body.appendChild(bottomWrap.firstChild);
+    // Idempotent, per-element injection. A page may pre-declare the <header
+    // id="topbar"> (e.g. index.html, to keep the markup in its own source) —
+    // in that case we skip re-creating it but still inject the shared CSS and
+    // the bottom tab bar, then wire everything by id. Previously this returned
+    // early if either bar existed, which would have left such a page without
+    // the bottombar/CSS.
+    if (!document.getElementById('topbar-style')) {
+      const style = document.createElement('style');
+      style.id = 'topbar-style';
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
+    if (!document.getElementById('topbar')) {
+      const topWrap = document.createElement('div');
+      topWrap.innerHTML = topbarHtml.trim();
+      document.body.insertBefore(topWrap.firstChild, document.body.firstChild);
+    }
+    if (!document.getElementById('bottombar')) {
+      const bottomWrap = document.createElement('div');
+      bottomWrap.innerHTML = bottombarHtml.trim();
+      document.body.appendChild(bottomWrap.firstChild);
+    }
     const active = currentPageKey();
     document.querySelectorAll('.bottombar-tab').forEach((t) => {
       t.classList.toggle('active', t.getAttribute('data-page') === active);

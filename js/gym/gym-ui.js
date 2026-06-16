@@ -18,6 +18,16 @@
           saveState, rebuildLogIndex } = G;
   void roundToStep; // (kept in alias set for parity; not used directly here)
 
+  // A few catalog/routine entries carry percent-encoded names (e.g.
+  // "45%C2%B0 Side Bend") which the coach mirrors verbatim. Decode for display
+  // so the UI reads "45° Side Bend". Guarded: no '%' → return as-is; malformed
+  // sequence → return the original (never throws). Pair with escape() for HTML.
+  function decodeName(s) {
+    s = s == null ? '' : String(s);
+    if (s.indexOf('%') === -1) return s;
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+
   // ============================================================
   // RENDER
   // ============================================================
@@ -147,7 +157,7 @@
     sel.innerHTML = f.map(e => {
       const wLbl = e.bw ? ' · BW' : (e.startWeight ? ' · ' + e.startWeight + unit() : '');
       const sh = e.gym === 'both' ? ' ★' : '';
-      return '<option value="' + e.id + '"' + (e.id === G.state.currentEx ? ' selected' : '') + '>' + escape(e.name) + wLbl + sh + '</option>';
+      return '<option value="' + e.id + '"' + (e.id === G.state.currentEx ? ' selected' : '') + '>' + escape(decodeName(e.name)) + wLbl + sh + '</option>';
     }).join('');
   }
   function renderForm() {
@@ -217,7 +227,7 @@
         : ex.bw
           ? 'Aim for ' + ex.repMin + '-' + ex.repMax + ' clean reps. Once you hit ' + ex.repMax + '+, push for more.'
           : 'Hit ' + ex.repMin + '-' + ex.repMax + ' reps. Once logged, the coach will start prescribing.';
-      wrap.innerHTML = '<div class="po-rx-card"><div class="po-rx-label">' + escape(ex.name) + ' · starting point</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag hold">Start here</span><p class="po-rx-reason">' + reason + '</p></div>';
+      wrap.innerHTML = '<div class="po-rx-card"><div class="po-rx-label">' + escape(decodeName(ex.name)) + ' · starting point</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag hold">Start here</span><p class="po-rx-reason">' + reason + '</p></div>';
       return;
     }
     const head = rx.time
@@ -225,7 +235,7 @@
       : rx.bw
         ? '<span class="po-accent">' + rx.reps + '</span> reps'
         : '<span class="po-accent">' + rx.weight + unit() + '</span> × ' + rx.reps + ' reps';
-    wrap.innerHTML = '<div class="po-rx-card po-rx-' + rx.type + '"><div class="po-rx-label">' + escape(ex.name) + '</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag ' + rx.type + '">' + rx.tag + '</span><p class="po-rx-reason">' + rx.reason + '</p></div>';
+    wrap.innerHTML = '<div class="po-rx-card po-rx-' + rx.type + '"><div class="po-rx-label">' + escape(decodeName(ex.name)) + '</div><div class="po-rx-headline">' + head + '</div><span class="po-rx-tag ' + rx.type + '">' + rx.tag + '</span><p class="po-rx-reason">' + rx.reason + '</p></div>';
   }
   // PR / Personal Record — heaviest weight ever logged (max reps for bodyweight
   // movements). Reads the same getLogs() history as the stats.
@@ -318,8 +328,8 @@
     const ex = getCurrentEx();
     const url = ex && ex.gifUrl;
     if (!url) { img.style.display = 'none'; img.removeAttribute('src'); return; }
-    img.src = url;
-    img.alt = ex.name || '';
+    img.src = decodeName(url);
+    img.alt = decodeName(ex.name || '');
     img.style.display = 'block';
     img.onerror = () => { img.style.display = 'none'; };
   }
@@ -484,7 +494,7 @@
     const meta = e.sets.length + ' set' + (e.sets.length === 1 ? '' : 's') + ' · ' + top;
     return '<li class="po-tw-row">'
       + '<div class="po-tw-row-head">'
-      +   '<span class="po-tw-row-name">' + escape(e.ex.name) + '</span>'
+      +   '<span class="po-tw-row-name">' + escape(decodeName(e.ex.name)) + '</span>'
       +   '<span class="po-tw-row-meta">' + meta + '</span>'
       + '</div>'
       + setLinesHtml(e)
