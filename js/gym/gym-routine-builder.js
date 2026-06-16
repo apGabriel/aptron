@@ -426,7 +426,7 @@
       });
 
       const delBtn = mini('×', () => {
-        if (!confirm('¿Estás seguro de que quieres eliminar esta rutina? Se borrará de todos tus dispositivos.')) return;
+        if (!confirm('Are you sure you want to delete this routine? It will be removed from all your devices.')) return;
         // Immediate local update — drop it from rb_routines_v1. saveRoutines()
         // also fires the 'rb:routines-changed' event so the coach refreshes.
         saveRoutines(loadRoutines().filter(x => x.id !== r.id));
