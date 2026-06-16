@@ -22,12 +22,21 @@
       <p class="wr-sub">Your digital closet, styled by AI.</p>
     </div>
     <!-- Temperature & Seasonality control -->
-    <div class="wr-season-toggle" id="wrSeason" role="group" aria-label="Season">
-      <button data-season="auto"   title="Auto (by date)">📍</button>
-      <button data-season="spring" title="Spring">🌸</button>
-      <button data-season="summer" title="Summer">☀️</button>
-      <button data-season="autumn" title="Autumn">🍂</button>
-      <button data-season="winter" title="Winter">❄️</button>
+    <div class="wr-head-controls">
+      <div class="wr-season-toggle" id="wrSeason" role="group" aria-label="Season">
+        <button data-season="auto"   title="Auto (by date)">📍</button>
+        <button data-season="spring" title="Spring">🌸</button>
+        <button data-season="summer" title="Summer">☀️</button>
+        <button data-season="autumn" title="Autumn">🍂</button>
+        <button data-season="winter" title="Winter">❄️</button>
+      </div>
+      <!-- Live weather (Open-Meteo). The chip shows the cached reading; the
+           button triggers a GPS-based refresh (the only place we prompt). -->
+      <div class="wr-weather" id="wrWeather">
+        <button class="wr-weather-loc" id="wrWeatherLoc" type="button"
+                aria-label="Use my location for live weather">📍 Use my location</button>
+        <span class="wr-weather-chip" id="wrWeatherChip" hidden></span>
+      </div>
     </div>
   </header>
 

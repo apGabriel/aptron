@@ -1438,13 +1438,34 @@
         '</div>').join('');
     }
 
-    // ---- season toggle ----
+    // ---- season toggle + live-weather chip ----
+    const WX_ICON = { clear: '☀️', clouds: '☁️', rain: '🌧️', snow: '❄️', fog: '🌫️', storm: '⛈️' };
+    function renderWeather() {
+      const chip = document.getElementById('wrWeatherChip');
+      if (!chip) return;
+      const wx = Weather.current();
+      if (wx && Number.isFinite(wx.tempC)) {
+        chip.hidden = false;
+        chip.textContent = (WX_ICON[wx.condition] || '🌡️') + ' ' + Math.round(wx.tempC) + '°C';
+        chip.title = 'Live: ' + (wx.condition || 'weather') + ' · drives the “auto” season';
+      } else {
+        chip.hidden = true;
+      }
+    }
     function renderSeason() {
       const wrap = document.getElementById('wrSeason');
       if (!wrap) return;
       const active = Store.settings().season;
       wrap.querySelectorAll('button').forEach((b) =>
         b.classList.toggle('active', b.dataset.season === active));
+      // Surface the live-resolved season on the "auto" pill so users see what
+      // "auto" currently maps to (live weather when available, else by date).
+      const autoBtn = wrap.querySelector('[data-season="auto"]');
+      if (autoBtn) {
+        autoBtn.title = 'Auto — ' + Weather.activeSeason() +
+          (Weather.current() ? ' (live weather)' : ' (by date)');
+      }
+      renderWeather();
     }
 
     function wire() {
@@ -1453,6 +1474,24 @@
       seasonWrap && seasonWrap.addEventListener('click', (e) => {
         const b = e.target.closest('button'); if (!b) return;
         const s = Store.settings(); s.season = b.dataset.season; Store.setSettings(s);
+        renderSeason();
+      });
+      // live weather — the ONLY place we prompt for GPS (user gesture). Forces
+      // "auto" so the live reading drives the season, then refreshes.
+      const locBtn = document.getElementById('wrWeatherLoc');
+      locBtn && locBtn.addEventListener('click', async () => {
+        locBtn.classList.add('is-loading');
+        const label = locBtn.textContent;
+        locBtn.textContent = '📍 Locating…';
+        if (Store.settings().season !== 'auto') {
+          const s = Store.settings(); s.season = 'auto'; Store.setSettings(s);
+        }
+        let res = null;
+        try { res = await Weather.refresh(true, true); } catch (e) {}
+        locBtn.classList.remove('is-loading');
+        locBtn.textContent = label;
+        if (res && Number.isFinite(res.tempC)) Toast.show('Live weather updated · ' + Math.round(res.tempC) + '°C');
+        else Toast.show('Couldn’t get live weather — check location permission.');
         renderSeason();
       });
       // generate
@@ -1489,7 +1528,7 @@
       renderSaved();
     }
 
-    return { wire, renderAll, openUpload, openItem, renderOutfits, renderRecs, renderSaved, generate };
+    return { wire, renderAll, renderSeason, openUpload, openItem, renderOutfits, renderRecs, renderSaved, generate };
   })();
 
   // expose UI for Closet's inline handlers
@@ -1510,8 +1549,9 @@
     // load (that's reserved for the explicit "use my location" control). On
     // success it emits a Store change and the season-driven views re-render.
     Weather.refresh(false, false);
-    // re-render when cloud sync applies remote changes (storage event)
-    Store.onChange(() => { Closet.render(); Profile.render(); });
+    // re-render when cloud sync applies remote changes (storage event) or when
+    // a live-weather refresh emits — keep the season pill + chip in sync.
+    Store.onChange(() => { Closet.render(); Profile.render(); UI.renderSeason(); });
     window.addEventListener('storage', () => UI.renderAll());
     window.addEventListener('wardrobe-changed', () => UI.renderAll());
   }
