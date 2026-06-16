@@ -77,6 +77,13 @@
     if (s.indexOf('%') === -1) return s;
     try { return decodeURIComponent(s); } catch (e) { return s; }
   }
+  // HTML-escape for innerHTML interpolation (NOT the global URL-encoding
+  // escape()). Used for OSM-sourced names, which are user-contributed.
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
 
   // ── Library filtering ─────────────────────────────────────────
   // Multi-level pill bar. At the root it shows the coarse groups; once an
@@ -115,6 +122,7 @@
       });
     }
     syncMuscleMap(); // keep the anatomical map in lockstep with the pills
+    toggleOutdoor(); // show the outdoor spot finder only for the Cardio group
   }
 
   // ── Interactive muscle map ────────────────────────────────────
@@ -589,6 +597,150 @@
   $('rbGifClose').addEventListener('click', () => $('rbGifModalBg').classList.remove('show'));
   $('rbGifModalBg').addEventListener('click', e => { if (e.target === $('rbGifModalBg')) $('rbGifModalBg').classList.remove('show'); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('rbGifModalBg').classList.remove('show'); });
+
+  // ── Outdoor cardio spot finder (Overpass / OpenStreetMap) ─────────────────
+  // Free, keyless, CORS-enabled. Only surfaced for the "Cardio" group. Results
+  // are cached in localStorage by rounded coordinates (≈1 km cells, 24 h TTL)
+  // so switching tabs / re-clicking doesn't hammer the shared public instance.
+  const OSM_KEY = 'osm_spots_v1';
+  const OSM_TTL = 24 * 60 * 60 * 1000;
+  const OSM_RADIUS_M = 1500;                 // ~1.5 km bounding-box half-size
+  // Human label + ordering when a spot has no name tag.
+  const OSM_LABEL = {
+    fitness_station: 'Outdoor Fitness Station',
+    park: 'Park',
+    track: 'Running Track',
+  };
+
+  function toggleOutdoor() {
+    const el = $('rbOutdoor');
+    if (el) el.hidden = (activeMuscle !== 'Cardio');
+  }
+
+  // Browser geolocation — same pattern as the wardrobe module. Never rejects;
+  // resolves null on denial / unavailable so the caller can show a fallback.
+  function outdoorCoords() {
+    return new Promise(resolve => {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        () => resolve(null),
+        { timeout: 25000, maximumAge: 30 * 60 * 1000 }
+      );
+    });
+  }
+  // Great-circle distance in metres.
+  function haversine(aLat, aLon, bLat, bLon) {
+    const R = 6371000, toRad = d => d * Math.PI / 180;
+    const dLat = toRad(bLat - aLat), dLon = toRad(bLon - aLon);
+    const s = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  function fmtDist(m) {
+    return m < 950 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1) + ' km';
+  }
+  const cellKey = (lat, lon) => lat.toFixed(2) + ',' + lon.toFixed(2);
+  function readCache() { try { return JSON.parse(localStorage.getItem(OSM_KEY)) || {}; } catch (e) { return {}; } }
+  function cachedSpots(key) {
+    const hit = readCache()[key];
+    return hit && (Date.now() - hit.fetchedAt) < OSM_TTL ? hit.spots : null;
+  }
+  function cacheSpots(key, spots) {
+    const all = readCache();
+    all[key] = { spots, fetchedAt: Date.now() };
+    try { localStorage.setItem(OSM_KEY, JSON.stringify(all)); } catch (e) {}
+  }
+
+  // Query Overpass for parks / outdoor fitness stations / running tracks inside
+  // a bounding box around the user. `out center` gives ways a single lat/lon.
+  async function fetchSpots(lat, lon) {
+    const dLat = OSM_RADIUS_M / 111320;
+    const dLon = OSM_RADIUS_M / (111320 * Math.cos(lat * Math.PI / 180));
+    const bbox = [lat - dLat, lon - dLon, lat + dLat, lon + dLon].join(',');
+    const q = '[out:json][timeout:25];(' +
+      ['fitness_station', 'park', 'track'].map(v =>
+        'node["leisure"="' + v + '"](' + bbox + ');' +
+        'way["leisure"="' + v + '"](' + bbox + ');').join('') +
+      ');out center 50;';
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q),
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!r.ok) throw new Error('overpass HTTP ' + r.status);
+    const els = (await r.json()).elements || [];
+    const spots = els.map(el => {
+      const p = el.center || el;                     // ways carry a `center`
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return null;
+      const leisure = (el.tags && el.tags.leisure) || '';
+      return {
+        name: (el.tags && el.tags.name) || OSM_LABEL[leisure] || 'Outdoor Spot',
+        type: leisure,
+        lat: p.lat, lon: p.lon,
+        dist: haversine(lat, lon, p.lat, p.lon),
+      };
+    }).filter(Boolean);
+    // De-dupe (a place can match more than one tag) and sort nearest-first.
+    const seen = new Set();
+    return spots
+      .filter(s => { const k = s.lat.toFixed(5) + s.lon.toFixed(5); return seen.has(k) ? false : seen.add(k); })
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 30);
+  }
+
+  function outdoorMessage(msg) {
+    const list = $('rbOutdoorList');
+    list.hidden = false;
+    list.innerHTML = '<div class="rb-outdoor-empty">' + msg + '</div>';
+  }
+  function renderSpots(spots) {
+    const list = $('rbOutdoorList');
+    list.hidden = false;
+    if (!spots.length) {
+      outdoorMessage('No outdoor workout spots found nearby. Try checking your GPS permissions.');
+      return;
+    }
+    list.innerHTML = spots.map(s => {
+      const href = 'https://www.openstreetmap.org/?mlat=' + s.lat + '&mlon=' + s.lon +
+        '#map=18/' + s.lat + '/' + s.lon;
+      const tag = OSM_LABEL[s.type] || 'Outdoor Spot';
+      return '<div class="rb-spot">'
+        + '<div class="rb-spot-main">'
+        +   '<div class="rb-spot-name">' + escapeHtml(decodeName(s.name)) + '</div>'
+        +   '<div class="rb-spot-meta">' + escapeHtml(tag) + ' · ' + fmtDist(s.dist) + '</div>'
+        + '</div>'
+        + '<a class="rb-spot-link" href="' + href + '" target="_blank" rel="noopener" aria-label="Open in OpenStreetMap">Directions ↗</a>'
+        + '</div>';
+    }).join('');
+  }
+
+  const outdoorBtn = $('rbOutdoorBtn');
+  if (outdoorBtn) outdoorBtn.addEventListener('click', async () => {
+    const label = '📍 Find Outdoor Spots Near Me';
+    outdoorBtn.disabled = true;
+    outdoorBtn.textContent = '📍 Searching spots...';
+    try {
+      const coords = await outdoorCoords();
+      if (!coords) {
+        outdoorMessage('No outdoor workout spots found nearby. Try checking your GPS permissions.');
+        return;
+      }
+      const key = cellKey(coords.lat, coords.lon);
+      let spots = cachedSpots(key);
+      if (!spots) {
+        spots = await fetchSpots(coords.lat, coords.lon);
+        cacheSpots(key, spots);
+      }
+      renderSpots(spots);
+    } catch (e) {
+      outdoorMessage('No outdoor workout spots found nearby. Try checking your GPS permissions.');
+    } finally {
+      outdoorBtn.disabled = false;
+      outdoorBtn.textContent = label;
+    }
+  });
 
   // ── Init ──────────────────────────────────────────────────────
   async function init() {

@@ -697,6 +697,14 @@ const CONFIG = {
 
     <div class="rb-filters" id="rbFilters"></div>
 
+    <!-- OUTDOOR CARDIO SPOT FINDER — visible only while the "Cardio" group is
+         active. Finds nearby parks / outdoor fitness stations via the free,
+         keyless Overpass API (OpenStreetMap). Wired in gym-routine-builder.js. -->
+    <div class="rb-outdoor" id="rbOutdoor" hidden>
+      <button class="rb-outdoor-btn" id="rbOutdoorBtn" type="button">📍 Find Outdoor Spots Near Me</button>
+      <div class="rb-outdoor-list" id="rbOutdoorList" hidden></div>
+    </div>
+
     <div class="rb-grid" id="rbGrid"></div>
     <div class="rb-lib-empty" id="rbLibEmpty" style="display:none"></div>
     <button class="rb-more" id="rbMore" type="button" style="display:none">Show more</button>
