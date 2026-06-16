@@ -1212,23 +1212,55 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-mini:disabled { opacity: 0.3; cursor: not-allowed; }
 .rb-mini.rb-del:hover { color: var(--bad); border-color: rgba(255,138,138,0.3); }
 
-/* ----- Routine-template rest control (per-exercise countdown duration) ----- */
-.rb-rest {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 8px 10px; border: 1px solid var(--border);
-  background: rgba(255,255,255,0.02); border-radius: 10px;
+/* ----- Routine-wide rest config (single global block) ----- */
+.rb-rest-global {
+  margin-top: 14px; padding: 14px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(255,255,255,0.02);
 }
-.rb-rest-label {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+.rb-rest-switch {
+  display: flex; align-items: center; gap: 11px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rb-rest-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.rb-rest-switch-track {
+  flex: none; position: relative; width: 42px; height: 24px; border-radius: 999px;
+  background: rgba(255,255,255,0.10); border: 1px solid var(--border);
+  transition: background 0.18s;
+}
+.rb-rest-switch-thumb {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--text-2);
+  transition: transform 0.18s, background 0.18s;
+}
+.rb-rest-switch input:checked + .rb-rest-switch-track {
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+}
+.rb-rest-switch input:checked + .rb-rest-switch-track .rb-rest-switch-thumb {
+  transform: translateX(18px); background: #0a0a0b;
+}
+.rb-rest-switch-label {
+  font-size: 13px; font-weight: 600; color: var(--text-1); line-height: 1.35;
+}
+.rb-rest-field { margin-top: 13px; }
+.rb-rest-field[hidden] { display: none; }
+.rb-rest-field > label {
+  display: block; margin-bottom: 7px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--text-3);
 }
-.rb-rest-ctr { display: flex; align-items: center; gap: 8px; }
-.rb-rest-val {
-  min-width: 52px; text-align: center; font-family: var(--font-mono);
-  font-size: 14px; font-weight: 700; color: var(--text-1);
-  font-variant-numeric: tabular-nums;
+.rb-rest-field-row { display: flex; align-items: center; gap: 10px; }
+.rb-rest-input {
+  width: 96px; padding: 10px 12px; text-align: center;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong);
+  border-radius: 10px; color: var(--text-1);
+  font-family: var(--font-mono); font-size: 17px; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
 }
-.rb-rest-btn { width: 30px; height: 26px; font-size: 15px; }
+.rb-rest-input:focus { outline: none; border-color: var(--accent); }
+.rb-rest-hint { font-size: 12px; color: var(--text-3); }
+.rb-rest-err { display: block; margin-top: 7px; font-size: 11.5px; color: var(--bad); }
+.rb-rest-err[hidden] { display: none; }
 
 /* ----- Routine-template row actions ----- */
 .rb-ex-actions { display: flex; gap: 8px; }
@@ -1368,3 +1400,118 @@ img, video, canvas, svg { max-width: 100%; }
   .po-rest-ring-wrap { width: 200px; height: 200px; }
   .po-rest-time { font-size: 48px; }
 }
+
+/* ============================================================
+   ROUTINE COMBOBOX — searchable dropdown for the active routine
+   ============================================================ */
+.po-combo { position: relative; flex: 1; }
+.po-combo-trigger {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 14px; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text-1); font-family: inherit; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.po-combo-trigger:hover { background: rgba(255,255,255,0.06); }
+.po-combo-trigger[aria-expanded="true"] { border-color: var(--border-strong); }
+.po-combo-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.po-combo-chev { flex: none; color: var(--text-3); transition: transform 0.2s; }
+.po-combo-trigger[aria-expanded="true"] .po-combo-chev { transform: rotate(180deg); }
+
+.po-combo-pop {
+  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0;
+  background: #16161a; border: 1px solid var(--border-strong);
+  border-radius: 12px; padding: 8px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+}
+.po-combo-pop[hidden] { display: none; }
+.po-combo-search {
+  width: 100%; padding: 9px 11px; margin-bottom: 6px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 9px; color: var(--text-1); font-family: inherit; font-size: 13px;
+}
+.po-combo-search:focus { outline: none; border-color: var(--accent); }
+.po-combo-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.po-combo-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 11px; border-radius: 9px; cursor: pointer;
+  font-size: 13.5px; color: var(--text-2); transition: background 0.12s, color 0.12s;
+}
+.po-combo-opt:hover { background: rgba(255,255,255,0.05); color: var(--text-1); }
+.po-combo-opt-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.po-combo-opt-meta { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.po-combo-opt.is-active {
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  color: #0a0a0b;
+}
+.po-combo-opt.is-active .po-combo-opt-meta { color: rgba(10,10,11,0.55); }
+.po-combo-check { flex: none; font-size: 13px; font-weight: 800; color: #0a0a0b; }
+.po-combo-empty { padding: 12px; text-align: center; font-size: 12px; color: var(--text-3); font-style: italic; }
+
+/* ============================================================
+   PAST-WORKOUTS CALENDAR
+   ============================================================ */
+.po-cal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 4px 0 12px; flex-wrap: wrap;
+}
+.po-cal-nav { display: flex; align-items: center; gap: 6px; }
+.po-cal-navbtn {
+  width: 30px; height: 30px; flex: none;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-1); font-size: 17px; line-height: 1;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.po-cal-navbtn:hover { background: rgba(255,255,255,0.07); }
+.po-cal-title {
+  min-width: 132px; text-align: center;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: var(--text-1);
+}
+.po-cal-filter {
+  flex: 1; min-width: 140px; max-width: 220px; padding: 8px 10px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 9px; color: var(--text-1); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+}
+.po-cal-filter:focus { outline: none; border-color: var(--accent); }
+
+.po-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.po-cal-dow {
+  text-align: center; padding-bottom: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-4);
+}
+.po-cal-cell { aspect-ratio: 1; }
+.po-cal-cell.is-empty { aspect-ratio: 1; }
+.po-cal-day {
+  position: relative; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.02); border: 1px solid transparent;
+  border-radius: 9px; color: var(--text-3);
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  cursor: default; -webkit-tap-highlight-color: transparent;
+}
+.po-cal-day[disabled] { opacity: 0.45; }
+.po-cal-day.has-workout {
+  cursor: pointer; color: #0a0a0b;
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 10px rgba(0,0,0,0.3);
+}
+.po-cal-day.has-workout:hover { filter: brightness(1.05); }
+.po-cal-day.is-today { border-color: var(--border-strong); }
+.po-cal-day.has-workout.is-today { border-color: rgba(10,10,11,0.4); }
+.po-cal-dot {
+  position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--good);
+}
+
+/* Calendar day modal — session breakdown */
+.po-cal-sess { margin-bottom: 14px; }
+.po-cal-sess:last-child { margin-bottom: 0; }
+.po-cal-sess-h {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 8px;
+}
+.po-cal-sess-name { font-size: 14px; font-weight: 700; color: var(--text-1); }
+.po-cal-sess-right { display: flex; align-items: center; gap: 8px; }
+.po-cal-sess-sum { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
