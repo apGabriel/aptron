@@ -230,13 +230,22 @@
 
   function applyFilter() {
     const q = search.trim().toLowerCase();
-    filtered = catalog.filter(e => {
-      if (q && !e.name.toLowerCase().includes(q)) return false;
-      // Precise body-map pick: surgical sub-muscle match (name/gifUrl substring).
-      if (activeSub) return matchesSub(e, activeSub);
-      // Otherwise the coarse pill filter.
-      return activeMuscle === 'All' || e.muscleGroup === activeMuscle;
-    });
+    if (q) {
+      // Global override: the moment the user types anything, the text query
+      // bypasses the active muscle pill / body-map filter entirely and searches
+      // the WHOLE library — so "run" surfaces Cardio movements even while
+      // "Chest" is highlighted. The pill stays selected (not cleared), so
+      // emptying the box snaps the list back to that muscle (see the else).
+      filtered = catalog.filter(e => (e.name || '').toLowerCase().includes(q));
+    } else {
+      // No query → filter by the active muscle selection.
+      filtered = catalog.filter(e => {
+        // Precise body-map pick: surgical sub-muscle match (name/gifUrl substring).
+        if (activeSub) return matchesSub(e, activeSub);
+        // Otherwise the coarse pill filter.
+        return activeMuscle === 'All' || e.muscleGroup === activeMuscle;
+      });
+    }
     renderGrid();
   }
 
