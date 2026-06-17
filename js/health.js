@@ -1224,7 +1224,7 @@ const CONFIG = {
   // via the in-card field, and is never committed or synced. Get a free key at
   // https://aistudio.google.com ("Get API key"). For a fully server-side option,
   // proxy this request through proxy/server.js (key in proxy/.env) instead.
-  const GEMINI_MODEL = 'gemini-2.0-flash';   // free tier ~15 RPM; swap if needed
+  const GEMINI_MODEL = 'gemini-2.5-flash';   // free tier ~15 RPM; swap if needed
   const GEMINI_URL = m => 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent';
   const KEY_LS = 'gemini_api_key';
   const getKey = () => { try { return (localStorage.getItem(KEY_LS) || '').trim(); } catch (e) { return ''; } };
