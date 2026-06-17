@@ -1210,6 +1210,220 @@ const CONFIG = {
   renderAll();
 })();
 
+// ===================== AI Snapshot Calorie & Macro Tracker =====================
+// Snap/upload a meal photo → Gemini Vision returns strict JSON
+// {meal_name,calories,protein,carbs,fats} → logged to po_food_v1 under the 6 AM
+// day key and synced via the 'health' app-state blob (po_food_v1 is in
+// syncedKeys below). Self-contained IIFE, same shape as the Stack/Water modules.
+(() => {
+  'use strict';
+
+  // ── Gemini config ───────────────────────────────────────────────────────
+  // SECURITY: never hardcode a real key here — this file ships to a PUBLIC site
+  // and repo. The key is read from localStorage ('gemini_api_key'), entered once
+  // via the in-card field, and is never committed or synced. Get a free key at
+  // https://aistudio.google.com ("Get API key"). For a fully server-side option,
+  // proxy this request through proxy/server.js (key in proxy/.env) instead.
+  const GEMINI_MODEL = 'gemini-2.0-flash';   // free tier ~15 RPM; swap if needed
+  const GEMINI_URL = m => 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent';
+  const KEY_LS = 'gemini_api_key';
+  const getKey = () => { try { return (localStorage.getItem(KEY_LS) || '').trim(); } catch (e) { return ''; } };
+
+  const FOOD_KEY = 'po_food_v1';
+  const $ = id => document.getElementById(id);
+
+  // 6 AM-anchored day key — mirrors the Daily Stack / Water reset exactly.
+  function dayKey() {
+    const now = new Date();
+    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  }
+  function load() { try { return JSON.parse(localStorage.getItem(FOOD_KEY)) || {}; } catch (e) { return {}; } }
+  function save(obj) {
+    try { localStorage.setItem(FOOD_KEY, JSON.stringify(obj)); } catch (e) {}
+    // Push immediately so a freshly logged meal survives a quick refresh.
+    try { if (typeof window.cloudSyncFlush === 'function') window.cloudSyncFlush(); } catch (e) {}
+  }
+  function todayMeals() { return load()[dayKey()] || []; }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function setStatus(msg, kind) {
+    const el = $('aiStatus'); if (!el) return;
+    if (!msg) { el.hidden = true; el.textContent = ''; el.className = 'food-status'; return; }
+    el.hidden = false; el.textContent = msg;
+    el.className = 'food-status' + (kind ? ' is-' + kind : '');
+  }
+
+  // ── Image encoding — downscale on a canvas to keep the upload small/fast ──
+  function fileToScaledBase64(file, maxPx) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('read failed'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('decode failed'));
+        img.onload = () => {
+          const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          c.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve({ mime: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.82).split(',')[1] });
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ── Gemini Vision call ────────────────────────────────────────────────────
+  const PROMPT =
+    'You are a nutrition estimator. Analyze the meal in this image and estimate its ' +
+    'TOTAL nutrition. Respond ONLY with minified JSON matching: ' +
+    '{"meal_name":string,"calories":number,"protein":number,"carbs":number,"fats":number}. ' +
+    'Calories in kcal; protein, carbs and fats in grams, as integers. No prose, no markdown.';
+
+  async function analyzeMealImage(base64Image, mime) {
+    const key = getKey();
+    if (!key) throw new Error('NO_KEY');
+    const body = {
+      contents: [{ parts: [
+        { text: PROMPT },
+        { inline_data: { mime_type: mime || 'image/jpeg', data: base64Image } }
+      ] }],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: 'application/json',     // native JSON output
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            meal_name: { type: 'STRING' },
+            calories:  { type: 'NUMBER' },
+            protein:   { type: 'NUMBER' },
+            carbs:     { type: 'NUMBER' },
+            fats:      { type: 'NUMBER' }
+          },
+          required: ['meal_name', 'calories', 'protein', 'carbs', 'fats']
+        }
+      }
+    };
+    const r = await fetch(GEMINI_URL(GEMINI_MODEL) + '?key=' + encodeURIComponent(key), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) {
+      throw new Error('HTTP ' + r.status + ((r.status === 400 || r.status === 403) ? ' — check your API key' : ''));
+    }
+    const j = await r.json();
+    const cand = (j.candidates || [])[0] || {};
+    const parts = (cand.content && cand.content.parts) || [];
+    const text = (parts[0] && parts[0].text) || '';
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { throw new Error('could not read the AI response'); }
+    const num = v => Math.max(0, Math.round(Number(v) || 0));
+    return {
+      meal_name: String(parsed.meal_name || 'Meal').slice(0, 80),
+      calories: num(parsed.calories), protein: num(parsed.protein),
+      carbs: num(parsed.carbs), fats: num(parsed.fats),
+    };
+  }
+
+  // ── Persistence ops ──────────────────────────────────────────────────────
+  function addMeal(m) {
+    const all = load(), k = dayKey();
+    const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    (all[k] = all[k] || []).push(Object.assign({ id: id, ts: Date.now() }, m));
+    save(all); render();
+  }
+  function deleteMeal(id) {
+    const all = load(), k = dayKey();
+    all[k] = (all[k] || []).filter(x => x.id !== id);
+    if (!all[k].length) delete all[k];
+    save(all); render();
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function render() {
+    const meals = todayMeals();
+    const t = meals.reduce((a, m) => ({
+      c: a.c + (+m.calories || 0), p: a.p + (+m.protein || 0),
+      cb: a.cb + (+m.carbs || 0), f: a.f + (+m.fats || 0),
+    }), { c: 0, p: 0, cb: 0, f: 0 });
+    if ($('foodKcal'))    $('foodKcal').textContent = t.c;
+    if ($('foodProtein')) $('foodProtein').textContent = t.p;
+    if ($('foodCarbs'))   $('foodCarbs').textContent = t.cb;
+    if ($('foodFats'))    $('foodFats').textContent = t.f;
+    const list = $('foodLog'); if (!list) return;
+    list.innerHTML = meals.map(m =>
+      '<li class="food-item" data-id="' + esc(m.id) + '">'
+      + '<div class="food-item-main">'
+      +   '<div class="food-item-name">' + esc(m.meal_name) + '</div>'
+      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
+      +     ' · C ' + (+m.carbs || 0) + ' · F ' + (+m.fats || 0) + '</div>'
+      + '</div>'
+      + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
+      + '</li>').join('');
+    const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
+    const kw = $('foodKeyWrap'); if (kw) kw.hidden = !!getKey();
+  }
+
+  // ── Wire up ─────────────────────────────────────────────────────────────────
+  async function handleFile(file) {
+    if (!file || !/^image\//.test(file.type)) { setStatus('Please choose an image file.', 'err'); return; }
+    if (!getKey()) {
+      setStatus('Add your Gemini API key first.', 'err');
+      const kw = $('foodKeyWrap'); if (kw) { kw.hidden = false; const i = $('foodKeyInput'); if (i) i.focus(); }
+      return;
+    }
+    setStatus('🔮 Analyzing ingredients...', 'loading');
+    try {
+      const enc = await fileToScaledBase64(file, 1024);
+      const meal = await analyzeMealImage(enc.data, enc.mime);
+      addMeal(meal);
+      setStatus('✓ Logged ' + meal.meal_name + ' · ' + meal.calories + ' kcal', 'ok');
+      setTimeout(() => setStatus(''), 2600);
+    } catch (e) {
+      if (e && e.message === 'NO_KEY') setStatus('Add your Gemini API key first.', 'err');
+      else setStatus('Could not analyze that image' + (e && e.message ? ' — ' + e.message : '') + '.', 'err');
+    }
+  }
+
+  function init() {
+    const fileEl = $('foodFile'), drop = $('foodDrop');
+    if (!fileEl || !drop) return;     // not on this page
+    fileEl.addEventListener('change', () => { if (fileEl.files[0]) handleFile(fileEl.files[0]); fileEl.value = ''; });
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('is-drag'); }));
+    ['dragleave', 'dragend'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('is-drag'); }));
+    drop.addEventListener('drop', e => {
+      e.preventDefault(); drop.classList.remove('is-drag');
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+    const list = $('foodLog');
+    if (list) list.addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) deleteMeal(b.dataset.del); });
+    const keySave = $('foodKeySave'), keyInp = $('foodKeyInput');
+    if (keySave && keyInp) keySave.addEventListener('click', () => {
+      const v = keyInp.value.trim(); if (!v) return;
+      try { localStorage.setItem(KEY_LS, v); } catch (e) {}
+      keyInp.value = ''; setStatus('API key saved on this device.', 'ok'); setTimeout(() => setStatus(''), 2000); render();
+    });
+    // re-render when cloud sync applies remote changes (storage event)
+    window.addEventListener('storage', render);
+    render();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+
+  // expose for debugging / future proxy wiring
+  window.FoodAI = { analyzeMealImage: analyzeMealImage, addMeal: addMeal };
+})();
+
 // ===================== Unified Supabase 'health' app-state sync =====================
 // One initCloudSync for the whole page: it mirrors the Daily Stack keys AND the
 // water blob. The water key gets a per-day field-level merge so two devices
@@ -1219,20 +1433,36 @@ document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
   initCloudSync({
     appKey: 'health',
-    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'po_water_v1'],
+    syncedKeys: ['stack:items', 'stack:version', 'stack:low', 'po_water_v1', 'po_food_v1'],
     syncedPrefixes: ['stack:taken:'],
     mergeRemote: function (key, local, remote) {
-      if (key !== 'po_water_v1') return undefined;            // only the water blob
-      if (!remote || typeof remote !== 'object') return undefined;
-      if (!local || typeof local !== 'object') return remote;
-      const merged = Object.assign({}, remote);               // settings: remote wins
-      const logs = Object.assign({}, remote.logs || {});
-      const localLogs = (local.logs && typeof local.logs === 'object') ? local.logs : {};
-      for (const day in localLogs) {
-        logs[day] = Math.max(Number(logs[day]) || 0, Number(localLogs[day]) || 0);
+      if (key === 'po_water_v1') {
+        if (!remote || typeof remote !== 'object') return undefined;
+        if (!local || typeof local !== 'object') return remote;
+        const merged = Object.assign({}, remote);             // settings: remote wins
+        const logs = Object.assign({}, remote.logs || {});
+        const localLogs = (local.logs && typeof local.logs === 'object') ? local.logs : {};
+        for (const day in localLogs) {
+          logs[day] = Math.max(Number(logs[day]) || 0, Number(localLogs[day]) || 0);
+        }
+        merged.logs = logs;
+        return merged;
       }
-      merged.logs = logs;
-      return merged;
+      if (key === 'po_food_v1') {
+        // Meal diary: union each day's entries by id so two devices logging the
+        // same day don't overwrite each other (offline-first safe).
+        if (!remote || typeof remote !== 'object') return undefined;
+        if (!local || typeof local !== 'object') return remote;
+        const out = {};
+        const days = new Set(Object.keys(local).concat(Object.keys(remote)));
+        days.forEach(day => {
+          const byId = {};
+          (remote[day] || []).concat(local[day] || []).forEach(m => { if (m && m.id) byId[m.id] = m; });
+          out[day] = Object.values(byId).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        });
+        return out;
+      }
+      return undefined;
     },
     onApplied: function () { window.dispatchEvent(new Event('storage')); }
   });

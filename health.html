@@ -58,6 +58,48 @@
     </div>
   </div>
 
+  <!-- ============ AI SNAPSHOT CALORIE & MACRO TRACKER ============ -->
+  <div class="section-title">Nutrition</div>
+  <section class="food-ai-card">
+    <div class="stack-head" style="margin-bottom:14px">
+      <div class="sf-eyebrow">AI meal scan</div>
+      <div class="sf-title">Snap a meal — get calories &amp; macros</div>
+    </div>
+
+    <!-- Daily totals -->
+    <div class="food-totals">
+      <div class="food-total"><div class="food-total-num" id="foodKcal">0</div><div class="food-total-label">kcal</div></div>
+      <div class="food-total"><div class="food-total-num" id="foodProtein">0</div><div class="food-total-label">Protein (g)</div></div>
+      <div class="food-total"><div class="food-total-num" id="foodCarbs">0</div><div class="food-total-label">Carbs (g)</div></div>
+      <div class="food-total"><div class="food-total-num" id="foodFats">0</div><div class="food-total-label">Fats (g)</div></div>
+    </div>
+
+    <!-- Drag-and-drop zone / file selector -->
+    <label class="food-dropzone" id="foodDrop" for="foodFile">
+      <span class="food-drop-icon">📸</span>
+      <span class="food-drop-text">Scan Meal Screenshot</span>
+      <span class="food-drop-sub">Drop an image here or tap to choose</span>
+    </label>
+    <input type="file" id="foodFile" accept="image/*" capture="environment" hidden>
+
+    <!-- Loading / result status (hidden by default) -->
+    <div class="food-status" id="aiStatus" hidden></div>
+
+    <!-- Gemini API key — shown only until a key is stored on this device -->
+    <div class="food-key" id="foodKeyWrap" hidden>
+      <label class="food-key-label" for="foodKeyInput">Gemini API key (stored only on this device)</label>
+      <div class="food-key-row">
+        <input type="password" id="foodKeyInput" class="food-key-input" placeholder="Paste your AI Studio key…" autocomplete="off" spellcheck="false">
+        <button type="button" id="foodKeySave" class="food-key-save">Save</button>
+      </div>
+      <div class="food-key-hint">Free key at aistudio.google.com → “Get API key”. Kept in this browser only — never committed or synced.</div>
+    </div>
+
+    <!-- Logged meals -->
+    <ul class="food-log" id="foodLog"></ul>
+    <div class="food-empty" id="foodEmpty">No meals logged today — scan one above.</div>
+  </section>
+
   <section id="water" class="water-embed">
     <div class="section-title">Water Tracker</div>
     <div class="wt-app wt-scope">
