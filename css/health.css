@@ -998,6 +998,11 @@ main {
   font-size: 12.5px; color: var(--text-tertiary); font-style: italic;
 }
 .food-empty[hidden] { display: none; }
+/* AI accuracy disclaimer */
+.food-disclaimer {
+  margin: 10px 2px 0; text-align: center;
+  font-size: 11px; line-height: 1.45; color: var(--text-tertiary);
+}
 /* Date navigator */
 .food-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 .food-date-nav {
