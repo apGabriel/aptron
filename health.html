@@ -85,16 +85,6 @@
     <!-- Loading / result status (hidden by default) -->
     <div class="food-status" id="aiStatus" hidden></div>
 
-    <!-- Gemini API key — shown only until a key is stored on this device -->
-    <div class="food-key" id="foodKeyWrap" hidden>
-      <label class="food-key-label" for="foodKeyInput">Gemini API key (stored only on this device)</label>
-      <div class="food-key-row">
-        <input type="password" id="foodKeyInput" class="food-key-input" placeholder="Paste your AI Studio key…" autocomplete="off" spellcheck="false">
-        <button type="button" id="foodKeySave" class="food-key-save">Save</button>
-      </div>
-      <div class="food-key-hint">Free key at aistudio.google.com → “Get API key”. Kept in this browser only — never committed or synced.</div>
-    </div>
-
     <!-- Logged meals -->
     <ul class="food-log" id="foodLog"></ul>
     <div class="food-empty" id="foodEmpty">No meals logged today — scan one above.</div>

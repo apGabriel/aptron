@@ -1219,15 +1219,12 @@ const CONFIG = {
   'use strict';
 
   // ── Gemini config ───────────────────────────────────────────────────────
-  // SECURITY: never hardcode a real key here — this file ships to a PUBLIC site
-  // and repo. The key is read from localStorage ('gemini_api_key'), entered once
-  // via the in-card field, and is never committed or synced. Get a free key at
-  // https://aistudio.google.com ("Get API key"). For a fully server-side option,
-  // proxy this request through proxy/server.js (key in proxy/.env) instead.
-  const GEMINI_MODEL = 'gemini-2.5-flash';   // free tier ~15 RPM; swap if needed
-  const GEMINI_URL = m => 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent';
-  const KEY_LS = 'gemini_api_key';
-  const getKey = () => { try { return (localStorage.getItem(KEY_LS) || '').trim(); } catch (e) { return ''; } };
+  // WARNING: this constant ships verbatim in the PUBLIC Vercel bundle and git
+  // history. Anyone can read it at /js/health.js and spend against your quota.
+  // Paste your real key below ONLY if you accept that exposure. A safer option
+  // is to leave the placeholder and proxy the call through proxy/server.js with
+  // the key in proxy/.env (server-side, gitignored).
+  const GEMINI_API_KEY = "Pega_Aquí_Tu_Clave_Real_De_Gemini";  // gemini-2.5-flash, free tier ~15 RPM
 
   const FOOD_KEY = 'po_food_v1';
   const $ = id => document.getElementById(id);
@@ -1287,8 +1284,7 @@ const CONFIG = {
     'Calories in kcal; protein, carbs and fats in grams, as integers. No prose, no markdown.';
 
   async function analyzeMealImage(base64Image, mime) {
-    const key = getKey();
-    if (!key) throw new Error('NO_KEY');
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_API_KEY;
     const body = {
       contents: [{ parts: [
         { text: PROMPT },
@@ -1310,7 +1306,7 @@ const CONFIG = {
         }
       }
     };
-    const r = await fetch(GEMINI_URL(GEMINI_MODEL) + '?key=' + encodeURIComponent(key), {
+    const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1369,17 +1365,11 @@ const CONFIG = {
       + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
       + '</li>').join('');
     const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
-    const kw = $('foodKeyWrap'); if (kw) kw.hidden = !!getKey();
   }
 
   // ── Wire up ─────────────────────────────────────────────────────────────────
   async function handleFile(file) {
     if (!file || !/^image\//.test(file.type)) { setStatus('Please choose an image file.', 'err'); return; }
-    if (!getKey()) {
-      setStatus('Add your Gemini API key first.', 'err');
-      const kw = $('foodKeyWrap'); if (kw) { kw.hidden = false; const i = $('foodKeyInput'); if (i) i.focus(); }
-      return;
-    }
     setStatus('🔮 Analyzing ingredients...', 'loading');
     try {
       const enc = await fileToScaledBase64(file, 1024);
@@ -1388,8 +1378,7 @@ const CONFIG = {
       setStatus('✓ Logged ' + meal.meal_name + ' · ' + meal.calories + ' kcal', 'ok');
       setTimeout(() => setStatus(''), 2600);
     } catch (e) {
-      if (e && e.message === 'NO_KEY') setStatus('Add your Gemini API key first.', 'err');
-      else setStatus('Could not analyze that image' + (e && e.message ? ' — ' + e.message : '') + '.', 'err');
+      setStatus('Could not analyze that image' + (e && e.message ? ' — ' + e.message : '') + '.', 'err');
     }
   }
 
@@ -1406,12 +1395,6 @@ const CONFIG = {
     });
     const list = $('foodLog');
     if (list) list.addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) deleteMeal(b.dataset.del); });
-    const keySave = $('foodKeySave'), keyInp = $('foodKeyInput');
-    if (keySave && keyInp) keySave.addEventListener('click', () => {
-      const v = keyInp.value.trim(); if (!v) return;
-      try { localStorage.setItem(KEY_LS, v); } catch (e) {}
-      keyInp.value = ''; setStatus('API key saved on this device.', 'ok'); setTimeout(() => setStatus(''), 2000); render();
-    });
     // re-render when cloud sync applies remote changes (storage event)
     window.addEventListener('storage', render);
     render();
