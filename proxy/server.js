@@ -94,9 +94,16 @@ async function listEvents({ timeMin, timeMax }) {
 
 // ── ROUTES ────────────────────────────────────────────────────────────────────
 
-// Health check — open http://localhost:3001/health to verify the proxy is up
+// Health check — open http://localhost:3001/health to verify the proxy is up.
+// gemini_key_present is a boolean-only probe (never the value) to diagnose
+// whether the GEMINI_API_KEY env var is actually bound in this deployment.
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', calendar_id: CALENDAR_ID, timezone: TIMEZONE });
+  res.json({
+    status: 'ok',
+    calendar_id: CALENDAR_ID,
+    timezone: TIMEZONE,
+    gemini_key_present: !!process.env.GEMINI_API_KEY,
+  });
 });
 
 
