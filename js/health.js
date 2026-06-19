@@ -1218,13 +1218,13 @@ const CONFIG = {
 (() => {
   'use strict';
 
-  // ── Gemini config ───────────────────────────────────────────────────────
-  // WARNING: this constant ships verbatim in the PUBLIC Vercel bundle and git
-  // history. Anyone can read it at /js/health.js and spend against your quota.
-  // Paste your real key below ONLY if you accept that exposure. A safer option
-  // is to leave the placeholder and proxy the call through proxy/server.js with
-  // the key in proxy/.env (server-side, gitignored).
-  const GEMINI_API_KEY = "Pega_Aquí_Tu_Clave_Real_De_Gemini";  // gemini-2.5-flash, free tier ~15 RPM
+  // ── Meal-scan config ─────────────────────────────────────────────────────
+  // No API key in the browser: the image is POSTed to the proxy, which holds
+  // GEMINI_API_KEY server-side (Vercel env var) and calls Gemini. Same-origin
+  // routing as the calendar — '/api/*' is rewritten to proxy/server.js by
+  // vercel.json. Leave PROXY '' in production; point it at the local proxy
+  // (e.g. 'http://localhost:3001') only for local dev.
+  const PROXY = '';
 
   const FOOD_KEY = 'po_food_v1';
   const $ = id => document.getElementById(id);
@@ -1276,57 +1276,22 @@ const CONFIG = {
     });
   }
 
-  // ── Gemini Vision call ────────────────────────────────────────────────────
-  const PROMPT =
-    'You are a nutrition estimator. Analyze the meal in this image and estimate its ' +
-    'TOTAL nutrition. Respond ONLY with minified JSON matching: ' +
-    '{"meal_name":string,"calories":number,"protein":number,"carbs":number,"fats":number}. ' +
-    'Calories in kcal; protein, carbs and fats in grams, as integers. No prose, no markdown.';
-
+  // ── Meal analysis (via proxy) ─────────────────────────────────────────────
+  // POST the downscaled image to the proxy; it calls Gemini with the
+  // server-side key and returns normalized { meal_name, calories, ... }.
   async function analyzeMealImage(base64Image, mime) {
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_API_KEY;
-    const body = {
-      contents: [{ parts: [
-        { text: PROMPT },
-        { inline_data: { mime_type: mime || 'image/jpeg', data: base64Image } }
-      ] }],
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: 'application/json',     // native JSON output
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            meal_name: { type: 'STRING' },
-            calories:  { type: 'NUMBER' },
-            protein:   { type: 'NUMBER' },
-            carbs:     { type: 'NUMBER' },
-            fats:      { type: 'NUMBER' }
-          },
-          required: ['meal_name', 'calories', 'protein', 'carbs', 'fats']
-        }
-      }
-    };
-    const r = await fetch(url, {
+    const r = await fetch(PROXY + '/api/gemini/meal-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ image: base64Image, mime: mime || 'image/jpeg' }),
       signal: AbortSignal.timeout(30000),
     });
     if (!r.ok) {
-      throw new Error('HTTP ' + r.status + ((r.status === 400 || r.status === 403) ? ' — check your API key' : ''));
+      let detail = '';
+      try { const j = await r.json(); if (j && j.error) detail = ' — ' + j.error; } catch (e) {}
+      throw new Error('HTTP ' + r.status + detail);
     }
-    const j = await r.json();
-    const cand = (j.candidates || [])[0] || {};
-    const parts = (cand.content && cand.content.parts) || [];
-    const text = (parts[0] && parts[0].text) || '';
-    let parsed;
-    try { parsed = JSON.parse(text); } catch (e) { throw new Error('could not read the AI response'); }
-    const num = v => Math.max(0, Math.round(Number(v) || 0));
-    return {
-      meal_name: String(parsed.meal_name || 'Meal').slice(0, 80),
-      calories: num(parsed.calories), protein: num(parsed.protein),
-      carbs: num(parsed.carbs), fats: num(parsed.fats),
-    };
+    return await r.json();
   }
 
   // ── Persistence ops ──────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));   // meal-scan posts a base64 image
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function dayBounds(dateStr) {
@@ -193,6 +193,75 @@ app.delete('/api/events/:id', async (req, res) => {
   try {
     await calendar.events.delete({ calendarId: CALENDAR_ID, eventId: req.params.id });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── 6. POST /api/gemini/meal-scan ─────────────────────────────────────────────
+// Estimate a meal's nutrition from a photo. The Gemini key stays server-side
+// (process.env.GEMINI_API_KEY) so it never reaches the browser.
+// Body: { image: <base64 JPEG/PNG, no data: prefix>, mime?: 'image/jpeg' }
+// Returns: { meal_name, calories, protein, carbs, fats }  (integers, >= 0)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL   = 'gemini-2.5-flash';   // free tier ~15 RPM; swap if needed
+const MEAL_PROMPT =
+  'You are a nutrition estimator. Analyze the meal in this image and estimate its ' +
+  'TOTAL nutrition. Respond ONLY with minified JSON matching: ' +
+  '{"meal_name":string,"calories":number,"protein":number,"carbs":number,"fats":number}. ' +
+  'Calories in kcal; protein, carbs and fats in grams, as integers. No prose, no markdown.';
+
+app.post('/api/gemini/meal-scan', async (req, res) => {
+  if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
+  const { image, mime } = req.body || {};
+  if (!image) return res.status(400).json({ error: 'image (base64) is required' });
+
+  const body = {
+    contents: [{ parts: [
+      { text: MEAL_PROMPT },
+      { inline_data: { mime_type: mime || 'image/jpeg', data: image } }
+    ] }],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          meal_name: { type: 'STRING' },
+          calories:  { type: 'NUMBER' },
+          protein:   { type: 'NUMBER' },
+          carbs:     { type: 'NUMBER' },
+          fats:      { type: 'NUMBER' }
+        },
+        required: ['meal_name', 'calories', 'protein', 'carbs', 'fats']
+      }
+    }
+  };
+
+  try {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL +
+      ':generateContent?key=' + GEMINI_API_KEY;
+    const gr = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!gr.ok) {
+      // Don't echo Google's body back to the client — it can contain key context.
+      return res.status(502).json({ error: 'Gemini request failed (HTTP ' + gr.status + ')' });
+    }
+    const j = await gr.json();
+    const text = (((j.candidates || [])[0] || {}).content?.parts || [])[0]?.text || '';
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { return res.status(502).json({ error: 'Could not read the AI response' }); }
+    const num = v => Math.max(0, Math.round(Number(v) || 0));
+    res.json({
+      meal_name: String(parsed.meal_name || 'Meal').slice(0, 80),
+      calories: num(parsed.calories), protein: num(parsed.protein),
+      carbs: num(parsed.carbs), fats: num(parsed.fats),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
