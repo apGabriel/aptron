@@ -66,6 +66,13 @@
       <div class="sf-title">Snap a meal — get calories &amp; macros</div>
     </div>
 
+    <!-- Date navigator -->
+    <div class="food-datebar">
+      <button type="button" class="food-date-nav" id="foodPrev" aria-label="Previous day">‹</button>
+      <input type="date" class="food-date-input" id="foodDate" aria-label="Journal date">
+      <button type="button" class="food-date-nav" id="foodNext" aria-label="Next day">›</button>
+    </div>
+
     <!-- Daily totals -->
     <div class="food-totals">
       <div class="food-total"><div class="food-total-num" id="foodKcal">0</div><div class="food-total-label">kcal</div></div>
@@ -87,7 +94,7 @@
 
     <!-- Logged meals -->
     <ul class="food-log" id="foodLog"></ul>
-    <div class="food-empty" id="foodEmpty">No meals logged today — scan one above.</div>
+    <div class="food-empty" id="foodEmpty">No meals logged for this day — scan one above.</div>
   </section>
 
   <section id="water" class="water-embed">

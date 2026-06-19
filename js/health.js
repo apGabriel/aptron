@@ -1241,7 +1241,42 @@ const CONFIG = {
     // Push immediately so a freshly logged meal survives a quick refresh.
     try { if (typeof window.cloudSyncFlush === 'function') window.cloudSyncFlush(); } catch (e) {}
   }
-  function todayMeals() { return load()[dayKey()] || []; }
+  function mealsFor(date) { return load()[date] || []; }
+
+  // Currently viewed day (defaults to the active nutrition day). The journal
+  // renders against this and new scans log into it; the chevrons and the date
+  // input move it around.
+  let selectedDate = dayKey();
+
+  // YYYY-MM-DD shifted by whole days, staying in local time (no UTC drift).
+  function shiftDate(dateStr, delta) {
+    const p = dateStr.split('-').map(Number);
+    const dt = new Date(p[0], p[1] - 1, p[2]);
+    dt.setDate(dt.getDate() + delta);
+    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+  }
+
+  // Contextual emoji from the meal name — first keyword match wins.
+  const EMOJI_RULES = [
+    [/tortilla|omelette|omelet|\begg|huevo/, '🍳'],
+    [/shake|smoothie|protein|batido|yogur/,  '🥤'],
+    [/chicken|pollo|beef|steak|meat|carne|pork/, '🍗'],
+    [/salad|ensalada|greens/,                '🥗'],
+    [/fish|salmon|tuna|pescado|sushi/,       '🐟'],
+    [/rice|pasta|noodle|arroz|fideo/,        '🍚'],
+    [/burger|sandwich|wrap|taco|bocadillo/,  '🌮'],
+    [/pizza/,                                '🍕'],
+    [/soup|sopa|stew|guiso/,                 '🍲'],
+    [/fruit|fruta|apple|banana|berry|manzana/, '🍎'],
+    [/bread|toast|\bpan\b|bagel/,            '🍞'],
+    [/coffee|caf[eé]|latte/,                 '☕'],
+  ];
+  function emojiFor(name) {
+    const n = String(name || '').toLowerCase();
+    for (let i = 0; i < EMOJI_RULES.length; i++) if (EMOJI_RULES[i][0].test(n)) return EMOJI_RULES[i][1];
+    return '🍽️';
+  }
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1296,21 +1331,45 @@ const CONFIG = {
 
   // ── Persistence ops ──────────────────────────────────────────────────────
   function addMeal(m) {
-    const all = load(), k = dayKey();
+    const all = load(), k = selectedDate;
     const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
     (all[k] = all[k] || []).push(Object.assign({ id: id, ts: Date.now() }, m));
     save(all); render();
   }
   function deleteMeal(id) {
-    const all = load(), k = dayKey();
+    const all = load(), k = selectedDate;
     all[k] = (all[k] || []).filter(x => x.id !== id);
     if (!all[k].length) delete all[k];
     save(all); render();
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // One log card: a thumbnail (with a small emoji badge) or, when there's no
+  // image, an emoji tile — then the name and per-meal macros.
+  function mealCardHTML(m) {
+    const emoji = m.emoji || emojiFor(m.meal_name);
+    const visual = m.thumb
+      ? '<div class="food-item-visual">'
+          + '<img src="data:image/jpeg;base64,' + esc(m.thumb) + '" alt="" loading="lazy">'
+          + '<span class="food-emoji-badge">' + emoji + '</span>'
+        + '</div>'
+      : '<div class="food-item-visual food-item-visual--emoji">' + emoji + '</div>';
+    return '<li class="food-item" data-id="' + esc(m.id) + '">'
+      + visual
+      + '<div class="food-item-main">'
+      +   '<div class="food-item-name">' + esc(m.meal_name) + '</div>'
+      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
+      +     ' · C ' + (+m.carbs || 0) + ' · F ' + (+m.fats || 0) + '</div>'
+      + '</div>'
+      + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
+      + '</li>';
+  }
+
   function render() {
-    const meals = todayMeals();
+    const dateInput = $('foodDate');
+    if (dateInput && dateInput.value !== selectedDate) dateInput.value = selectedDate;
+
+    const meals = mealsFor(selectedDate);
     const t = meals.reduce((a, m) => ({
       c: a.c + (+m.calories || 0), p: a.p + (+m.protein || 0),
       cb: a.cb + (+m.carbs || 0), f: a.f + (+m.fats || 0),
@@ -1320,15 +1379,7 @@ const CONFIG = {
     if ($('foodCarbs'))   $('foodCarbs').textContent = t.cb;
     if ($('foodFats'))    $('foodFats').textContent = t.f;
     const list = $('foodLog'); if (!list) return;
-    list.innerHTML = meals.map(m =>
-      '<li class="food-item" data-id="' + esc(m.id) + '">'
-      + '<div class="food-item-main">'
-      +   '<div class="food-item-name">' + esc(m.meal_name) + '</div>'
-      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
-      +     ' · C ' + (+m.carbs || 0) + ' · F ' + (+m.fats || 0) + '</div>'
-      + '</div>'
-      + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
-      + '</li>').join('');
+    list.innerHTML = meals.map(mealCardHTML).join('');
     const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
   }
 
@@ -1339,7 +1390,11 @@ const CONFIG = {
     try {
       const enc = await fileToScaledBase64(file, 1024);
       const meal = await analyzeMealImage(enc.data, enc.mime);
-      addMeal(meal);
+      // Store a tiny ~96px thumbnail for the card — keeps the synced blob lean
+      // (the full 1024px image is only sent to Gemini, never persisted).
+      let thumb = null;
+      try { thumb = (await fileToScaledBase64(file, 96)).data; } catch (e) {}
+      addMeal(Object.assign({ emoji: emojiFor(meal.meal_name), thumb: thumb }, meal));
       setStatus('✓ Logged ' + meal.meal_name + ' · ' + meal.calories + ' kcal', 'ok');
       setTimeout(() => setStatus(''), 2600);
     } catch (e) {
@@ -1360,6 +1415,16 @@ const CONFIG = {
     });
     const list = $('foodLog');
     if (list) list.addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) deleteMeal(b.dataset.del); });
+
+    // Date navigator — chevrons step a day; the native picker jumps anywhere.
+    const dateInput = $('foodDate'), prevBtn = $('foodPrev'), nextBtn = $('foodNext');
+    if (dateInput) {
+      dateInput.value = selectedDate;
+      dateInput.addEventListener('change', () => { if (dateInput.value) { selectedDate = dateInput.value; render(); } });
+    }
+    if (prevBtn) prevBtn.addEventListener('click', () => { selectedDate = shiftDate(selectedDate, -1); render(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { selectedDate = shiftDate(selectedDate, 1); render(); });
+
     // re-render when cloud sync applies remote changes (storage event)
     window.addEventListener('storage', render);
     render();
