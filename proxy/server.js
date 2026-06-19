@@ -102,7 +102,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     calendar_id: CALENDAR_ID,
     timezone: TIMEZONE,
-    gemini_key_present: !!process.env.GEMINI_API_KEY,
+    gemini_key_present: !!(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY),
   });
 });
 
@@ -211,7 +211,11 @@ app.delete('/api/events/:id', async (req, res) => {
 // (process.env.GEMINI_API_KEY) so it never reaches the browser.
 // Body: { image: <base64 JPEG/PNG, no data: prefix>, mime?: 'image/jpeg' }
 // Returns: { meal_name, calories, protein, carbs, fats }  (integers, >= 0)
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+// Prefer the unprefixed name; fall back to VITE_-prefixed for the current
+// Vercel setup. NOTE: rename the Vercel var to GEMINI_API_KEY when convenient —
+// the VITE_ prefix would leak the key to the client bundle if a build step is
+// ever added. Safe for now only because this project has no bundler.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
 const GEMINI_MODEL   = 'gemini-2.5-flash';   // free tier ~15 RPM; swap if needed
 const MEAL_PROMPT =
   'You are a nutrition estimator. Analyze the meal in this image and estimate its ' +
