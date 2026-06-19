@@ -893,3 +893,108 @@ main {
 .water-minus-btn {
   margin-bottom: max(0px, env(safe-area-inset-bottom));
 }
+
+/* ===================== AI Snapshot Calorie & Macro Tracker ===================== */
+.food-ai-card {
+  background: var(--bg-card);
+  border-radius: 16px;
+  padding: 22px 22px 18px;
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  margin-bottom: 18px;
+}
+/* Daily totals */
+.food-totals {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  margin-bottom: 16px;
+}
+.food-total {
+  background: var(--bg-secondary); border: 1px solid var(--border-soft);
+  border-radius: 12px; padding: 12px 6px; text-align: center;
+}
+.food-total-num {
+  font-family: var(--font-mono); font-size: 20px; font-weight: 700;
+  color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1;
+}
+.food-total-label {
+  margin-top: 5px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+/* Drag-and-drop / file selector */
+.food-dropzone {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; padding: 22px 16px; cursor: pointer; text-align: center;
+  border: 1.5px dashed var(--border-strong); border-radius: 14px;
+  background: var(--bg-secondary); color: var(--text-secondary);
+  transition: border-color 0.18s, background 0.18s, transform 0.08s;
+  -webkit-tap-highlight-color: transparent;
+}
+.food-dropzone:hover { border-color: var(--accent); background: rgba(29,158,117,0.06); }
+.food-dropzone:active { transform: scale(0.99); }
+.food-dropzone.is-drag {
+  border-color: var(--accent); background: rgba(29,158,117,0.10);
+  box-shadow: 0 0 0 4px var(--accent-glow);
+}
+.food-drop-icon { font-size: 26px; line-height: 1; }
+.food-drop-text { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.food-drop-sub { font-size: 11.5px; color: var(--text-tertiary); }
+/* Status line */
+.food-status {
+  margin-top: 12px; padding: 10px 12px; border-radius: 10px;
+  font-size: 12.5px; font-weight: 600; text-align: center;
+  background: var(--bg-secondary); border: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+}
+.food-status[hidden] { display: none; }
+.food-status.is-loading { color: var(--text-primary); }
+.food-status.is-ok { color: var(--accent); border-color: rgba(29,158,117,0.3); }
+.food-status.is-err { color: var(--warning); border-color: rgba(255,138,77,0.3); background: var(--warning-bg); }
+/* API key field */
+.food-key { margin-top: 12px; }
+.food-key-label {
+  display: block; margin-bottom: 6px; font-size: 11px; font-weight: 600;
+  color: var(--text-tertiary);
+}
+.food-key-row { display: flex; gap: 8px; }
+.food-key-input {
+  flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  color: var(--text-primary); font-family: inherit; font-size: 13px;
+}
+.food-key-input:focus { outline: none; border-color: var(--accent); background: var(--bg-input-focus); }
+.food-key-save {
+  flex: none; padding: 10px 16px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg-secondary);
+  color: var(--text-primary); font-family: inherit; font-size: 13px; font-weight: 700;
+}
+.food-key-save:hover { border-color: var(--accent); color: var(--accent); }
+.food-key-hint { margin-top: 6px; font-size: 11px; color: var(--text-quaternary); line-height: 1.4; }
+/* Logged meals */
+.food-log { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.food-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 12px; border-radius: 11px;
+  background: var(--bg-secondary); border: 1px solid var(--border-soft);
+}
+.food-item-main { flex: 1; min-width: 0; }
+.food-item-name {
+  font-size: 13.5px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.food-item-macros {
+  margin-top: 2px; font-family: var(--font-mono); font-size: 11.5px;
+  color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+}
+.food-item-del {
+  flex: none; width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-tertiary); font-size: 17px; line-height: 1;
+  -webkit-tap-highlight-color: transparent; transition: color 0.15s, border-color 0.15s;
+}
+.food-item-del:hover { color: var(--warning); border-color: rgba(255,138,77,0.4); }
+.food-empty {
+  margin-top: 12px; padding: 14px; text-align: center;
+  font-size: 12.5px; color: var(--text-tertiary); font-style: italic;
+}
+.food-empty[hidden] { display: none; }
