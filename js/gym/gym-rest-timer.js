@@ -24,6 +24,11 @@
   let timer = 0;          // setInterval handle
   let finished = false;   // guard so the finish cue fires exactly once
   let audioCtx = null;    // lazily created inside the log gesture (autoplay-safe)
+  let onFinishCb = null;  // optional callback fired when the countdown hits 0 —
+                          // e.g. log a completed Time-set hold. null for plain rest.
+  let runId = 0;          // bumped on every start(); lets finish() detect that its
+                          // callback opened a NEW countdown in this same overlay
+                          // (hold → rest hand-off) and bow out instead of closing it.
 
   const root = () => $('poRest');
 
@@ -56,6 +61,9 @@
 
   function close() {
     clearTick();
+    // Drop any pending callback so a manual Skip (early close) of a hold can't
+    // later log it, and so it never leaks into the next, unrelated countdown.
+    onFinishCb = null;
     const el = root();
     if (!el) return;
     el.classList.remove('is-open', 'is-done');
@@ -83,16 +91,27 @@
     } catch (e) { /* audio unavailable — ignore */ }
   }
 
-  // Timer hit 0 → fire the audio beep, a haptic buzz and a green flash, then
-  // auto-dismiss so the user can start the next set hands-free.
+  // Timer hit 0 → fire the audio beep + haptic buzz, then run any completion
+  // callback (e.g. log the held Time-set). If that callback starts a NEW
+  // countdown in this overlay — the hold→rest hand-off, where commitSet kicks
+  // off the between-sets rest — runId changes and we bow out so the green flash
+  // + auto-close don't clobber the fresh rest countdown. Otherwise (plain rest,
+  // or a hold with no rest planned) we green-flash and auto-dismiss as before.
   function finish() {
     if (finished) return;
     finished = true;
     clearTick();
-    const el = root();
-    if (el) el.classList.add('is-done');
+    const cb = onFinishCb;
+    onFinishCb = null;
     beep();
     try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
+    if (cb) {
+      const token = runId;
+      cb(total);                      // total = the duration actually held (grows with +15s)
+      if (runId !== token) return;    // callback opened a new countdown → it owns the overlay now
+    }
+    const el = root();
+    if (el) el.classList.add('is-done');
     setTimeout(close, 1400);
   }
 
@@ -107,17 +126,31 @@
     paint(remaining);
   }
 
-  function start(seconds, label) {
+  // Eyebrow caption — same chrome, different context. Plain rest reads
+  // "REST · <EXERCISE>"; an in-progress Time-set hold reads
+  // "KEEP HOLDING · <EXERCISE>" so the shared overlay never feels mislabelled.
+  function buildEyebrow(label, mode) {
+    const base = mode === 'hold' ? 'KEEP HOLDING' : 'REST';
+    return label ? (base + ' · ' + String(label).toUpperCase()) : base;
+  }
+
+  // start(seconds, label[, opts]) — opts.mode ('rest' default | 'hold') picks the
+  // caption; opts.onFinish(secondsHeld) runs when the countdown reaches 0. The
+  // rest-between-sets caller passes no opts, so its behaviour is unchanged.
+  function start(seconds, label, opts) {
+    opts = opts || {};
     seconds = Math.max(1, Math.round(Number(seconds) || 0));
     const el = root();
     if (!el) return;
     clearTick();
+    runId++;
     finished = false;
+    onFinishCb = typeof opts.onFinish === 'function' ? opts.onFinish : null;
     total = seconds;
     endAt = Date.now() + seconds * 1000;
 
     const eye = $('poRestEyebrow');
-    if (eye) eye.textContent = label ? ('REST · ' + String(label).toUpperCase()) : 'REST';
+    if (eye) eye.textContent = buildEyebrow(label, opts.mode);
 
     el.classList.remove('is-done');
     el.classList.add('is-open');

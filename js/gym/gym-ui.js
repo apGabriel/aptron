@@ -296,15 +296,28 @@
     const svg = $('sparkline');
     const empty = $('sparkEmpty');
     const ex = getCurrentEx();
+    const time = isTimeMetric(ex);
     // Strength trend tracks working sets only, so a dropset chain doesn't
-    // sawtooth the line downward.
-    const logs = ex ? workingSets(getLogs()).slice(-10) : [];
+    // sawtooth the line downward — AND only sets matching the exercise's
+    // current metric. A set logged under the other metric lacks the field this
+    // trend reads (a Time set carries no `reps`), so mixing them would feed
+    // estimate1RM(weight, undefined) → NaN and break the SVG path.
+    const logs = ex
+      ? workingSets(getLogs()).filter(l => (l.metric === 'time') === time).slice(-10)
+      : [];
     if (logs.length < 2) {
       svg.style.display = 'none'; empty.style.display = 'block';
       return;
     }
     svg.style.display = 'block'; empty.style.display = 'none';
-    const vals = logs.map(l => isTimeMetric(ex) ? (Number(l.duration) || 0) : ex.bw ? l.reps : estimate1RM(l.weight, l.reps));
+    // Coerce to a finite number per point as a final guard, so a malformed
+    // legacy set can never reintroduce a NaN coordinate.
+    const vals = logs.map(l => {
+      const v = time ? (Number(l.duration) || 0)
+        : ex.bw ? (Number(l.reps) || 0)
+        : estimate1RM(Number(l.weight) || 0, Number(l.reps) || 0);
+      return Number.isFinite(v) ? v : 0;
+    });
     const min = Math.min.apply(null, vals);
     const max = Math.max.apply(null, vals);
     const range = max - min || 1;

@@ -342,18 +342,6 @@ img, video, canvas, svg { max-width: 100%; }
 .po-btn-primary:hover { transform: translateY(-1px); }
 .po-btn-primary:active { transform: translateY(0) scale(0.98); }
 .po-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
-/* In-set hold timer states on the primary log button (Time metric only):
-   .po-btn-counting = live countdown running (amber → tap to stop early);
-   .po-btn-done = brief green success flash when the hold completes + logs. */
-.po-btn-primary.po-btn-counting {
-  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
-  border-color: rgba(251,191,36,0.85); color: #0a0a0b;
-}
-.po-btn-primary.po-btn-done {
-  background: linear-gradient(180deg, #6ee7b7 0%, #34d399 100%);
-  border-color: rgba(110,231,183,0.9); color: #06281d;
-  transition: background 0.2s, color 0.2s;
-}
 
 /* Log-set action row: dropset toggle + primary Log button side by side */
 .po-log-actions { display: flex; gap: 8px; align-items: stretch; }

@@ -72,9 +72,6 @@
   window.addEventListener('rb:routines-changed', () => { saveState(); renderAll(); });
 
   $('exSelect').addEventListener('change', e => {
-    // A live hold belongs to the exercise it was started on — abandon it before
-    // switching so its ticks can't keep writing into another exercise's input.
-    if (G.cancelSetHold) G.cancelSetHold();
     G.state.currentEx = e.target.value;
     G.histDate = ''; // new exercise → reset the History date filter
     saveState(); renderAll();
@@ -124,8 +121,6 @@
       if (!ex) return;
       const next = b.dataset.metric === 'time' ? 'time' : 'reps';
       if ((ex.metric || 'reps') === next) return;
-      // Leaving Time mode (or re-entering Reps) abandons any running hold.
-      cancelHold();
       ex.metric = next;
       // Reset the input so a stale reps value isn't read as seconds (or vice
       // versa) — renderAll reseeds it from this metric's last set / default.
@@ -219,122 +214,40 @@
   }
 
   // ============================================================
-  // IN-SET HOLD TIMER (Time metric) — isolated state machine
+  // TIME-SET HOLD COUNTDOWN — reuses the Rest Timer overlay
   // ============================================================
-  // Layered on the single log button. In Reps mode the button commits a set
-  // immediately (unchanged). In Time mode it instead runs a live countdown
-  // inside the duration input, then auto-commits the completed hold at 0.
-  // This owns ONLY the countdown vars below + its interval; it reaches the
-  // session exclusively through commitSet(), so Reps logging and routine
-  // persistence are entirely unaffected.
-  let holdTimer = 0;     // setInterval handle (0 = idle)
-  let holdEndAt = 0;     // wall-clock ms the hold ends (drift-free under throttling)
-  let holdTotal = 0;     // the duration being held, logged verbatim at completion
-  let holdAudio = null;  // AudioContext, lazily primed inside the start tap (autoplay-safe)
-  const holdRunning = () => holdTimer !== 0;
-
-  // The log button's label lives here (the interaction layer owns its behaviour):
-  // "Stop set" while a hold counts, "Start set" for an idle Time exercise,
-  // "Log set" for Reps. renderForm() calls this, so any re-render (e.g. an 8s
-  // cloud poll) re-derives the label instead of clobbering it back to a default.
+  // The log button's label is metric-driven: "Start set" for a Time exercise,
+  // "Log set" for Reps. renderForm() calls this, so a re-render (e.g. an 8s
+  // cloud poll) re-derives it instead of leaving a stale label behind.
   function refreshLogBtn() {
     const btn = $('logBtn');
     if (!btn) return;
-    if (holdRunning()) { btn.textContent = 'Stop set'; btn.classList.add('po-btn-counting'); return; }
-    btn.classList.remove('po-btn-counting');
     btn.textContent = isTimeMetric(getCurrentEx()) ? 'Start set' : 'Log set';
   }
   G.refreshLogBtn = refreshLogBtn;
 
-  function clearHold() { if (holdTimer) { clearInterval(holdTimer); holdTimer = 0; } }
-
-  // Stop a running hold WITHOUT logging — user tapped "Stop set", or switched
-  // exercise/metric mid-hold. Restores the input to the full duration so the
-  // next Start begins fresh, then repaints the button.
-  function cancelHold() {
-    if (!holdRunning()) return;
-    clearHold();
-    const input = $('repsInput');
-    if (input && holdTotal) input.value = String(holdTotal);
-    refreshLogBtn();
-  }
-  G.cancelSetHold = cancelHold;
-
-  // Wall-clock tick (every 250ms) → paint the whole remaining seconds into the
-  // input so the readout self-corrects instead of drifting if a tick is delayed.
-  function holdTick() {
-    const remaining = Math.ceil((holdEndAt - Date.now()) / 1000);
-    const input = $('repsInput');
-    if (remaining <= 0) {
-      if (input) input.value = '0';
-      finishHold();
-      return;
-    }
-    if (input) input.value = String(remaining);
-  }
-
-  // Hold reached 0 → fire a subtle success cue, then commit the COMPLETED hold
-  // (the full duration, not 0) through the shared path. commitSet → renderAll
-  // reseeds the input back to its baseline; refreshLogBtn restores "Start set".
-  function finishHold() {
-    clearHold();
-    const dur = holdTotal;
-    successCue();
-    commitSet({ duration: dur });
-    refreshLogBtn();
-  }
-
-  // Subtle completion feedback: short tone (primed on the start tap), a haptic
-  // blip, and a green flash on the button. All best-effort / silent where blocked.
-  function successCue() {
-    const btn = $('logBtn');
-    if (btn) { btn.classList.add('po-btn-done'); setTimeout(() => btn.classList.remove('po-btn-done'), 600); }
-    try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
-    try {
-      if (holdAudio) {
-        if (holdAudio.state === 'suspended') holdAudio.resume();
-        const t0 = holdAudio.currentTime;
-        const osc = holdAudio.createOscillator();
-        const g = holdAudio.createGain();
-        osc.type = 'sine'; osc.frequency.value = 1040;
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
-        osc.connect(g); g.connect(holdAudio.destination);
-        osc.start(t0); osc.stop(t0 + 0.24);
-      }
-    } catch (e) { /* audio unavailable — ignore */ }
-  }
-
-  function startHold(seconds) {
-    clearHold();
-    holdTotal = seconds;
-    holdEndAt = Date.now() + seconds * 1000;
-    // Prime audio inside this user gesture so the completion tone is allowed
-    // to play later when the countdown reaches 0.
-    try {
-      holdAudio = holdAudio || new (window.AudioContext || window.webkitAudioContext)();
-      if (holdAudio.state === 'suspended') holdAudio.resume();
-    } catch (e) { /* ignore */ }
-    // Start the interval BEFORE refreshing the label so holdRunning() is already
-    // true — otherwise the button would render its idle "Start set" state.
-    holdTimer = setInterval(holdTick, 250);
-    holdTick();            // paint the starting value immediately
-    refreshLogBtn();       // → "Stop set"
-  }
-
-  // Log button: a 3-state machine driven by the active metric + hold state.
-  //   • Reps          → commit immediately (unchanged behaviour).
-  //   • Time, idle    → start the live hold countdown (does NOT log yet).
-  //   • Time, running → cancel the hold (no log).
+  // Log button:
+  //   • Reps → commit immediately (unchanged).
+  //   • Time → run the hold as a live countdown in the SHARED Rest Timer overlay
+  //     (same ring, animation and chrome, captioned "KEEP HOLDING"). Reaching 0
+  //     logs the completed hold via commitSet — which in turn starts the
+  //     between-sets rest in that very same overlay (a seamless hold→rest
+  //     hand-off). Skipping the overlay early logs nothing.
   $('logBtn').addEventListener('click', () => {
     const ex = getCurrentEx();
     if (!ex) return;
-    if (holdRunning()) { cancelHold(); return; }
     const raw = parseInt($('repsInput').value, 10);
     if (isTimeMetric(ex)) {
       if (isNaN(raw) || raw < DUR_MIN) { alert('Enter a duration in seconds.'); return; }
-      startHold(clampDur(raw));
+      const dur = clampDur(raw);
+      if (window.GymRestTimer && window.GymRestTimer.start) {
+        window.GymRestTimer.start(dur, ex.name, {
+          mode: 'hold',
+          onFinish: (held) => commitSet({ duration: clampDur(Math.round(held) || dur) })
+        });
+      } else {
+        commitSet({ duration: dur });   // overlay module absent → log straight away
+      }
       return;
     }
     if (isNaN(raw) || raw < REP_MIN) { alert('Enter reps (1–36).'); return; }
