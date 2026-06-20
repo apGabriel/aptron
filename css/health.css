@@ -556,9 +556,19 @@ main {
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
 }
 .water-chip-swap { color: var(--info); font-size: 13px; line-height: 1; }
-.water-num-emoji {
-  font-size: 34px; line-height: 1; align-self: center;
+/* Shared minimalist line-icon (water serving icons). Thin stroke, inherits
+   currentColor so each context (seg active state, white primary button) themes
+   it for free. Size is set per location below — never via font-size. */
+.water-ico {
+  display: inline-block; vertical-align: middle; flex: none;
+  width: 1em; height: 1em;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
 }
+.water-num-emoji {
+  align-self: center; display: inline-flex; color: var(--text-1);
+}
+.water-num-emoji .water-ico { width: 30px; height: 30px; }
 .water-num {
   font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
   line-height: 1; font-variant-numeric: tabular-nums;
@@ -601,7 +611,12 @@ main {
 
 /* Input-mode toggle (Bottle vs Glass) */
 .water-mode-seg { margin-bottom: 12px; }
-.water-mode-seg button { padding: 11px; font-size: 13px; font-weight: 700; }
+.water-mode-seg button {
+  padding: 11px; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+}
+.water-mode-seg .water-ico { width: 16px; height: 16px; }
+.water-mode-seg .seg-txt { line-height: 1; }
 
 /* Action row */
 .water-actions {
@@ -628,6 +643,8 @@ main {
 }
 .water-plus-btn:hover { transform: translateY(-1px); }
 .water-plus-btn:active { transform: scale(0.98); }
+#waterPlusLabel { display: inline-flex; align-items: center; gap: 8px; }
+.water-plus-btn .water-ico { width: 18px; height: 18px; }
 
 .water-helper {
   text-align: center; font-size: 12px;
@@ -692,7 +709,10 @@ main {
 .hist-count {
   font-family: var(--font-mono); font-size: 12px;
   color: var(--text-2); font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 5px;
 }
+.hist-count .hist-ico { display: inline-flex; }
+.hist-count .water-ico { width: 13px; height: 13px; }
 
 /* ----- Mini chart for last 14 days ----- */
 .spark-wrap { padding: 6px 0; }
