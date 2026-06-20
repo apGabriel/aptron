@@ -79,8 +79,13 @@
 }
 .topbar-wardrobe-btn:hover { background: rgba(255, 255, 255, 0.08); }
 .topbar-wardrobe-icon {
-  font-size: 20px; line-height: 1;
-  filter: grayscale(100%) brightness(1.4); opacity: 0.85;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; color: rgba(255, 255, 255, 0.85);
+}
+.topbar-wardrobe-icon svg {
+  width: 20px; height: 20px;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
 }
 .bottombar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
@@ -99,14 +104,17 @@
   -webkit-tap-highlight-color: transparent; transition: color 0.15s;
 }
 .bottombar-tab-icon {
-  font-size: 24px; line-height: 1;
-  filter: grayscale(100%) brightness(1.2); opacity: 0.55;
-  transition: opacity 0.15s, filter 0.15s, transform 0.10s;
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; opacity: 0.6;
+  transition: opacity 0.15s, transform 0.10s;
+}
+.bottombar-tab-icon svg {
+  width: 24px; height: 24px;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
 }
 .bottombar-tab.active { color: #FAFAFA; }
-.bottombar-tab.active .bottombar-tab-icon {
-  filter: grayscale(100%) brightness(1.6); opacity: 1;
-}
+.bottombar-tab.active .bottombar-tab-icon { opacity: 1; }
 .bottombar-tab:active .bottombar-tab-icon { transform: scale(0.92); }
 body.has-bottombar {
   padding-bottom: calc(72px + env(safe-area-inset-bottom)) !important;
@@ -117,8 +125,8 @@ body.has-bottombar {
   .topbar-pill-count { font-size: 12px; }
   .topbar-water-add { width: 40px; font-size: 18px; }
   .topbar-wardrobe-btn { width: 40px; height: 38px; }
-  .topbar-wardrobe-icon { font-size: 18px; }
-  .bottombar-tab-icon { font-size: 22px; }
+  .topbar-wardrobe-icon, .topbar-wardrobe-icon svg { width: 18px; height: 18px; }
+  .bottombar-tab-icon, .bottombar-tab-icon svg { width: 22px; height: 22px; }
   .bottombar-tab { font-size: 10px; }
 }
 html, body { -webkit-text-size-adjust: 100%; }
@@ -148,6 +156,13 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
 }
 `;
 
+  // Minimalist line icons (Lucide paths, inlined — no CDN/build step). They draw
+  // with `currentColor`, so the bottom-tab color rules theme them automatically.
+  const ICON_HOME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  const ICON_PILL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></svg>';
+  const ICON_DUMBBELL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/></svg>';
+  const ICON_SHIRT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></svg>';
+
   const topbarHtml = `
 <header class="topbar" id="topbar" role="navigation" aria-label="Quick actions">
   <div class="topbar-water-wrap">
@@ -158,20 +173,20 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button">🍼</button>
   </div>
   <a href="wardrobe.html" class="topbar-wardrobe-btn" id="topbarWardrobe" aria-label="Smart Wardrobe">
-    <span class="topbar-wardrobe-icon">👕</span>
+    <span class="topbar-wardrobe-icon">${ICON_SHIRT}</span>
   </a>
 </header>`;
 
   const bottombarHtml = `
 <nav class="bottombar" id="bottombar" role="navigation" aria-label="Main tabs">
   <a href="index.html" class="bottombar-tab" data-page="main">
-    <span class="bottombar-tab-icon">🏠</span><span>Main</span>
+    <span class="bottombar-tab-icon">${ICON_HOME}</span><span>Main</span>
   </a>
   <a href="health.html" class="bottombar-tab" data-page="health">
-    <span class="bottombar-tab-icon">💊</span><span>Health</span>
+    <span class="bottombar-tab-icon">${ICON_PILL}</span><span>Health</span>
   </a>
   <a href="gym.html" class="bottombar-tab" data-page="fitness">
-    <span class="bottombar-tab-icon">💪</span><span>Fitness</span>
+    <span class="bottombar-tab-icon">${ICON_DUMBBELL}</span><span>Fitness</span>
   </a>
 </nav>`;
 

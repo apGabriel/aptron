@@ -30,10 +30,17 @@ body {
   background-color: #101010;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text-primary);
+  position: relative;
+}
+
+/* Page content wrapper. Padding + max-width live here (not on <body>) so the
+   shared topbar can sit flush, full-bleed at the very top — exactly like the
+   Health / Fitness screens, whose body is also unpadded with a padded <main>.
+   The topbar's own safe-area-inset-top padding handles the notch. */
+.dash-main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: calc(env(safe-area-inset-top, 0px) + 32px) 24px 48px;
-  position: relative;
+  padding: 24px 24px 48px;
 }
 
 body::before {
@@ -65,21 +72,6 @@ body::after {
 }
 
 body > * { position: relative; z-index: 1; }
-
-/* ===================== TOP BAR (injected by js/topbar.js) =====================
-   The shared topbar is auto-injected as the body's first child and styled by
-   topbar.js itself. On this page the body is centered (max-width) with a 32px
-   top / 24px side padding, which would box the sticky bar in and float it.
-   Break it out so it sits flush at the very top edge and full-width — exactly
-   like the Health / Fitness screens (whose body has no such padding). The
-   negative margins cancel the body padding precisely (border-box), so nothing
-   else shifts and there's no horizontal overflow. */
-#topbar.topbar {
-  margin-top: calc(-1 * (env(safe-area-inset-top, 0px) + 32px));
-  margin-left: -24px;
-  margin-right: -24px;
-  margin-bottom: 18px;
-}
 
 /* Card chassis */
 .card {
