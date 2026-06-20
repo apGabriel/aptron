@@ -191,6 +191,9 @@
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
+    // Sync the log button's label to the metric ("Start set" for Time, "Log set"
+    // for Reps) — owned by gym-actions so it stays correct mid-countdown too.
+    if (G.refreshLogBtn) G.refreshLogBtn();
   }
   function renderLastSet() {
     const wrap = $('lastSet');
