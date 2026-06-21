@@ -585,12 +585,11 @@ body > * { position: relative; z-index: 1; }
 .shenlong-bg-overlay {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
   overflow: hidden; border-radius: 16px;
-  /* Bias the dragon toward the bottom-right for an epic sense of scale. */
-  display: flex; align-items: flex-end; justify-content: flex-end;
+  /* Centre the figure so the head sits behind the bubbles, facing the user. */
+  display: flex; align-items: center; justify-content: center;
 }
 .shenlong-bg-overlay svg {
-  width: 90%; height: auto;
-  margin: 0 -4% -6% 0;           /* let it break slightly off the corner */
+  width: 90%; height: auto; max-width: 560px;
   transform-origin: center;
   animation: dragonFloat 13s ease-in-out infinite;
   will-change: transform;
@@ -598,8 +597,6 @@ body > * { position: relative; z-index: 1; }
 /* Filled silhouette — dark jade→charcoal gradient kept low enough to read as
    muscular anatomy without competing with the white text above it. */
 .shenlong-body { fill: url(#dragonGrad); opacity: 0.15; }
-/* Storm clouds melting into the card surface. */
-.shenlong-clouds { fill: #0e141a; opacity: 0.55; filter: blur(8px); }
 /* Piercing ember eyes — drop-shadow is the SVG-native equivalent of the
    requested glow; pulses in sync with the float cycle. */
 .shenlong-eye {
@@ -617,4 +614,23 @@ body > * { position: relative; z-index: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .shenlong-bg-overlay svg, .shenlong-eye { animation: none; }
+}
+
+/* =====================================================================
+   Mobile — single-column stack (Schedule → Shenlong chat), tighter
+   chat chrome, and a smaller, fainter dragon for legibility on narrow
+   viewports. (The .aios-grid already collapses ≤860px; this layer
+   tunes the chat itself.)
+   ===================================================================== */
+@media (max-width: 768px) {
+  .aios-grid { grid-template-columns: 1fr; gap: 12px; }
+  .aios-chat { padding: 14px 14px; min-height: 380px; }
+  .aios-chat-log { max-height: 300px; }
+  /* Keep the head centred but smaller, and step the watermark back so
+     text stays crisp on small screens. */
+  .shenlong-bg-overlay svg { width: 96%; max-width: 480px; }
+  .shenlong-body { opacity: 0.08; }
+  /* Suggestion chips wrap into clean rows instead of clipping. */
+  .aios-chips { flex-wrap: wrap; gap: 6px; }
+  .aios-chip { white-space: nowrap; }
 }
