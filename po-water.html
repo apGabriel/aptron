@@ -1,16 +1,3 @@
-<!--
-=====================================================
-© 2026 Rowan Thistlebrooke — All Rights Reserved
-
-Personal & Educational Use Only.
-You may view and run this code locally for learning.
-You may NOT use this code or data in a commercial
-product, redistribute it, or republish it as your own.
-
-Unauthorized use may be subject to copyright enforcement.
-Contact: rowan.wisere@gmail.com
-=====================================================
--->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -165,9 +152,19 @@ html, body {
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
 }
 .water-chip-swap { color: var(--info); font-size: 13px; line-height: 1; }
-.water-num-emoji {
-  font-size: 34px; line-height: 1; align-self: center;
+/* Shared minimalist line-icon (water serving icons). Thin stroke, inherits
+   currentColor so each context (seg active state, white primary button) themes
+   it for free. Size is set per location below — never via font-size. */
+.water-ico {
+  display: inline-block; vertical-align: middle; flex: none;
+  width: 1em; height: 1em;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
 }
+.water-num-emoji {
+  align-self: center; display: inline-flex; color: var(--text-1);
+}
+.water-num-emoji .water-ico { width: 30px; height: 30px; }
 .water-num {
   font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
   line-height: 1; font-variant-numeric: tabular-nums;
@@ -210,7 +207,12 @@ html, body {
 
 /* Input-mode toggle (Bottle vs Glass) */
 .water-mode-seg { margin-bottom: 12px; }
-.water-mode-seg button { padding: 11px; font-size: 13px; font-weight: 700; }
+.water-mode-seg button {
+  padding: 11px; font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+}
+.water-mode-seg .water-ico { width: 16px; height: 16px; }
+.water-mode-seg .seg-txt { line-height: 1; }
 
 /* Action row */
 .water-actions {
@@ -237,6 +239,8 @@ html, body {
 }
 .water-plus-btn:hover { transform: translateY(-1px); }
 .water-plus-btn:active { transform: scale(0.98); }
+#waterPlusLabel { display: inline-flex; align-items: center; gap: 8px; }
+.water-plus-btn .water-ico { width: 18px; height: 18px; }
 
 .water-helper {
   text-align: center; font-size: 12px;
@@ -301,7 +305,10 @@ html, body {
 .hist-count {
   font-family: var(--font-mono); font-size: 12px;
   color: var(--text-2); font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 5px;
 }
+.hist-count .hist-ico { display: inline-flex; }
+.hist-count .water-ico { width: 13px; height: 13px; }
 
 /* ----- Mini chart for last 14 days ----- */
 .spark-wrap { padding: 6px 0; }
@@ -508,7 +515,7 @@ html, body {
          untouched (see rotateDisplayUnit). -->
     <div class="water-row" id="waterDisplayToggle" role="button" tabindex="0"
          aria-label="Tap to switch display unit" title="Tap to switch display unit">
-      <span class="water-num-emoji" id="waterNumEmoji" aria-hidden="true">🍼</span>
+      <span class="water-num-emoji" id="waterNumEmoji" aria-hidden="true"><svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg></span>
       <span class="water-num" id="waterNum">0</span>
       <span class="water-target" id="waterTarget">/ 9</span>
       <span class="water-unit-chip" id="waterUnitChip" aria-hidden="true">
@@ -874,17 +881,31 @@ html, body {
     if (u === 'custom') return (state.customLabel || 'Custom').toLowerCase();
     return 'bottle';
   }
-  // Serving icon per unit — identical set to js/topbar.js so the bubble, the
-  // + button and this panel all read as one design.
-  function emojiFor(u) {
-    if (u === 'glass')  return '🥛';
-    if (u === 'custom') return '🍶';
-    return '🍼';
+  // Serving icon per unit — minimalist Lucide-style line SVGs (same philosophy as
+  // the nav bar). They carry class "water-ico"; .water-ico CSS gives them
+  // stroke-width 1.75 and stroke:currentColor, so the seg-button active state and
+  // the white primary button theme them automatically.
+  const WATER_ICONS = {
+    glass:  '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.116 4.104A1 1 0 0 1 6.11 3h11.78a1 1 0 0 1 .994 1.105L17.19 20.21A2 2 0 0 1 15.2 22H8.8a2 2 0 0 1-2-1.79z"/><path d="M6 12a5 5 0 0 1 6 0 5 5 0 0 0 6 0"/></svg>',
+    bottle: '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg>',
+    custom: '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8"/><path d="M5 8h14"/><path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg>',
+    droplet:'<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></svg>'
+  };
+  function iconFor(u) {
+    if (u === 'glass')  return WATER_ICONS.glass;
+    if (u === 'custom') return WATER_ICONS.custom;
+    return WATER_ICONS.bottle;
+  }
+  // Set a serving-mode toggle's content: trusted SVG via innerHTML, label as a
+  // text node (so a user-set custom label can never inject markup).
+  function setSegBtn(btn, iconHtml, text) {
+    btn.innerHTML = iconHtml + '<span class="seg-txt"></span>';
+    btn.querySelector('.seg-txt').textContent = text;
   }
   function unitVolMl()       { return volMlFor(state.unit); }
   function unitLabelPlural() { return pluralFor(state.unit); }
   function unitLabelTitle()  { return titleFor(state.unit); }
-  function unitEmoji()       { return emojiFor(state.unit); }
+  function unitIcon()        { return iconFor(state.unit); }
 
   // Display-unit rotation order. 'custom' only joins the cycle once it has a
   // size, so an unconfigured container never appears as a toggle destination.
@@ -937,9 +958,9 @@ html, body {
     const targetUnits = targetMl / unitVolMl();
 
     renderInputMode();
-    $('waterUnitLabel').textContent = unitEmoji() + ' ' + unitLabelPlural().toUpperCase() + ' DRANK TODAY';
+    $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
     $('waterUnitChipLabel').textContent = altUnitLabelTitle();
-    $('waterNumEmoji').textContent = unitEmoji();
+    $('waterNumEmoji').innerHTML = unitIcon();
     $('waterNum').textContent = fmtUnits(display);
     // e.g. "/ 2.5 Bottles" — no raw ml anywhere in the main readout.
     $('waterTarget').textContent = '/ ' + fmtUnits(targetUnits) + ' ' + unitLabelTitle();
@@ -981,16 +1002,19 @@ html, body {
     const bBtn = seg.querySelector('[data-m="bottle"]');
     const gBtn = seg.querySelector('[data-m="glass"]');
     const cBtn = seg.querySelector('[data-m="custom"]');
-    bBtn.textContent = emojiFor('bottle') + ' Bottle · ' + (state.bottleMl || 500) + 'ml';
-    gBtn.textContent = emojiFor('glass') + ' Glass · ' + (state.glassMl || 250) + 'ml';
+    setSegBtn(bBtn, iconFor('bottle'), 'Bottle · ' + (state.bottleMl || 500) + 'ml');
+    setSegBtn(gBtn, iconFor('glass'), 'Glass · ' + (state.glassMl || 250) + 'ml');
     // The custom input button only exists once a size is configured.
     const hasCustom = (state.customMl || 0) > 0;
     cBtn.style.display = hasCustom ? '' : 'none';
-    if (hasCustom) cBtn.textContent = emojiFor('custom') + ' ' + (state.customLabel || 'Custom') + ' · ' + state.customMl + 'ml';
+    if (hasCustom) setSegBtn(cBtn, iconFor('custom'), (state.customLabel || 'Custom') + ' · ' + state.customMl + 'ml');
     bBtn.classList.toggle('active', state.inputMode === 'bottle');
     gBtn.classList.toggle('active', state.inputMode === 'glass');
     cBtn.classList.toggle('active', state.inputMode === 'custom');
-    $('waterPlusLabel').textContent = emojiFor(state.inputMode) + ' Drank a ' + inputModeSingular();
+    // Primary button: a fixed water droplet + the per-mode label.
+    const pl = $('waterPlusLabel');
+    pl.innerHTML = WATER_ICONS.droplet + '<span class="water-plus-txt"></span>';
+    pl.querySelector('.water-plus-txt').textContent = 'Drank a ' + inputModeSingular();
   }
 
   function renderWhy(calc, targetUnits) {
@@ -1024,7 +1048,7 @@ html, body {
       const k = dateKey(d);
       days.push({ date: d, key: k, ml: state.logs[k] || 0 });
     }
-    const emoji = unitEmoji();   // history reads in the active display unit
+    const icon = unitIcon();   // history reads in the active display unit
     list.innerHTML = days.map(({date, ml}) => {
       const dows = ['Sun','Mon','Tue','Wed','THU','Fri','Sat'];
       const lbl = dows[date.getDay()] + ' ' + (date.getMonth()+1) + '/' + date.getDate();
@@ -1033,7 +1057,7 @@ html, body {
       return '<div class="hist-row">'
         + '<span class="hist-date">' + lbl + '</span>'
         + '<div class="hist-bar-wrap"><div class="hist-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div>'
-        + '<span class="hist-count">' + emoji + ' ' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
+        + '<span class="hist-count"><span class="hist-ico">' + icon + '</span>' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
         + '</div>';
     }).join('') || '<div style="text-align:center;font-size:12px;color:var(--text-3);padding:12px 0">No logs yet.</div>';
   }

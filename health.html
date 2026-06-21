@@ -16,6 +16,57 @@
 <body>
 
 <main>
+
+  <!-- ============ AI SNAPSHOT CALORIE & MACRO TRACKER ============ -->
+  <div class="section-title">Nutrition</div>
+  <section class="food-ai-card">
+    <div class="stack-head" style="margin-bottom:14px">
+      <div class="sf-eyebrow">AI meal scan</div>
+      <div class="sf-title">Snap a meal — get calories &amp; macros</div>
+    </div>
+
+    <!-- Date navigator -->
+    <div class="food-datebar">
+      <button type="button" class="food-date-nav" id="foodPrev" aria-label="Previous day">‹</button>
+      <input type="date" class="food-date-input" id="foodDate" aria-label="Journal date">
+      <button type="button" class="food-date-nav" id="foodNext" aria-label="Next day">›</button>
+    </div>
+
+    <!-- Daily totals -->
+    <div class="food-totals">
+      <div class="food-total"><div class="food-total-num" id="foodKcal">0</div><div class="food-total-label">kcal</div></div>
+      <div class="food-total"><div class="food-total-num" id="foodProtein">0</div><div class="food-total-label">Protein (g)</div></div>
+      <div class="food-total"><div class="food-total-num" id="foodCarbs">0</div><div class="food-total-label">Carbs (g)</div></div>
+      <div class="food-total"><div class="food-total-num" id="foodFats">0</div><div class="food-total-label">Fats (g)</div></div>
+    </div>
+
+    <!-- Meal type — auto-picked from the local clock, override before scanning -->
+    <div class="food-mealtype" id="foodMealType" role="group" aria-label="Meal type">
+      <button type="button" class="food-mealtype-btn" data-meal="breakfast">Breakfast</button>
+      <button type="button" class="food-mealtype-btn" data-meal="lunch">Lunch</button>
+      <button type="button" class="food-mealtype-btn" data-meal="dinner">Dinner</button>
+      <button type="button" class="food-mealtype-btn" data-meal="snack">Snack</button>
+    </div>
+
+    <!-- Drag-and-drop zone / file selector -->
+    <label class="food-dropzone" id="foodDrop" for="foodFile">
+      <span class="food-drop-icon">📸</span>
+      <span class="food-drop-text">Scan Meal Screenshot</span>
+      <span class="food-drop-sub">Drop an image here or tap to choose</span>
+    </label>
+    <input type="file" id="foodFile" accept="image/*" capture="environment" hidden>
+
+    <!-- AI accuracy disclaimer -->
+    <p class="food-disclaimer">⚠️ AI analysis can make mistakes. Double-check important nutritional data.</p>
+
+    <!-- Loading / result status (hidden by default) -->
+    <div class="food-status" id="aiStatus" hidden></div>
+
+    <!-- Logged meals -->
+    <ul class="food-log" id="foodLog"></ul>
+    <div class="food-empty" id="foodEmpty">No meals logged for this day — scan one above.</div>
+  </section>
+
   <div class="section-title">Daily Stack</div>
 
   <div class="stack-card">
@@ -58,38 +109,6 @@
     </div>
   </div>
 
-  <!-- ============ AI SNAPSHOT CALORIE & MACRO TRACKER ============ -->
-  <div class="section-title">Nutrition</div>
-  <section class="food-ai-card">
-    <div class="stack-head" style="margin-bottom:14px">
-      <div class="sf-eyebrow">AI meal scan</div>
-      <div class="sf-title">Snap a meal — get calories &amp; macros</div>
-    </div>
-
-    <!-- Daily totals -->
-    <div class="food-totals">
-      <div class="food-total"><div class="food-total-num" id="foodKcal">0</div><div class="food-total-label">kcal</div></div>
-      <div class="food-total"><div class="food-total-num" id="foodProtein">0</div><div class="food-total-label">Protein (g)</div></div>
-      <div class="food-total"><div class="food-total-num" id="foodCarbs">0</div><div class="food-total-label">Carbs (g)</div></div>
-      <div class="food-total"><div class="food-total-num" id="foodFats">0</div><div class="food-total-label">Fats (g)</div></div>
-    </div>
-
-    <!-- Drag-and-drop zone / file selector -->
-    <label class="food-dropzone" id="foodDrop" for="foodFile">
-      <span class="food-drop-icon">📸</span>
-      <span class="food-drop-text">Scan Meal Screenshot</span>
-      <span class="food-drop-sub">Drop an image here or tap to choose</span>
-    </label>
-    <input type="file" id="foodFile" accept="image/*" capture="environment" hidden>
-
-    <!-- Loading / result status (hidden by default) -->
-    <div class="food-status" id="aiStatus" hidden></div>
-
-    <!-- Logged meals -->
-    <ul class="food-log" id="foodLog"></ul>
-    <div class="food-empty" id="foodEmpty">No meals logged today — scan one above.</div>
-  </section>
-
   <section id="water" class="water-embed">
     <div class="section-title">Water Tracker</div>
     <div class="wt-app wt-scope">
@@ -116,7 +135,7 @@
          untouched (see rotateDisplayUnit). -->
     <div class="water-row" id="waterDisplayToggle" role="button" tabindex="0"
          aria-label="Tap to switch display unit" title="Tap to switch display unit">
-      <span class="water-num-emoji" id="waterNumEmoji" aria-hidden="true">🍼</span>
+      <span class="water-num-emoji" id="waterNumEmoji" aria-hidden="true"><svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg></span>
       <span class="water-num" id="waterNum">0</span>
       <span class="water-target" id="waterTarget">/ 9</span>
       <span class="water-unit-chip" id="waterUnitChip" aria-hidden="true">

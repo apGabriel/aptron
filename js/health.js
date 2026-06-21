@@ -746,17 +746,31 @@ const CONFIG = {
     if (u === 'custom') return (state.customLabel || 'Custom').toLowerCase();
     return 'bottle';
   }
-  // Serving icon per unit — identical set to js/topbar.js so the bubble, the
-  // + button and this panel all read as one design.
-  function emojiFor(u) {
-    if (u === 'glass')  return '🥛';
-    if (u === 'custom') return '🍶';
-    return '🍼';
+  // Serving icon per unit — minimalist Lucide-style line SVGs (same philosophy as
+  // the nav bar). They carry class "water-ico"; .water-ico CSS gives them
+  // stroke-width 1.75 and stroke:currentColor, so the seg-button active state and
+  // the white primary button theme them automatically.
+  const WATER_ICONS = {
+    glass:  '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.116 4.104A1 1 0 0 1 6.11 3h11.78a1 1 0 0 1 .994 1.105L17.19 20.21A2 2 0 0 1 15.2 22H8.8a2 2 0 0 1-2-1.79z"/><path d="M6 12a5 5 0 0 1 6 0 5 5 0 0 0 6 0"/></svg>',
+    bottle: '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg>',
+    custom: '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8"/><path d="M5 8h14"/><path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg>',
+    droplet:'<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/></svg>'
+  };
+  function iconFor(u) {
+    if (u === 'glass')  return WATER_ICONS.glass;
+    if (u === 'custom') return WATER_ICONS.custom;
+    return WATER_ICONS.bottle;
+  }
+  // Set a serving-mode toggle's content: trusted SVG via innerHTML, label as a
+  // text node (so a user-set custom label can never inject markup).
+  function setSegBtn(btn, iconHtml, text) {
+    btn.innerHTML = iconHtml + '<span class="seg-txt"></span>';
+    btn.querySelector('.seg-txt').textContent = text;
   }
   function unitVolMl()       { return volMlFor(state.unit); }
   function unitLabelPlural() { return pluralFor(state.unit); }
   function unitLabelTitle()  { return titleFor(state.unit); }
-  function unitEmoji()       { return emojiFor(state.unit); }
+  function unitIcon()        { return iconFor(state.unit); }
 
   // Display-unit rotation order. 'custom' only joins the cycle once it has a
   // size, so an unconfigured container never appears as a toggle destination.
@@ -809,9 +823,9 @@ const CONFIG = {
     const targetUnits = targetMl / unitVolMl();
 
     renderInputMode();
-    $('waterUnitLabel').textContent = unitEmoji() + ' ' + unitLabelPlural().toUpperCase() + ' DRANK TODAY';
+    $('waterUnitLabel').textContent = unitLabelPlural().toUpperCase() + ' DRANK TODAY';
     $('waterUnitChipLabel').textContent = altUnitLabelTitle();
-    $('waterNumEmoji').textContent = unitEmoji();
+    $('waterNumEmoji').innerHTML = unitIcon();
     $('waterNum').textContent = fmtUnits(display);
     // e.g. "/ 2.5 Bottles" — no raw ml anywhere in the main readout.
     $('waterTarget').textContent = '/ ' + fmtUnits(targetUnits) + ' ' + unitLabelTitle();
@@ -853,16 +867,19 @@ const CONFIG = {
     const bBtn = seg.querySelector('[data-m="bottle"]');
     const gBtn = seg.querySelector('[data-m="glass"]');
     const cBtn = seg.querySelector('[data-m="custom"]');
-    bBtn.textContent = emojiFor('bottle') + ' Bottle · ' + (state.bottleMl || 500) + 'ml';
-    gBtn.textContent = emojiFor('glass') + ' Glass · ' + (state.glassMl || 250) + 'ml';
+    setSegBtn(bBtn, iconFor('bottle'), 'Bottle · ' + (state.bottleMl || 500) + 'ml');
+    setSegBtn(gBtn, iconFor('glass'), 'Glass · ' + (state.glassMl || 250) + 'ml');
     // The custom input button only exists once a size is configured.
     const hasCustom = (state.customMl || 0) > 0;
     cBtn.style.display = hasCustom ? '' : 'none';
-    if (hasCustom) cBtn.textContent = emojiFor('custom') + ' ' + (state.customLabel || 'Custom') + ' · ' + state.customMl + 'ml';
+    if (hasCustom) setSegBtn(cBtn, iconFor('custom'), (state.customLabel || 'Custom') + ' · ' + state.customMl + 'ml');
     bBtn.classList.toggle('active', state.inputMode === 'bottle');
     gBtn.classList.toggle('active', state.inputMode === 'glass');
     cBtn.classList.toggle('active', state.inputMode === 'custom');
-    $('waterPlusLabel').textContent = emojiFor(state.inputMode) + ' Drank a ' + inputModeSingular();
+    // Primary button: a fixed water droplet + the per-mode label.
+    const pl = $('waterPlusLabel');
+    pl.innerHTML = WATER_ICONS.droplet + '<span class="water-plus-txt"></span>';
+    pl.querySelector('.water-plus-txt').textContent = 'Drank a ' + inputModeSingular();
   }
 
   function renderWhy(calc, targetUnits) {
@@ -896,7 +913,7 @@ const CONFIG = {
       const k = dateKey(d);
       days.push({ date: d, key: k, ml: state.logs[k] || 0 });
     }
-    const emoji = unitEmoji();   // history reads in the active display unit
+    const icon = unitIcon();   // history reads in the active display unit
     list.innerHTML = days.map(({date, ml}) => {
       const dows = ['Sun','Mon','Tue','Wed','THU','Fri','Sat'];
       const lbl = dows[date.getDay()] + ' ' + (date.getMonth()+1) + '/' + date.getDate();
@@ -905,7 +922,7 @@ const CONFIG = {
       return '<div class="hist-row">'
         + '<span class="hist-date">' + lbl + '</span>'
         + '<div class="hist-bar-wrap"><div class="hist-bar-fill ' + cls + '" style="width:' + pct + '%"></div></div>'
-        + '<span class="hist-count">' + emoji + ' ' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
+        + '<span class="hist-count"><span class="hist-ico">' + icon + '</span>' + fmtUnits(ml / unitVolMl()) + '/' + fmtUnits(targetUnits) + '</span>'
         + '</div>';
     }).join('') || '<div style="text-align:center;font-size:12px;color:var(--text-3);padding:12px 0">No logs yet.</div>';
   }
@@ -1235,13 +1252,65 @@ const CONFIG = {
     if (now.getHours() < 6) now.setDate(now.getDate() - 1);
     return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
   }
+  // ── Meal type ────────────────────────────────────────────────────────────
+  // Tag every logged meal as breakfast/lunch/dinner/snack. The default is
+  // guessed from the local clock; the segmented control lets the user override.
+  const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack' };
+  // Time ranges per spec; the 16–19h and 23–05h gaps fall through to Snack.
+  function defaultMealType() {
+    const h = new Date().getHours();
+    if (h >= 5 && h < 11)  return 'breakfast';
+    if (h >= 11 && h < 16) return 'lunch';
+    if (h >= 19 && h < 23) return 'dinner';
+    return 'snack';
+  }
+  // Active selection + whether the user has manually overridden the auto-guess
+  // (so a later auto-refresh won't clobber a deliberate pick).
+  let selectedMealType = defaultMealType();
+  let mealTypeUserSet = false;
+
   function load() { try { return JSON.parse(localStorage.getItem(FOOD_KEY)) || {}; } catch (e) { return {}; } }
   function save(obj) {
     try { localStorage.setItem(FOOD_KEY, JSON.stringify(obj)); } catch (e) {}
     // Push immediately so a freshly logged meal survives a quick refresh.
     try { if (typeof window.cloudSyncFlush === 'function') window.cloudSyncFlush(); } catch (e) {}
   }
-  function todayMeals() { return load()[dayKey()] || []; }
+  function mealsFor(date) { return load()[date] || []; }
+
+  // Currently viewed day (defaults to the active nutrition day). The journal
+  // renders against this and new scans log into it; the chevrons and the date
+  // input move it around.
+  let selectedDate = dayKey();
+
+  // YYYY-MM-DD shifted by whole days, staying in local time (no UTC drift).
+  function shiftDate(dateStr, delta) {
+    const p = dateStr.split('-').map(Number);
+    const dt = new Date(p[0], p[1] - 1, p[2]);
+    dt.setDate(dt.getDate() + delta);
+    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+  }
+
+  // Contextual emoji from the meal name — first keyword match wins.
+  const EMOJI_RULES = [
+    [/tortilla|omelette|omelet|\begg|huevo/, '🍳'],
+    [/shake|smoothie|protein|batido|yogur/,  '🥤'],
+    [/chicken|pollo|beef|steak|meat|carne|pork/, '🍗'],
+    [/salad|ensalada|greens/,                '🥗'],
+    [/fish|salmon|tuna|pescado|sushi/,       '🐟'],
+    [/rice|pasta|noodle|arroz|fideo/,        '🍚'],
+    [/burger|sandwich|wrap|taco|bocadillo/,  '🌮'],
+    [/pizza/,                                '🍕'],
+    [/soup|sopa|stew|guiso/,                 '🍲'],
+    [/fruit|fruta|apple|banana|berry|manzana/, '🍎'],
+    [/bread|toast|\bpan\b|bagel/,            '🍞'],
+    [/coffee|caf[eé]|latte/,                 '☕'],
+  ];
+  function emojiFor(name) {
+    const n = String(name || '').toLowerCase();
+    for (let i = 0; i < EMOJI_RULES.length; i++) if (EMOJI_RULES[i][0].test(n)) return EMOJI_RULES[i][1];
+    return '🍽️';
+  }
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1296,21 +1365,49 @@ const CONFIG = {
 
   // ── Persistence ops ──────────────────────────────────────────────────────
   function addMeal(m) {
-    const all = load(), k = dayKey();
+    const all = load(), k = selectedDate;
     const id = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
     (all[k] = all[k] || []).push(Object.assign({ id: id, ts: Date.now() }, m));
     save(all); render();
   }
   function deleteMeal(id) {
-    const all = load(), k = dayKey();
+    const all = load(), k = selectedDate;
     all[k] = (all[k] || []).filter(x => x.id !== id);
     if (!all[k].length) delete all[k];
     save(all); render();
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // One log row in the compact timeline: a small circular photo "node" sitting
+  // on the accent rail, then the name + meal-type pill on one line and the
+  // macros on a light, low-contrast line below. No per-row container — just
+  // typography and space, so the day's log stays tight and scannable.
+  function mealCardHTML(m) {
+    const emoji = m.emoji || emojiFor(m.meal_name);
+    const node = m.thumb
+      ? '<img src="data:image/jpeg;base64,' + esc(m.thumb) + '" alt="" loading="lazy">'
+      : '<span class="food-node-emoji">' + emoji + '</span>';
+    const tag = m.meal_type
+      ? '<span class="food-item-tag">' + esc(MEAL_LABELS[m.meal_type] || m.meal_type) + '</span>'
+      : '';
+    return '<li class="food-item" data-id="' + esc(m.id) + '">'
+      + '<span class="food-node">' + node + '</span>'
+      + '<div class="food-item-main">'
+      +   '<div class="food-item-head">'
+      +     '<span class="food-item-name">' + esc(m.meal_name) + '</span>' + tag
+      +   '</div>'
+      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P:' + (+m.protein || 0)
+      +     ' C:' + (+m.carbs || 0) + ' F:' + (+m.fats || 0) + '</div>'
+      + '</div>'
+      + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
+      + '</li>';
+  }
+
   function render() {
-    const meals = todayMeals();
+    const dateInput = $('foodDate');
+    if (dateInput && dateInput.value !== selectedDate) dateInput.value = selectedDate;
+
+    const meals = mealsFor(selectedDate);
     const t = meals.reduce((a, m) => ({
       c: a.c + (+m.calories || 0), p: a.p + (+m.protein || 0),
       cb: a.cb + (+m.carbs || 0), f: a.f + (+m.fats || 0),
@@ -1320,26 +1417,32 @@ const CONFIG = {
     if ($('foodCarbs'))   $('foodCarbs').textContent = t.cb;
     if ($('foodFats'))    $('foodFats').textContent = t.f;
     const list = $('foodLog'); if (!list) return;
-    list.innerHTML = meals.map(m =>
-      '<li class="food-item" data-id="' + esc(m.id) + '">'
-      + '<div class="food-item-main">'
-      +   '<div class="food-item-name">' + esc(m.meal_name) + '</div>'
-      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
-      +     ' · C ' + (+m.carbs || 0) + ' · F ' + (+m.fats || 0) + '</div>'
-      + '</div>'
-      + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
-      + '</li>').join('');
+    list.innerHTML = meals.map(mealCardHTML).join('');
     const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
+  }
+
+  // Reflect the active meal type on the segmented control.
+  function renderMealType() {
+    const wrap = $('foodMealType'); if (!wrap) return;
+    wrap.querySelectorAll('.food-mealtype-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.meal === selectedMealType));
   }
 
   // ── Wire up ─────────────────────────────────────────────────────────────────
   async function handleFile(file) {
     if (!file || !/^image\//.test(file.type)) { setStatus('Please choose an image file.', 'err'); return; }
+    // Refresh the time-based guess at scan time — but never override a manual pick.
+    if (!mealTypeUserSet) { selectedMealType = defaultMealType(); renderMealType(); }
     setStatus('🔮 Analyzing ingredients...', 'loading');
     try {
       const enc = await fileToScaledBase64(file, 1024);
       const meal = await analyzeMealImage(enc.data, enc.mime);
-      addMeal(meal);
+      // Store a tiny ~96px thumbnail for the card — keeps the synced blob lean
+      // (the full 1024px image is only sent to Gemini, never persisted).
+      let thumb = null;
+      try { thumb = (await fileToScaledBase64(file, 96)).data; } catch (e) {}
+      // Bundle the meal-type tag alongside the calories/macros in po_food_v1.
+      addMeal(Object.assign({ emoji: emojiFor(meal.meal_name), thumb: thumb }, meal, { meal_type: selectedMealType }));
       setStatus('✓ Logged ' + meal.meal_name + ' · ' + meal.calories + ' kcal', 'ok');
       setTimeout(() => setStatus(''), 2600);
     } catch (e) {
@@ -1360,6 +1463,26 @@ const CONFIG = {
     });
     const list = $('foodLog');
     if (list) list.addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) deleteMeal(b.dataset.del); });
+
+    // Meal-type override — a tap pins the choice so the auto-guess backs off.
+    const mealWrap = $('foodMealType');
+    if (mealWrap) {
+      mealWrap.addEventListener('click', e => {
+        const b = e.target.closest('.food-mealtype-btn'); if (!b) return;
+        selectedMealType = b.dataset.meal; mealTypeUserSet = true; renderMealType();
+      });
+      renderMealType();
+    }
+
+    // Date navigator — chevrons step a day; the native picker jumps anywhere.
+    const dateInput = $('foodDate'), prevBtn = $('foodPrev'), nextBtn = $('foodNext');
+    if (dateInput) {
+      dateInput.value = selectedDate;
+      dateInput.addEventListener('change', () => { if (dateInput.value) { selectedDate = dateInput.value; render(); } });
+    }
+    if (prevBtn) prevBtn.addEventListener('click', () => { selectedDate = shiftDate(selectedDate, -1); render(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { selectedDate = shiftDate(selectedDate, 1); render(); });
+
     // re-render when cloud sync applies remote changes (storage event)
     window.addEventListener('storage', render);
     render();

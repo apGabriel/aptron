@@ -850,9 +850,11 @@ const CONFIG = {
   </div>
 </div>
 
-<!-- Rest Timer overlay — between-sets countdown. Triggered by GymRestTimer
-     after each logged set; the duration is the active routine's per-exercise
-     rest. Fully self-contained: no session state lives here. -->
+<!-- Shared countdown overlay (GymRestTimer). Two uses, same chrome/animation:
+     (1) the between-sets REST after each logged set (per-exercise routine rest);
+     (2) an in-progress Time-set HOLD ("KEEP HOLDING"), which on reaching 0 logs
+     the set and hands straight off into the rest countdown. Fully self-contained:
+     no session state lives here. -->
 <div class="po-rest" id="poRest" role="dialog" aria-label="Rest timer" aria-hidden="true">
   <div class="po-rest-card">
     <div class="po-rest-eyebrow" id="poRestEyebrow">REST</div>

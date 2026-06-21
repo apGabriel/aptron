@@ -148,20 +148,15 @@
   }
   if ($('dsToggle')) $('dsToggle').addEventListener('click', () => setDropArmed(!dsArmed));
 
-  $('logBtn').addEventListener('click', () => {
+  // Shared commit path for BOTH Reps ("Log set") and a completed Time hold.
+  // The caller passes `reps` xor `duration` (already validated); weight and the
+  // dropset state are read here, at commit time. This is the ORIGINAL logging
+  // flow verbatim — extracted so the in-set timer can reuse it without forking
+  // session/history/cloud persistence.
+  function commitSet(payload) {
     const ex = getCurrentEx();
     if (!ex) return;
-    const isTime = isTimeMetric(ex);
-    // Read the metric input: reps (1–36) or hold-duration in seconds (1–3600).
-    let reps = null, duration = null;
-    const raw = parseInt($('repsInput').value, 10);
-    if (isTime) {
-      if (isNaN(raw) || raw < DUR_MIN) { alert('Enter a duration in seconds.'); return; }
-      duration = clampDur(raw);
-    } else {
-      if (isNaN(raw) || raw < REP_MIN) { alert('Enter reps (1–36).'); return; }
-      reps = clampReps(raw);
-    }
+    const isTime = payload.duration != null;
     // Weight: bodyweight exercises log 0. Otherwise 0 is a VALID added load
     // (pull-ups, dips, push-ups) — only reject a negative or non-numeric value.
     let w;
@@ -183,8 +178,8 @@
     // `reps`; a rep set carries `reps` only. The set row structure is otherwise
     // unchanged, so sessions/history stay intact.
     const setObj = { exId: ex.id, name: ex.name, weight: w, date: iso };
-    if (isTime) { setObj.metric = 'time'; setObj.duration = duration; }
-    else { setObj.reps = reps; }
+    if (isTime) { setObj.metric = 'time'; setObj.duration = payload.duration; }
+    else { setObj.reps = payload.reps; }
     if (isDrop) setObj.is_dropset = true;
     sess.sets.push(setObj);
     rebuildLogIndex();
@@ -195,15 +190,19 @@
     // session id rides in metadata so the row carries its session attribution.
     try {
       window.GymCloud && window.GymCloud.pushLog({
-        exId: ex.id, name: ex.name, weight: w, reps: reps, duration: duration,
+        exId: ex.id, name: ex.name, weight: w,
+        reps: isTime ? null : payload.reps,
+        duration: isTime ? payload.duration : null,
         metric: isTime ? 'time' : 'reps', date: iso, unit: unit(), session: sess.id, is_dropset: isDrop
       });
     } catch (e) {}
     // Tiny pulse on the button so the user feels the save
     const btn = $('logBtn');
-    btn.style.transition = 'transform 0.15s';
-    btn.style.transform = 'scale(0.96)';
-    setTimeout(() => { btn.style.transform = ''; }, 160);
+    if (btn) {
+      btn.style.transition = 'transform 0.15s';
+      btn.style.transform = 'scale(0.96)';
+      setTimeout(() => { btn.style.transform = ''; }, 160);
+    }
     // Kick off the between-sets rest countdown for this exercise. The duration
     // is the rest planned for this movement in the ACTIVE routine (0 = off).
     // The timer is a self-contained overlay (window.GymRestTimer) that holds no
@@ -212,6 +211,47 @@
       const rest = G.getRestSeconds(ex.id);
       if (rest > 0 && window.GymRestTimer) window.GymRestTimer.start(rest, ex.name);
     } catch (e) {}
+  }
+
+  // ============================================================
+  // TIME-SET HOLD COUNTDOWN — reuses the Rest Timer overlay
+  // ============================================================
+  // The log button's label is metric-driven: "Start set" for a Time exercise,
+  // "Log set" for Reps. renderForm() calls this, so a re-render (e.g. an 8s
+  // cloud poll) re-derives it instead of leaving a stale label behind.
+  function refreshLogBtn() {
+    const btn = $('logBtn');
+    if (!btn) return;
+    btn.textContent = isTimeMetric(getCurrentEx()) ? 'Start set' : 'Log set';
+  }
+  G.refreshLogBtn = refreshLogBtn;
+
+  // Log button:
+  //   • Reps → commit immediately (unchanged).
+  //   • Time → run the hold as a live countdown in the SHARED Rest Timer overlay
+  //     (same ring, animation and chrome, captioned "KEEP HOLDING"). Reaching 0
+  //     logs the completed hold via commitSet — which in turn starts the
+  //     between-sets rest in that very same overlay (a seamless hold→rest
+  //     hand-off). Skipping the overlay early logs nothing.
+  $('logBtn').addEventListener('click', () => {
+    const ex = getCurrentEx();
+    if (!ex) return;
+    const raw = parseInt($('repsInput').value, 10);
+    if (isTimeMetric(ex)) {
+      if (isNaN(raw) || raw < DUR_MIN) { alert('Enter a duration in seconds.'); return; }
+      const dur = clampDur(raw);
+      if (window.GymRestTimer && window.GymRestTimer.start) {
+        window.GymRestTimer.start(dur, ex.name, {
+          mode: 'hold',
+          onFinish: (held) => commitSet({ duration: clampDur(Math.round(held) || dur) })
+        });
+      } else {
+        commitSet({ duration: dur });   // overlay module absent → log straight away
+      }
+      return;
+    }
+    if (isNaN(raw) || raw < REP_MIN) { alert('Enter reps (1–36).'); return; }
+    commitSet({ reps: clampReps(raw) });
   });
 
   // ============================================================

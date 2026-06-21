@@ -218,9 +218,12 @@ app.delete('/api/events/:id', async (req, res) => {
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
 const GEMINI_MODEL   = 'gemini-2.5-flash';   // free tier ~15 RPM; swap if needed
 const MEAL_PROMPT =
-  'You are a nutrition estimator. Analyze the meal in this image and estimate its ' +
-  'TOTAL nutrition. Respond ONLY with minified JSON matching: ' +
-  '{"meal_name":string,"calories":number,"protein":number,"carbs":number,"fats":number}. ' +
+  'You are a meticulous nutrition estimator. Identify the specific dish in the image and estimate its TOTAL nutrition for the full portion actually shown. ' +
+  'Judge portion size from concrete visual cues — plate/bowl diameter, utensils, hands, packaging or other objects for scale, and the food\'s height and density — instead of assuming a default serving. ' +
+  'Base the numbers on the real visible quantity and the typical ingredients/preparation of that dish; do NOT fall back on round or generic placeholder values when the image shows enough detail to do better. ' +
+  'Keep the macros realistic and internally consistent with the calories: protein and carbs ≈ 4 kcal/g, fat ≈ 9 kcal/g, so (4*protein + 4*carbs + 9*fats) should land within ~10% of the calories figure. ' +
+  'If the image is ambiguous, commit to your single best realistic estimate (never 0 for a food that is clearly present). ' +
+  'Respond ONLY with minified JSON matching: {"meal_name":string,"calories":number,"protein":number,"carbs":number,"fats":number}. ' +
   'Calories in kcal; protein, carbs and fats in grams, as integers. No prose, no markdown.';
 
 app.post('/api/gemini/meal-scan', async (req, res) => {

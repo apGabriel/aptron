@@ -22,12 +22,16 @@
       <span class="topbar-pill-dot"></span>
       <span class="topbar-pill-count" id="topbarWaterCount">0/2.4</span>
     </a>
-    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one bottle of water" type="button">🍼</button>
+    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one bottle of water" type="button"><svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg></button>
   </div>
   <a href="wardrobe.html" class="topbar-wardrobe-btn" id="topbarWardrobe" aria-label="Smart Wardrobe">
-    <span class="topbar-wardrobe-icon">👕</span>
+    <span class="topbar-wardrobe-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></svg></span>
   </a>
 </header>
+
+<!-- Page content lives in <main> (padded + centered) so the topbar above stays
+     a flush, full-bleed body child — identical to the Health/Fitness screens. -->
+<main class="dash-main">
 
 <!-- COMPONENT 1 — PAGE TITLE -->
 <h1 class="dash-title">My personal Dashboard</h1>
@@ -159,6 +163,8 @@
     </div>
   </div>
 </div>
+
+</main>
 
 <script src="js/index.js" defer></script>
 <script src="js/topbar.js" defer></script>
