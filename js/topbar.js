@@ -56,13 +56,19 @@
 }
 .topbar-water-add {
   width: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid rgba(125, 211, 252, 0.16);
   background: linear-gradient(180deg, rgba(125, 211, 252, 0.28), rgba(110, 231, 183, 0.28));
   color: #FFFFFF; font-family: inherit;
-  font-size: 20px; font-weight: 700; line-height: 1;
+  font-weight: 700; line-height: 1;
   cursor: pointer; border-radius: 0 12px 12px 0;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, transform 0.10s;
+}
+.topbar-water-add svg {
+  width: 20px; height: 20px;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
 }
 .topbar-water-add:active { transform: scale(0.94); }
 .topbar-water-add.flash {
@@ -123,7 +129,8 @@ body.has-bottombar {
   .topbar { padding-left: 10px; padding-right: 10px; gap: 6px; }
   .topbar-water-pill { padding: 8px 11px; gap: 6px; }
   .topbar-pill-count { font-size: 12px; }
-  .topbar-water-add { width: 40px; font-size: 18px; }
+  .topbar-water-add { width: 40px; }
+  .topbar-water-add svg { width: 18px; height: 18px; }
   .topbar-wardrobe-btn { width: 40px; height: 38px; }
   .topbar-wardrobe-icon, .topbar-wardrobe-icon svg { width: 18px; height: 18px; }
   .bottombar-tab-icon, .bottombar-tab-icon svg { width: 22px; height: 22px; }
@@ -170,7 +177,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
       <span class="topbar-pill-dot"></span>
       <span class="topbar-pill-count" id="topbarWaterCount">0/0</span>
     </a>
-    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button">🍼</button>
+    <button class="topbar-water-add" id="topbarWaterAdd" aria-label="Log one drink" type="button"><svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg></button>
   </div>
   <a href="wardrobe.html" class="topbar-wardrobe-btn" id="topbarWardrobe" aria-label="Smart Wardrobe">
     <span class="topbar-wardrobe-icon">${ICON_SHIRT}</span>
@@ -244,9 +251,15 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   function unitVolMlFor(state) {
     return state.unit === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
   }
-  // Shared serving icons — kept identical to po-water.html so the +button, the
-  // bubble and the main panel all read as one design.
-  const UNIT_EMOJI = { bottle: '🍼', glass: '🥛', custom: '🍶' };
+  // Shared serving icons — the EXACT minimalist line SVGs from po-water.html's
+  // WATER_ICONS, so the + button, the bubble and the main panel all read as one
+  // design. They draw with stroke:currentColor / stroke-width 1.75, so the add
+  // button's white color themes them automatically (see .topbar-water-add svg).
+  const WATER_ICONS = {
+    glass:  '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.116 4.104A1 1 0 0 1 6.11 3h11.78a1 1 0 0 1 .994 1.105L17.19 20.21A2 2 0 0 1 15.2 22H8.8a2 2 0 0 1-2-1.79z"/><path d="M6 12a5 5 0 0 1 6 0 5 5 0 0 0 6 0"/></svg>',
+    bottle: '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8"/><path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.789V2"/><path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg>',
+    custom: '<svg class="water-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8"/><path d="M5 8h14"/><path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/></svg>'
+  };
   // Which serving the + button logs right now — mirrors the water app's
   // inputMode. 'custom' only counts once the user has given it a size.
   function inputModeOf(state) {
@@ -320,7 +333,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     // is unambiguous about what it's adding.
     const addBtn = document.getElementById('topbarWaterAdd');
     if (addBtn) {
-      addBtn.textContent = UNIT_EMOJI[w.mode] || UNIT_EMOJI.bottle;
+      addBtn.innerHTML = WATER_ICONS[w.mode] || WATER_ICONS.bottle;
       addBtn.setAttribute('aria-label', 'Log one ' + (w.mode === 'custom' ? 'serving' : w.mode) + ' of water');
     }
   }
