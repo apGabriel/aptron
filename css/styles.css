@@ -421,6 +421,14 @@ body > * { position: relative; z-index: 1; }
   width: 18px; height: 18px;
   fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
 }
+/* Dragon emblem parts — filled silhouette + ring + spiral whisker, all in
+   currentColor so they pick up the orb's gold aura. */
+.aios-chat-orb svg .orb-dragon { fill: currentColor; stroke: none; }
+.aios-chat-orb svg .orb-ring { fill: none; stroke: currentColor; stroke-width: 5; }
+.aios-chat-orb svg .orb-whisker {
+  fill: none; stroke: currentColor; stroke-width: 3;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 @keyframes aiOrbPulse {
   0%, 100% { box-shadow: 0 0 12px rgba(210,188,138,0.18); }
   50%      { box-shadow: 0 0 24px rgba(210,188,138,0.42); }
