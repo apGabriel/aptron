@@ -585,22 +585,26 @@ body > * { position: relative; z-index: 1; }
 .shenlong-bg-overlay {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
   overflow: hidden; border-radius: 16px;
-  display: flex; align-items: center; justify-content: center;
+  /* Bias the dragon toward the bottom-right for an epic sense of scale. */
+  display: flex; align-items: flex-end; justify-content: flex-end;
 }
 .shenlong-bg-overlay svg {
-  width: 92%; height: 92%;
-  opacity: 0.05;                 /* premium watermark — barely-there */
-  fill: none; stroke: #2ECC71;   /* jade, matching the aura */
-  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  width: 90%; height: auto;
+  margin: 0 -4% -6% 0;           /* let it break slightly off the corner */
   transform-origin: center;
   animation: dragonFloat 13s ease-in-out infinite;
   will-change: transform;
 }
-/* Piercing red eyes — drop-shadow is the SVG-native equivalent of the
-   requested box-shadow glow; pulses in sync with the float cycle. */
+/* Filled silhouette — dark jade→charcoal gradient kept low enough to read as
+   muscular anatomy without competing with the white text above it. */
+.shenlong-body { fill: url(#dragonGrad); opacity: 0.15; }
+/* Storm clouds melting into the card surface. */
+.shenlong-clouds { fill: #0e141a; opacity: 0.55; filter: blur(8px); }
+/* Piercing ember eyes — drop-shadow is the SVG-native equivalent of the
+   requested glow; pulses in sync with the float cycle. */
 .shenlong-eye {
   fill: #FF4D4D; stroke: none;
-  filter: drop-shadow(0 0 6px #FF4D4D);
+  filter: drop-shadow(0 0 6px rgba(255,77,77,0.9));
   animation: dragonEyePulse 13s ease-in-out infinite;
 }
 @keyframes dragonFloat {
@@ -608,8 +612,8 @@ body > * { position: relative; z-index: 1; }
   50%      { transform: translateY(-6px) scale(1.02); }
 }
 @keyframes dragonEyePulse {
-  0%, 100% { opacity: 0.5; }
-  50%      { opacity: 1; }
+  0%, 100% { opacity: 0.65; filter: drop-shadow(0 0 4px rgba(255,77,77,0.65)); }
+  50%      { opacity: 1;    filter: drop-shadow(0 0 9px rgba(255,77,77,1)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .shenlong-bg-overlay svg, .shenlong-eye { animation: none; }

@@ -83,29 +83,58 @@
 
     <!-- AI COMMAND ASSISTANT -->
     <section class="card aios-chat" aria-label="AI assistant">
-      <!-- Shenlong watermark — faint serpentine silhouette drifting behind
-           the chat. Strictly decorative; sits at z-index 0 (below the
-           z-index:1 content) and ignores pointer events. -->
+      <!-- Shenlong watermark — a filled, gradient dragon silhouette weaving
+           through storm clouds behind the chat. Strictly decorative; sits at
+           z-index 0 (below the z-index:1 content) and ignores pointer events. -->
       <div class="shenlong-bg-overlay" aria-hidden="true">
-        <svg viewBox="0 0 360 240" preserveAspectRatio="xMidYMid meet">
-          <!-- coiled, serpentine body -->
-          <path d="M250,55 C285,50 300,80 285,105 C270,130 235,128 220,152
-                   C205,176 225,205 195,220 C165,235 130,222 118,198
-                   C106,174 126,150 100,140 C74,130 52,152 58,180"/>
-          <!-- head loop + horns -->
-          <path d="M250,55 C268,47 289,57 289,76 C289,93 272,99 257,92"/>
-          <path d="M270,50 L279,31"/>
-          <path d="M256,52 L258,32"/>
-          <!-- long trailing whiskers -->
-          <path d="M250,55 C210,40 170,46 138,37"/>
-          <path d="M253,63 C214,53 178,61 148,55"/>
-          <!-- claws flicking off the lower coils -->
-          <path d="M58,180 l-8,10 M58,180 l4,12"/>
-          <path d="M118,198 l-6,11 M118,198 l6,9"/>
-          <path d="M195,220 l-7,10 M195,220 l5,11"/>
-          <!-- piercing eyes -->
-          <circle class="shenlong-eye" cx="268" cy="68" r="2.4"/>
-          <circle class="shenlong-eye" cx="279" cy="72" r="2.4"/>
+        <svg viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id="dragonGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"   stop-color="#23925c"/>   <!-- deep jade -->
+              <stop offset="55%"  stop-color="#123d2b"/>
+              <stop offset="100%" stop-color="#0a0f12"/>   <!-- smoky charcoal -->
+            </linearGradient>
+          </defs>
+
+          <!-- Stormy night-sky clouds, soft-blurred into the card. -->
+          <g class="shenlong-clouds">
+            <path d="M0,32 C50,20 100,36 150,26 C210,14 260,34 320,24
+                     C360,18 392,32 400,24 L400,0 L0,0 Z"/>
+            <path d="M0,278 C44,256 92,272 134,262 C188,250 236,274 286,260
+                     C334,247 382,270 400,256 L400,300 L0,300 Z"/>
+            <path d="M250,150 C290,138 332,154 372,146 C386,143 396,150 400,147
+                     C384,170 330,176 296,168 C276,163 262,160 250,150 Z"/>
+          </g>
+
+          <!-- Coiled, muscular dragon — solid filled silhouette. -->
+          <g class="shenlong-body">
+            <!-- serpentine body ribbon -->
+            <path d="M50,215 C40,180 80,166 96,150 C122,124 96,96 132,76
+                     C168,55 222,56 272,72 C225,86 176,90 150,110
+                     C122,136 152,160 126,186 C108,206 94,216 78,222
+                     C68,226 58,226 50,215 Z"/>
+            <!-- spiked mane along the back -->
+            <path d="M120,84 L128,58 L142,82 Z"/>
+            <path d="M170,66 L181,42 L194,64 Z"/>
+            <path d="M222,62 L234,42 L247,64 Z"/>
+            <!-- head / snout -->
+            <path d="M266,72 C300,66 333,77 345,95 C351,106 345,118 327,120
+                     C307,122 286,113 276,103 C269,96 262,82 266,72 Z"/>
+            <!-- horns -->
+            <path d="M300,73 L315,45 L323,51 L310,77 Z"/>
+            <path d="M281,75 L286,49 L295,51 L290,79 Z"/>
+            <!-- trailing whiskers -->
+            <path d="M345,93 C312,101 276,105 246,99 C278,111 314,109 347,101 Z"/>
+            <path d="M341,106 C311,116 275,122 249,118 C277,126 313,124 343,114 Z"/>
+            <!-- claws flicking off the lower coils -->
+            <path d="M50,215 L39,229 L53,227 Z"/>
+            <path d="M126,186 L119,201 L131,199 Z"/>
+            <path d="M78,222 L74,238 L86,232 Z"/>
+          </g>
+
+          <!-- Piercing ember eyes — full opacity, drawn over the body. -->
+          <circle class="shenlong-eye" cx="319" cy="93" r="3.6"/>
+          <circle class="shenlong-eye" cx="332" cy="97" r="3.6"/>
         </svg>
       </div>
       <div class="aios-chat-head">
