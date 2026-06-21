@@ -941,6 +941,25 @@ main {
   margin-top: 5px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--text-tertiary);
 }
+/* Meal-type segmented control — auto-set by time of day, tap to override */
+.food-mealtype {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  margin-bottom: 14px;
+}
+.food-mealtype-btn {
+  padding: 9px 4px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border-soft); background: var(--bg-secondary);
+  color: var(--text-tertiary); font-family: inherit;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.08s;
+  -webkit-tap-highlight-color: transparent;
+}
+.food-mealtype-btn:hover { border-color: var(--accent); color: var(--text-secondary); }
+.food-mealtype-btn:active { transform: scale(0.96); }
+.food-mealtype-btn.active {
+  border-color: var(--accent); color: var(--accent);
+  background: rgba(29,158,117,0.10);
+}
 /* Drag-and-drop / file selector */
 .food-dropzone {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1005,6 +1024,14 @@ main {
 .food-item-macros {
   margin-top: 2px; font-family: var(--font-mono); font-size: 11.5px;
   color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+}
+.food-item-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px;
+  border-radius: 999px; font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; vertical-align: middle;
+  color: var(--accent); background: rgba(29,158,117,0.12);
+  border: 1px solid rgba(29,158,117,0.25);
 }
 .food-item-del {
   flex: none; width: 28px; height: 28px; border-radius: 8px; cursor: pointer;

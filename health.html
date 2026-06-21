@@ -40,6 +40,14 @@
       <div class="food-total"><div class="food-total-num" id="foodFats">0</div><div class="food-total-label">Fats (g)</div></div>
     </div>
 
+    <!-- Meal type — auto-picked from the local clock, override before scanning -->
+    <div class="food-mealtype" id="foodMealType" role="group" aria-label="Meal type">
+      <button type="button" class="food-mealtype-btn" data-meal="breakfast">Breakfast</button>
+      <button type="button" class="food-mealtype-btn" data-meal="lunch">Lunch</button>
+      <button type="button" class="food-mealtype-btn" data-meal="dinner">Dinner</button>
+      <button type="button" class="food-mealtype-btn" data-meal="snack">Snack</button>
+    </div>
+
     <!-- Drag-and-drop zone / file selector -->
     <label class="food-dropzone" id="foodDrop" for="foodFile">
       <span class="food-drop-icon">📸</span>

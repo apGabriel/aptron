@@ -1252,6 +1252,23 @@ const CONFIG = {
     if (now.getHours() < 6) now.setDate(now.getDate() - 1);
     return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
   }
+  // ── Meal type ────────────────────────────────────────────────────────────
+  // Tag every logged meal as breakfast/lunch/dinner/snack. The default is
+  // guessed from the local clock; the segmented control lets the user override.
+  const MEAL_LABELS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack' };
+  // Time ranges per spec; the 16–19h and 23–05h gaps fall through to Snack.
+  function defaultMealType() {
+    const h = new Date().getHours();
+    if (h >= 5 && h < 11)  return 'breakfast';
+    if (h >= 11 && h < 16) return 'lunch';
+    if (h >= 19 && h < 23) return 'dinner';
+    return 'snack';
+  }
+  // Active selection + whether the user has manually overridden the auto-guess
+  // (so a later auto-refresh won't clobber a deliberate pick).
+  let selectedMealType = defaultMealType();
+  let mealTypeUserSet = false;
+
   function load() { try { return JSON.parse(localStorage.getItem(FOOD_KEY)) || {}; } catch (e) { return {}; } }
   function save(obj) {
     try { localStorage.setItem(FOOD_KEY, JSON.stringify(obj)); } catch (e) {}
@@ -1371,11 +1388,14 @@ const CONFIG = {
           + '<span class="food-emoji-badge">' + emoji + '</span>'
         + '</div>'
       : '<div class="food-item-visual food-item-visual--emoji">' + emoji + '</div>';
+    const tag = m.meal_type
+      ? '<span class="food-item-tag">' + esc(MEAL_LABELS[m.meal_type] || m.meal_type) + '</span>'
+      : '';
     return '<li class="food-item" data-id="' + esc(m.id) + '">'
       + visual
       + '<div class="food-item-main">'
       +   '<div class="food-item-name">' + esc(m.meal_name) + '</div>'
-      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
+      +   '<div class="food-item-macros">' + tag + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
       +     ' · C ' + (+m.carbs || 0) + ' · F ' + (+m.fats || 0) + '</div>'
       + '</div>'
       + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
@@ -1400,9 +1420,18 @@ const CONFIG = {
     const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
   }
 
+  // Reflect the active meal type on the segmented control.
+  function renderMealType() {
+    const wrap = $('foodMealType'); if (!wrap) return;
+    wrap.querySelectorAll('.food-mealtype-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.meal === selectedMealType));
+  }
+
   // ── Wire up ─────────────────────────────────────────────────────────────────
   async function handleFile(file) {
     if (!file || !/^image\//.test(file.type)) { setStatus('Please choose an image file.', 'err'); return; }
+    // Refresh the time-based guess at scan time — but never override a manual pick.
+    if (!mealTypeUserSet) { selectedMealType = defaultMealType(); renderMealType(); }
     setStatus('🔮 Analyzing ingredients...', 'loading');
     try {
       const enc = await fileToScaledBase64(file, 1024);
@@ -1411,7 +1440,8 @@ const CONFIG = {
       // (the full 1024px image is only sent to Gemini, never persisted).
       let thumb = null;
       try { thumb = (await fileToScaledBase64(file, 96)).data; } catch (e) {}
-      addMeal(Object.assign({ emoji: emojiFor(meal.meal_name), thumb: thumb }, meal));
+      // Bundle the meal-type tag alongside the calories/macros in po_food_v1.
+      addMeal(Object.assign({ emoji: emojiFor(meal.meal_name), thumb: thumb }, meal, { meal_type: selectedMealType }));
       setStatus('✓ Logged ' + meal.meal_name + ' · ' + meal.calories + ' kcal', 'ok');
       setTimeout(() => setStatus(''), 2600);
     } catch (e) {
@@ -1432,6 +1462,16 @@ const CONFIG = {
     });
     const list = $('foodLog');
     if (list) list.addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) deleteMeal(b.dataset.del); });
+
+    // Meal-type override — a tap pins the choice so the auto-guess backs off.
+    const mealWrap = $('foodMealType');
+    if (mealWrap) {
+      mealWrap.addEventListener('click', e => {
+        const b = e.target.closest('.food-mealtype-btn'); if (!b) return;
+        selectedMealType = b.dataset.meal; mealTypeUserSet = true; renderMealType();
+      });
+      renderMealType();
+    }
 
     // Date navigator — chevrons step a day; the native picker jumps anywhere.
     const dateInput = $('foodDate'), prevBtn = $('foodPrev'), nextBtn = $('foodNext');
