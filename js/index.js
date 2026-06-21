@@ -496,16 +496,32 @@ window.QuickNotes = (function () {
     await loadEvents();
     return { title, when: fmtTime(made.start || startDt.toISOString()) };
   }
-  async function apiMoveEvent(match, hm) {
+  // Re-time a block. opts: { start:{h,m}?, end:{h,m}?, durationMin?, deltaMin? }
+  //   • start only          → shift, keep duration
+  //   • start + end (range) → set both (end wraps past midnight, e.g. 10pm→12am)
+  //   • durationMin         → absolute length from the (new or current) start
+  //   • deltaMin            → grow/shrink by N minutes (reduce/extend)
+  async function apiRetimeEvent(match, opts) {
     const ev = findEvent(match);
     if (!ev) return { ok: false };
-    const durMs = new Date(ev.end) - new Date(ev.start);
-    const start = new Date(ev.start); start.setHours(hm.h, hm.m, 0, 0);
-    const end = new Date(start.getTime() + durMs);
+    const origMs = new Date(ev.end) - new Date(ev.start);
+    let start = new Date(ev.start);
+    if (opts.start) start.setHours(opts.start.h, opts.start.m, 0, 0);
+    let end = new Date(start.getTime() + origMs);
+    if (opts.end) {
+      end = new Date(start); end.setHours(opts.end.h, opts.end.m, 0, 0);
+      if (end <= start) end.setDate(end.getDate() + 1);     // crosses midnight
+    }
+    if (opts.durationMin != null) end = new Date(start.getTime() + opts.durationMin * 60000);
+    if (opts.deltaMin != null) end = new Date(end.getTime() + opts.deltaMin * 60000);
+    if (end <= start) end = new Date(start.getTime() + 5 * 60000);  // never zero/negative
     ev.start = toLocalISO(start); ev.end = toLocalISO(end);
     sortEvents(); renderEvents(currentEvents);
     await patchEvent(ev, { startTime: ev.start, endTime: ev.end }, null);
-    return { ok: true, title: ev.title, when: fmtTime(ev.start) };
+    return {
+      ok: true, title: ev.title, when: fmtTime(ev.start), end: fmtTime(ev.end),
+      durationMin: Math.round((end - start) / 60000),
+    };
   }
   function apiCompleteEvent(match) {
     const ev = findEvent(match, 'undone');
@@ -567,7 +583,8 @@ window.QuickNotes = (function () {
     reload: loadEvents,
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
-    summarize, addEvent: apiAddEvent, moveEvent: apiMoveEvent,
+    summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
+    moveEvent: (m, hm) => apiRetimeEvent(m, { start: hm }),   // back-compat alias
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
     matchTitle, fmtTime,
   };
@@ -586,10 +603,18 @@ window.QuickNotes = (function () {
   if (!log || !form) return;
 
   // ── message UI ─────────────────────────────────────────────────────────────
+  const chatEl = document.querySelector('.aios-chat');
   function scroll() { log.scrollTop = log.scrollHeight; }
+  // Toggle the Dragon-Balls "summoning" wave while Shenlong is working.
+  function setSummoning(on) { if (chatEl) chatEl.classList.toggle('is-summoning', !!on); }
   function addMsg(role, text) {
     const div = document.createElement('div');
     div.className = 'aios-msg aios-msg-' + role;
+    // Shenlong's replies get the jade outline; granted (✓) commands an amber accent.
+    if (role === 'ai') {
+      div.classList.add('shenlong-reply');
+      if (/^\s*✓/.test(text)) div.classList.add('is-granted');
+    }
     div.textContent = text;
     log.appendChild(div); scroll();
     return div;
@@ -617,6 +642,20 @@ window.QuickNotes = (function () {
     if (m) return { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]) };
     return null;
   }
+  // Every time token in a string, in order — for ranges like "10pm to 12am".
+  function parseTimes(text) {
+    const out = [];
+    const re = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b|\b(noon|midnight)\b/gi;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m[6]) out.push(/noon/i.test(m[6]) ? { h: 12, m: 0 } : { h: 0, m: 0 });
+      else if (m[3]) { let h = +m[1] % 12; if (/pm/i.test(m[3])) h += 12; out.push({ h, m: m[2] ? +m[2] : 0 }); }
+      else if (m[4]) out.push({ h: Math.min(23, +m[4]), m: Math.min(59, +m[5]) });
+    }
+    return out;
+  }
+  // Strip every time/duration token so what's left is the task phrase.
+  const TIME_TOKENS = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:noon|midnight)\b|\b\d+\s*(?:min|minute|hour|hr)s?\b/gi;
   function fmtHm(hm) {
     let h = hm.h % 12 || 12;
     return h + (hm.m ? ':' + padZ(hm.m) : '') + ' ' + (hm.h >= 12 ? 'PM' : 'AM');
@@ -688,12 +727,32 @@ window.QuickNotes = (function () {
       const phrase = phraseFrom(/\b(delete|remove|cancel|clear|drop)\b/gi);
       return { action: 'delete_event', match: resolve(phrase) || phrase };
     }
-    // MOVE / reschedule  → re-time an existing block
-    if (/\b(move|reschedule|resched|shift|push|change)\b/.test(t)) {
-      const time = parseTime(t);
-      let phrase = t.replace(/\b(move|reschedule|resched|shift|push|change)\b/, '').split(/\bto\b|\bat\b/)[0]
-        .replace(/\b(my|the|a|an)\b/g, '').trim();
-      return { action: 'move_event', match: resolve(phrase) || phrase, time };
+    // RE-TIME — move / reschedule / shift / reduce / extend / shorten / lengthen.
+    // Pulls the task name + any time(s) or duration so it can recompute start AND
+    // end of the block. A range ("10pm to 12am") sets both; a single time shifts;
+    // "by/to N min|hr" resizes. "set"/"make" are excluded (they collide with the
+    // "set up" create verb). The branch only fires when a time/duration is given.
+    if (/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/.test(t)) {
+      const times = parseTimes(t);
+      const byMatch = t.match(/\bby\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
+      const toDur = t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
+      const conv = (mm) => (/hour|hr/.test(mm[2]) ? +mm[1] * 60 : +mm[1]);
+      if (times.length || byMatch || toDur) {
+        const phrase = raw
+          .replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ')
+          .replace(/\bfrom\b|\bto\b|\bat\b|\bby\b/gi, ' ')
+          .replace(TIME_TOKENS, ' ')
+          .replace(/\b(my|the|a|an)\b/gi, ' ')
+          .replace(/\s+/g, ' ').trim();
+        const out = { action: 'retime_event', match: resolve(phrase) || phrase };
+        if (times.length >= 2) { out.time = times[0]; out.endTime = times[1]; }
+        else if (times.length === 1) { out.time = times[0]; }
+        if (times.length < 2) {
+          if (byMatch) out.deltaMin = (/extend|lengthen/.test(t) ? 1 : -1) * conv(byMatch);
+          else if (toDur) out.durationMin = conv(toDur);
+        }
+        return out;
+      }
     }
     // ADD / schedule / remind (broad — LAST). "book" is intentionally NOT a
     // trigger: it collides with real titles like "read a book".
@@ -709,6 +768,17 @@ window.QuickNotes = (function () {
         .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
         .trim();
       return { action: 'add_event', title: cleanTitle(title), time, durationMin };
+    }
+    // Bare "TASK from X to Y" (no verb) — re-time, but ONLY when the phrase maps
+    // to an existing block, so it never hijacks creation of a brand-new entry.
+    {
+      const times = parseTimes(t);
+      if (times.length >= 2) {
+        const phrase = raw.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
+          .replace(/\b(my|the|a|an)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+        const title = resolve(phrase);
+        if (title) return { action: 'retime_event', match: title, time: times[0], endTime: times[1] };
+      }
     }
     return null; // unknown → Gemini fallback
   }
@@ -742,11 +812,12 @@ window.QuickNotes = (function () {
   // ── apply a structured intent (from local parser OR Gemini) ──────────────────
   async function applyIntent(intent) {
     const A = window.AptCal;
-    const time = intent.time
-      ? (typeof intent.time === 'string' ? parseTime(intent.time) || (function () {
-          const m = intent.time.match(/(\d{1,2}):(\d{2})/); return m ? { h: +m[1], m: +m[2] } : null;
-        })() : intent.time)
-      : null;
+    // Accept times as {h,m} (local parser) or "HH:MM"/"4pm" strings (Gemini).
+    const asTime = (v) => !v ? null
+      : (typeof v === 'string'
+          ? (parseTime(v) || (function () { const m = v.match(/(\d{1,2}):(\d{2})/); return m ? { h: +m[1], m: +m[2] } : null; })())
+          : v);
+    const time = asTime(intent.time);
 
     switch (intent.action) {
       case 'summarize':
@@ -763,11 +834,21 @@ window.QuickNotes = (function () {
         } catch { addMsg('ai', 'Adding that failed — is the proxy running?'); }
         return;
       }
-      case 'move_event': {
-        if (!time) { addMsg('ai', 'Move it to when? Try “move workout to 4pm”.'); return; }
-        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to move that."); return; }
-        const r = await A.moveEvent(intent.match, time);
-        addMsg('ai', r.ok ? '✓ Moved “' + r.title + '” → ' + r.when + '.'
+      case 'move_event':
+      case 'retime_event': {
+        const opts = {};
+        if (time) opts.start = time;
+        if (intent.endTime) opts.end = asTime(intent.endTime);
+        if (intent.durationMin != null) opts.durationMin = intent.durationMin;
+        if (intent.deltaMin != null) opts.deltaMin = intent.deltaMin;
+        if (!opts.start && !opts.end && opts.durationMin == null && opts.deltaMin == null) {
+          addMsg('ai', 'Re-time it to when? Try “move workout to 4pm” or “reduce film 10pm to 12am”.');
+          return;
+        }
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to re-time that."); return; }
+        const r = await A.retimeEvent(intent.match, opts);
+        addMsg('ai', r.ok
+          ? '✓ Updated “' + r.title + '” → ' + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
         return;
       }
@@ -834,12 +915,12 @@ window.QuickNotes = (function () {
   async function handle(text) {
     const msg = text.trim();
     if (!msg || busy) return;
-    busy = true;
+    busy = true; setSummoning(true);
     addMsg('user', msg);
     const local = parseLocal(msg);
     if (local) {
       try { await applyIntent(local); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
-      busy = false; return;
+      busy = false; setSummoning(false); return;
     }
     // free-form → Gemini (only reachable on the deployed proxy)
     const thinking = addThinking();
@@ -854,7 +935,7 @@ window.QuickNotes = (function () {
         + '(it runs on the deployed proxy). Try a direct command — e.g. “add gym at 5pm”, '
         + '“move workout to 4pm”, “log water”, or “what’s on today?”.');
     }
-    busy = false;
+    busy = false; setSummoning(false);
   }
 
   // ── quick chips ──────────────────────────────────────────────────────────────

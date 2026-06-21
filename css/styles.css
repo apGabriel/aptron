@@ -405,7 +405,9 @@ body > * { position: relative; z-index: 1; }
 }
 
 /* Assistant chat */
-.aios-chat { display: flex; flex-direction: column; min-height: 440px; }
+.aios-chat { display: flex; flex-direction: column; min-height: 440px; position: relative; }
+/* Keep content above the dragon-aura border drawn in ::before. */
+.aios-chat > * { position: relative; z-index: 1; }
 .aios-chat-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .aios-chat-orb {
   width: 34px; height: 34px; border-radius: 50%; flex: none;
@@ -511,3 +513,67 @@ body > * { position: relative; z-index: 1; }
   color: var(--text-secondary); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
 }
 .aios-notes-input button:hover { color: var(--text-primary); border-color: rgba(210,188,138,0.40); }
+
+/* =====================================================================
+   SHENLONG persona — additive jade/amber aura over the existing dark
+   tokens. No color-system, button or icon changes; this only layers
+   a mystical dragon vibe onto the chat panel.
+   ===================================================================== */
+
+/* Dragon whisps — a slow, flowing jade energy border around the chat. The
+   mask trick paints only the 1px ring so the card surface stays untouched. */
+.aios-chat::before {
+  content: ''; position: absolute; inset: 0; z-index: 0;
+  border-radius: 16px; padding: 1px; pointer-events: none;
+  background: linear-gradient(130deg,
+    rgba(46,204,113,0.15) 0%, rgba(46,204,113,0.04) 28%, transparent 48%,
+    rgba(255,159,67,0.10) 68%, rgba(46,204,113,0.15) 100%);
+  background-size: 300% 300%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: shenlongFlow 9s ease-in-out infinite;
+}
+/* Soft outer aura — additive, doesn't replace the card's own shadow. */
+.aios-chat { box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 26px rgba(46,204,113,0.06); }
+@keyframes shenlongFlow {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* The 7 Dragon Balls */
+.shenlong-balls {
+  display: flex; gap: 7px; align-items: center; justify-content: center;
+  margin: -2px 0 12px;
+}
+.dball {
+  width: 9px; height: 9px; border-radius: 50%; position: relative;
+  background: radial-gradient(circle at 35% 30%, #ffd9a8 0%, #FF9F43 60%, #e07b1f 100%);
+  box-shadow: 0 0 6px rgba(255,159,67,0.55), inset 0 -1px 2px rgba(120,50,0,0.55);
+}
+.dball::after {   /* tiny center star/shadow */
+  content: ''; position: absolute; inset: 0; margin: auto;
+  width: 2px; height: 2px; border-radius: 50%; background: rgba(120,50,0,0.6);
+}
+/* Summoning — a left-to-right pulse wave while Shenlong is working. */
+.aios-chat.is-summoning .dball { animation: dballWave 1.1s ease-in-out infinite; }
+.aios-chat.is-summoning .dball:nth-child(1) { animation-delay: 0s; }
+.aios-chat.is-summoning .dball:nth-child(2) { animation-delay: 0.09s; }
+.aios-chat.is-summoning .dball:nth-child(3) { animation-delay: 0.18s; }
+.aios-chat.is-summoning .dball:nth-child(4) { animation-delay: 0.27s; }
+.aios-chat.is-summoning .dball:nth-child(5) { animation-delay: 0.36s; }
+.aios-chat.is-summoning .dball:nth-child(6) { animation-delay: 0.45s; }
+.aios-chat.is-summoning .dball:nth-child(7) { animation-delay: 0.54s; }
+@keyframes dballWave {
+  0%, 65%, 100% { transform: translateY(0); box-shadow: 0 0 6px rgba(255,159,67,0.55), inset 0 -1px 2px rgba(120,50,0,0.55); }
+  32%           { transform: translateY(-4px); box-shadow: 0 0 12px rgba(255,159,67,0.95), inset 0 -1px 2px rgba(120,50,0,0.55); }
+}
+
+/* Shenlong reply bubbles — jade outline; granted (✓) commands get an amber accent. */
+.aios-msg-ai.shenlong-reply {
+  border-color: rgba(46,204,113,0.28);
+  background: linear-gradient(180deg, rgba(46,204,113,0.06), rgba(255,255,255,0.05));
+}
+.aios-msg-ai.shenlong-reply.is-granted {
+  border-color: rgba(255,159,67,0.42);
+  box-shadow: inset 2px 0 0 0 rgba(255,159,67,0.6);
+}

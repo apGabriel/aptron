@@ -303,6 +303,8 @@ app.post('/api/gemini/assistant', async (req, res) => {
     'Rules: all times are 24-hour "HH:MM". For move_event / complete_event / delete_event, ' +
     '"match" MUST be a distinctive keyword taken from the target event\'s title. ' +
     'For add_event include "title" and "time" (and "durationMin" if the user implies a length). ' +
+    'For retime_event (move / reschedule / reduce / extend / "from X to Y") include "match" and the new "time"; ' +
+    'add "endTime" for a range, "durationMin" to set an absolute length, or "deltaMin" to grow (+) / shrink (-) it. ' +
     'For log_water set "servings" (default 1) and "unit" ("glass" or "bottle"). ' +
     'For log_food set "name" and "calories" if stated. For a quick reminder/idea with no time, use "note" with "text". ' +
     'If the message is purely conversational with no concrete action, use action "chat". ' +
@@ -318,10 +320,11 @@ app.post('/api/gemini/assistant', async (req, res) => {
         properties: {
           action: {
             type: 'STRING',
-            enum: ['add_event', 'move_event', 'complete_event', 'delete_event',
-              'summarize', 'log_water', 'log_food', 'note', 'chat'],
+            enum: ['add_event', 'move_event', 'retime_event', 'complete_event', 'uncheck_event',
+              'delete_event', 'summarize', 'log_water', 'log_food', 'note', 'chat'],
           },
           title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
+          endTime: { type: 'STRING' }, deltaMin: { type: 'NUMBER' },
           durationMin: { type: 'NUMBER' }, notes: { type: 'STRING' },
           servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
           name: { type: 'STRING' }, calories: { type: 'NUMBER' },
