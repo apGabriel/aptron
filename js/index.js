@@ -458,16 +458,37 @@ window.QuickNotes = (function () {
   }
 
   // ── assistant-facing helpers ──────────────────────────────────────────────
-  // Pick the event that best matches a keyword: prefer an upcoming/active one
-  // over an already-finished slot so "move my workout" hits the right block.
-  function findEvent(match) {
+  // Score how well a query matches an event title. A contiguous substring wins;
+  // otherwise we accept a token-subset match so filler-stripped phrases like
+  // "read book" still find "Read a book". Returns 0 when there's no real match.
+  function scoreMatch(title, q) {
+    const tl = title.toLowerCase();
+    if (tl.includes(q)) return 100 + q.length;
+    const tokens = q.split(/\s+/).filter(Boolean);
+    if (!tokens.length) return 0;
+    const hit = tokens.filter(w => w.length > 1 && tl.includes(w)).length;
+    if (hit === tokens.length) return 50 + hit;   // every word present
+    return hit;                                    // partial (weak)
+  }
+  // Pick the event that best matches a keyword. `prefer` biases ties: 'done' for
+  // unchecking (target the completed slot), 'undone' for completing, else the
+  // upcoming/active one so "move my workout" hits the right block.
+  function findEvent(match, prefer) {
     const q = String(match || '').toLowerCase().trim();
     if (!q) return null;
-    const hits = currentEvents.filter(ev => ev.title.toLowerCase().includes(q));
-    if (!hits.length) return null;
-    const now = new Date();
-    return hits.find(ev => new Date(ev.end) >= now) || hits[0];
+    const scored = currentEvents.map(ev => ({ ev, s: scoreMatch(ev.title, q) })).filter(x => x.s > 0);
+    if (!scored.length) return null;
+    scored.sort((a, b) => b.s - a.s);
+    const best = scored[0].s;
+    const top = scored.filter(x => x.s === best).map(x => x.ev);
+    const now = new Date(), doneSet = getDoneSet();
+    if (prefer === 'done')   return top.find(ev => doneSet.has(ev.id))  || top[0];
+    if (prefer === 'undone') return top.find(ev => !doneSet.has(ev.id)) || top[0];
+    return top.find(ev => new Date(ev.end) >= now) || top[0];
   }
+  // Resolve a phrase to a real event title (or null) — lets the parser decide
+  // between mutating an existing block and creating a new one.
+  function matchTitle(q) { const ev = findEvent(q); return ev ? ev.title : null; }
   async function apiAddEvent(title, hm, durationMin, notes) {
     const startDt = new Date(); startDt.setHours(hm.h, hm.m, 0, 0);
     const endDt = new Date(startDt.getTime() + (durationMin || 30) * 60000);
@@ -487,9 +508,18 @@ window.QuickNotes = (function () {
     return { ok: true, title: ev.title, when: fmtTime(ev.start) };
   }
   function apiCompleteEvent(match) {
-    const ev = findEvent(match);
+    const ev = findEvent(match, 'undone');
     if (!ev) return { ok: false };
     setManual(ev.id, true); setDone(ev.id, true);
+    applyDoneStateToDOM();
+    if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
+    return { ok: true, title: ev.title };
+  }
+  function apiUncheckEvent(match) {
+    const ev = findEvent(match, 'done');
+    if (!ev) return { ok: false };
+    // Record an explicit "not done" so autoCheckPastEvents won't re-tick a past slot.
+    setManual(ev.id, false); setDone(ev.id, false);
     applyDoneStateToDOM();
     if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
     return { ok: true, title: ev.title };
@@ -538,8 +568,8 @@ window.QuickNotes = (function () {
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
     summarize, addEvent: apiAddEvent, moveEvent: apiMoveEvent,
-    completeEvent: apiCompleteEvent, deleteEvent: apiDeleteEvent,
-    fmtTime,
+    completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
+    matchTitle, fmtTime,
   };
 })();
 
@@ -627,33 +657,53 @@ window.QuickNotes = (function () {
       let text = raw.replace(/^note[:\-]\s*/i, '').replace(/\b(jot down|jot|note that|add a note( to)?|remember to)\b/gi, '').trim();
       return { action: 'note', text: text || raw };
     }
-    // move / reschedule
+    // ── STATE MUTATIONS — consult the live calendar so an EXISTING block always
+    // wins over the broad "create" logic. This is the fix for "unmark read a
+    // book" being mis-read as scheduling "Unmark read a": we strip the action
+    // word, resolve the remaining phrase against today's blocks, and only fall
+    // back to creation when no block matches.
+    const A = window.AptCal;
+    // Words that aren't part of a block title — dropped before fuzzy matching.
+    const FILLER = /\b(the|my|a|an|that|this|please|it|i|just|to|item|entry|event|block|task|as|off|for|on|today|tonight|already|done|complete[d]?|finished?)\b/gi;
+    const phraseFrom = (re) => raw.replace(re, ' ').replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
+    const resolve = (phrase) => (A && A.matchTitle ? A.matchTitle(phrase) : null);
+
+    // UNCHECK / unmark / undo / incomplete  → toggle done:false
+    if (/\b(uncheck|unmark|un-?mark|undo|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
+      const phrase = phraseFrom(/\b(uncheck|unmark|un-?mark|undo|incomplete|untick(ed)?|not\s+done)\b/gi);
+      const title = resolve(phrase);
+      if (title) return { action: 'uncheck_event', match: title };
+      if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
+    }
+    // CHECK / complete / finish / done / tick / "log that I…"  → toggle done:true
+    if (/\b(check(\s*off)?|complete[d]?|finish(ed)?|done|tick(ed)?)\b/.test(t) ||
+        /\bmark\b[\s\S]*\b(done|complete[d]?)\b/.test(t) || /^log\s+(that\s+)?i\b/.test(t)) {
+      const phrase = phraseFrom(/\b(log|check(\s*off)?|checkoff|complete[d]?|finish(ed)?|done|tick(ed)?|mark|did)\b/gi);
+      const title = resolve(phrase);
+      if (title) return { action: 'complete_event', match: title };
+      if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
+    }
+    // DELETE / remove / cancel  → remove the block entirely
+    if (/\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
+      const phrase = phraseFrom(/\b(delete|remove|cancel|clear|drop)\b/gi);
+      return { action: 'delete_event', match: resolve(phrase) || phrase };
+    }
+    // MOVE / reschedule  → re-time an existing block
     if (/\b(move|reschedule|resched|shift|push|change)\b/.test(t)) {
       const time = parseTime(t);
-      let match = t.replace(/\b(move|reschedule|resched|shift|push|change)\b/, '');
-      match = match.split(/\bto\b|\bat\b/)[0];
-      match = match.replace(/\b(my|the|a|an)\b/g, '').trim();
-      return { action: 'move_event', match, time };
+      let phrase = t.replace(/\b(move|reschedule|resched|shift|push|change)\b/, '').split(/\bto\b|\bat\b/)[0]
+        .replace(/\b(my|the|a|an)\b/g, '').trim();
+      return { action: 'move_event', match: resolve(phrase) || phrase, time };
     }
-    // delete / cancel
-    if (/\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
-      let match = t.replace(/\b(delete|remove|cancel|clear|drop)\b/, '').replace(/\b(my|the|a|an|event|block)\b/g, '').trim();
-      return { action: 'delete_event', match };
-    }
-    // complete / log done
-    if (/\b(finish(ed)?|complete[d]?|done|mark.*(done|complete)|check off)\b/.test(t) ||
-        /^log\s+(that\s+)?i\b/.test(t)) {
-      let match = raw.replace(/\b(log|mark|check off|that|i|just|finished?|completed?|did|done|my|the)\b/gi, '').trim();
-      return { action: 'complete_event', match: match || t };
-    }
-    // add / schedule / remind (broad — last)
-    if (/\b(add|schedule|create|new|remind(er)?|set up|book|block)\b/.test(t)) {
+    // ADD / schedule / remind (broad — LAST). "book" is intentionally NOT a
+    // trigger: it collides with real titles like "read a book".
+    if (/\b(add|schedule|create|new|remind(er)?|set up|block)\b/.test(t)) {
       const time = parseTime(t);
       const durM = (t.match(/(\d+)\s*(min|minute|hour|hr)/) || []);
       let durationMin = null;
       if (durM[1]) durationMin = /hour|hr/.test(durM[2]) ? +durM[1] * 60 : +durM[1];
       let title = raw
-        .replace(/\b(add|schedule|create|new|set up|book|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '')
+        .replace(/\b(add|schedule|create|new|set up|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '')
         .replace(/\bat\b\s*[\d:apm\s]+/i, '')
         .replace(/\bfor\b\s*\d+\s*(min|minute|hour|hr)s?/i, '')
         .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
@@ -723,8 +773,15 @@ window.QuickNotes = (function () {
       }
       case 'complete_event': {
         const r = A.completeEvent(intent.match);
-        addMsg('ai', r.ok ? '✓ Marked “' + r.title + '” complete. Nice.'
+        addMsg('ai', r.ok ? '✓ Awesome — marked “' + r.title + '” as completed.'
           : (A.isOffline() ? "I can't see your events (proxy offline) to check that off."
+            : "I couldn't find an event matching “" + (intent.match || '') + '”.'));
+        return;
+      }
+      case 'uncheck_event': {
+        const r = A.uncheckEvent(intent.match);
+        addMsg('ai', r.ok ? "✓ I've unchecked “" + r.title + '” — back on your list.'
+          : (A.isOffline() ? "I can't see your events (proxy offline) to uncheck that."
             : "I couldn't find an event matching “" + (intent.match || '') + '”.'));
         return;
       }
@@ -823,4 +880,7 @@ window.QuickNotes = (function () {
   window.addEventListener('apt:calendar-loaded', greet, { once: true });
   // Safety net if the calendar event never fires (e.g. very slow proxy timeout).
   setTimeout(greet, 6000);
+
+  // Exposed for debugging / tests — inspect how a phrase is parsed locally.
+  window.Assistant = { parse: parseLocal, handle };
 })();
