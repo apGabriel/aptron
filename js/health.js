@@ -1378,25 +1378,26 @@ const CONFIG = {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  // One log card: a thumbnail (with a small emoji badge) or, when there's no
-  // image, an emoji tile — then the name and per-meal macros.
+  // One log row in the compact timeline: a small circular photo "node" sitting
+  // on the accent rail, then the name + meal-type pill on one line and the
+  // macros on a light, low-contrast line below. No per-row container — just
+  // typography and space, so the day's log stays tight and scannable.
   function mealCardHTML(m) {
     const emoji = m.emoji || emojiFor(m.meal_name);
-    const visual = m.thumb
-      ? '<div class="food-item-visual">'
-          + '<img src="data:image/jpeg;base64,' + esc(m.thumb) + '" alt="" loading="lazy">'
-          + '<span class="food-emoji-badge">' + emoji + '</span>'
-        + '</div>'
-      : '<div class="food-item-visual food-item-visual--emoji">' + emoji + '</div>';
+    const node = m.thumb
+      ? '<img src="data:image/jpeg;base64,' + esc(m.thumb) + '" alt="" loading="lazy">'
+      : '<span class="food-node-emoji">' + emoji + '</span>';
     const tag = m.meal_type
       ? '<span class="food-item-tag">' + esc(MEAL_LABELS[m.meal_type] || m.meal_type) + '</span>'
       : '';
     return '<li class="food-item" data-id="' + esc(m.id) + '">'
-      + visual
+      + '<span class="food-node">' + node + '</span>'
       + '<div class="food-item-main">'
-      +   '<div class="food-item-name">' + esc(m.meal_name) + '</div>'
-      +   '<div class="food-item-macros">' + tag + (+m.calories || 0) + ' kcal · P ' + (+m.protein || 0)
-      +     ' · C ' + (+m.carbs || 0) + ' · F ' + (+m.fats || 0) + '</div>'
+      +   '<div class="food-item-head">'
+      +     '<span class="food-item-name">' + esc(m.meal_name) + '</span>' + tag
+      +   '</div>'
+      +   '<div class="food-item-macros">' + (+m.calories || 0) + ' kcal · P:' + (+m.protein || 0)
+      +     ' C:' + (+m.carbs || 0) + ' F:' + (+m.fats || 0) + '</div>'
       + '</div>'
       + '<button class="food-item-del" data-del="' + esc(m.id) + '" aria-label="Delete meal" title="Delete">×</button>'
       + '</li>';

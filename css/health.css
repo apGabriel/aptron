@@ -1009,37 +1009,61 @@ main {
 }
 .food-key-save:hover { border-color: var(--accent); color: var(--accent); }
 .food-key-hint { margin-top: 6px; font-size: 11px; color: var(--text-quaternary); line-height: 1.4; }
-/* Logged meals */
-.food-log { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.food-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 12px; border-radius: 11px;
-  background: var(--bg-secondary); border: 1px solid var(--border-soft);
+/* Logged meals — compact timeline strip.
+   A single thin accent rail threads circular photo "nodes"; rows are pure
+   typography with no per-row container, so 4+ meals stay tight and scannable. */
+.food-log { list-style: none; margin: 16px 0 0; padding: 0; position: relative; }
+.food-log:empty { display: none; }
+/* Continuous rail, centered behind the 30px nodes (rail x = node center = 15px). */
+.food-log::before {
+  content: ''; position: absolute; top: 8px; bottom: 8px; left: 15px;
+  width: 1.5px; background: rgba(29,158,117,0.28);
 }
+.food-item {
+  position: relative; display: flex; align-items: center; gap: 11px;
+  padding: 5px 0;
+}
+/* Photo/emoji node — opaque disc masks the rail where they overlap. */
+.food-node {
+  position: relative; z-index: 1; flex: none;
+  width: 30px; height: 30px; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: #0f0f11; border: 1.5px solid var(--border-strong);
+  font-size: 15px; line-height: 1;
+}
+.food-node img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .food-item-main { flex: 1; min-width: 0; }
+.food-item-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .food-item-name {
-  font-size: 13.5px; font-weight: 600; color: var(--text-primary);
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .food-item-macros {
-  margin-top: 2px; font-family: var(--font-mono); font-size: 11.5px;
-  color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+  margin-top: 1px; font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--text-quaternary); font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .food-item-tag {
-  display: inline-block; margin-right: 6px; padding: 1px 7px;
+  flex: none; padding: 1px 6px;
   border-radius: 999px; font-family: var(--font-mono);
-  font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
-  text-transform: uppercase; vertical-align: middle;
-  color: var(--accent); background: rgba(29,158,117,0.12);
-  border: 1px solid rgba(29,158,117,0.25);
+  font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent); background: rgba(29,158,117,0.10);
+  border: 1px solid rgba(29,158,117,0.22);
 }
+/* Delete: hidden until row hover/focus (desktop); faintly present on touch. */
 .food-item-del {
-  flex: none; width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
-  border: 1px solid var(--border); background: transparent;
-  color: var(--text-tertiary); font-size: 17px; line-height: 1;
-  -webkit-tap-highlight-color: transparent; transition: color 0.15s, border-color 0.15s;
+  flex: none; width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+  border: none; background: transparent;
+  color: var(--text-tertiary); font-size: 16px; line-height: 1;
+  opacity: 0; transition: opacity 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
-.food-item-del:hover { color: var(--warning); border-color: rgba(255,138,77,0.4); }
+.food-item:hover .food-item-del,
+.food-item:focus-within .food-item-del { opacity: 1; }
+.food-item-del:hover { color: var(--warning); }
+@media (hover: none) { .food-item-del { opacity: 0.45; } }
 .food-empty {
   margin-top: 12px; padding: 14px; text-align: center;
   font-size: 12.5px; color: var(--text-tertiary); font-style: italic;
@@ -1070,14 +1094,3 @@ main {
 .food-date-input:focus { outline: none; border-color: var(--accent); background: var(--bg-input-focus); }
 .food-date-input::-webkit-calendar-picker-indicator { filter: invert(0.65); cursor: pointer; }
 /* Meal visual — thumbnail with emoji badge, or emoji-only tile */
-.food-item-visual {
-  position: relative; flex: none; width: 44px; height: 44px; border-radius: 10px;
-  overflow: hidden; display: flex; align-items: center; justify-content: center;
-  background: var(--bg-input); border: 1px solid var(--border-soft);
-  font-size: 22px; line-height: 1;
-}
-.food-item-visual img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.food-emoji-badge {
-  position: absolute; right: 1px; bottom: 0; font-size: 12px; line-height: 1;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.75));
-}
