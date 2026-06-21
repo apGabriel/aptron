@@ -594,14 +594,29 @@ body > * { position: relative; z-index: 1; }
   animation: dragonFloat 13s ease-in-out infinite;
   will-change: transform;
 }
-/* Filled silhouette — dark jade→charcoal gradient kept low enough to read as
-   muscular anatomy without competing with the white text above it. */
-.shenlong-body { fill: url(#dragonGrad); opacity: 0.24; }
-/* Piercing ember eyes — drop-shadow is the SVG-native equivalent of the
-   requested glow; pulses in sync with the float cycle. */
+/* Whole dragon — turned up for real presence; still under the text. */
+.shenlong-body { opacity: 0.34; }
+.sl-fill { fill: url(#dragonGrad); stroke: none; }          /* head, mane, horns, whiskers */
+.sl-jaw  { fill: #07140d; stroke: none; opacity: 0.9; }     /* dark open mouth */
+.sl-tube {                                                  /* coiled muscular body */
+  fill: none; stroke: url(#dragonGrad);
+  stroke-width: 26; stroke-linecap: round; stroke-linejoin: round;
+}
+.sl-belly {                                                 /* lighter belly highlight */
+  fill: none; stroke: #bfe9b0; stroke-width: 9;
+  stroke-linecap: round; opacity: 0.45;
+}
+.sl-claw {                                                  /* three-talon hands */
+  fill: none; stroke: url(#dragonGrad);
+  stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+}
+/* Warm sunset haze — soft and low so it reads as atmosphere, not a block. */
+.shenlong-glow { fill: url(#sunGlow); opacity: 0.10; }
+/* Blazing eyes — over the head, full opacity; drop-shadow is the SVG-native
+   equivalent of the requested glow and pulses in sync with the float cycle. */
 .shenlong-eye {
-  fill: #FF4D4D; stroke: none;
-  filter: drop-shadow(0 0 6px rgba(255,77,77,0.9));
+  fill: #FF3B3B; stroke: none;
+  filter: drop-shadow(0 0 7px rgba(255,59,59,0.95));
   animation: dragonEyePulse 13s ease-in-out infinite;
 }
 @keyframes dragonFloat {
@@ -629,7 +644,8 @@ body > * { position: relative; z-index: 1; }
   /* Keep the head centred but smaller, and step the watermark back so
      text stays crisp on small screens. */
   .shenlong-bg-overlay svg { width: 96%; max-width: 480px; }
-  .shenlong-body { opacity: 0.08; }
+  .shenlong-body { opacity: 0.16; }
+  .shenlong-glow { opacity: 0.07; }
   /* Suggestion chips wrap into clean rows instead of clipping. */
   .aios-chips { flex-wrap: wrap; gap: 6px; }
   .aios-chip { white-space: nowrap; }
