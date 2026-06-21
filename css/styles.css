@@ -596,7 +596,7 @@ body > * { position: relative; z-index: 1; }
 }
 /* Filled silhouette — dark jade→charcoal gradient kept low enough to read as
    muscular anatomy without competing with the white text above it. */
-.shenlong-body { fill: url(#dragonGrad); opacity: 0.15; }
+.shenlong-body { fill: url(#dragonGrad); opacity: 0.24; }
 /* Piercing ember eyes — drop-shadow is the SVG-native equivalent of the
    requested glow; pulses in sync with the float cycle. */
 .shenlong-eye {
