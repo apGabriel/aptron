@@ -1,639 +1,203 @@
-// ── CONFIG ──────────────────────────────────────────────────────────────────
-const WAKE_HOUR  = 6.5;
-const SLEEP_HOUR = 24;
+// =============================================================================
+// Calendar-first AI dashboard.
+//   • The Google Calendar (via the proxy) is the single source of truth for the
+//     day's blocks. The engine below is refactored to expose a small window.AptCal
+//     API so the assistant can read + mutate the schedule.
+//   • The Assistant is HYBRID: a synchronous local intent parser handles the
+//     common tactical commands instantly/offline (and is fully previewable);
+//     anything it can't match is forwarded to the Gemini proxy route
+//     (/api/gemini/assistant) for free-form understanding when deployed.
+//   • A tiny synced Quick-Notes inbox replaces the old to-do lists.
+// No framework, no build step.
+// =============================================================================
+'use strict';
 
-// ── STORAGE HELPERS ─────────────────────────────────────────────────────────
-function storeGet(key) {
-  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
-}
-function storeSet(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-  if (key.startsWith('goals:')) {
-    window.dispatchEvent(new CustomEvent('goals-changed'));
-  }
-}
-function storeDelete(key) { localStorage.removeItem(key); }
-function storeListKeys(prefix) {
-  const keys = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.startsWith(prefix)) keys.push(k);
-  }
-  return keys;
-}
-
-// ── DATE HELPERS ─────────────────────────────────────────────────────────────
+// ── Shared date helpers ──────────────────────────────────────────────────────
 function padZ(n) { return String(n).padStart(2, '0'); }
-
-function dateToStr(d) {
-  return `${d.getFullYear()}-${padZ(d.getMonth()+1)}-${padZ(d.getDate())}`;
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + padZ(d.getMonth() + 1) + '-' + padZ(d.getDate());
+}
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function isBeforeWake() {
-  const now = new Date();
-  return (now.getHours() + now.getMinutes() / 60) < WAKE_HOUR;
-}
+// =============================================================================
+// DAY HEADER — greeting + slim awake-day progress (ambient, replaces the ring).
+// =============================================================================
+(function () {
+  const WAKE = 6.5, SLEEP = 24;
+  const hello = document.getElementById('aiosHello');
+  const dateEl = document.getElementById('aiosDate');
+  const fill = document.getElementById('aiosDayFill');
+  const label = document.getElementById('aiosDayLabel');
+  if (!hello) return;
 
-function getActiveDateString() {
-  const now = new Date();
-  if (isBeforeWake()) {
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    return dateToStr(yesterday);
+  function fmtDateLabel() {
+    const d = new Date();
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate();
   }
-  return dateToStr(now);
-}
-
-function getTomorrowDateString() {
-  const now = new Date();
-  if (isBeforeWake()) {
-    return dateToStr(now); // active day is yesterday, so "tomorrow" is today
+  function greeting(h) {
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
   }
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return dateToStr(tomorrow);
-}
-
-function formatDate(str) {
-  // str: YYYY-MM-DD
-  const [y, m, d] = str.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  const days  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${days[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}`;
-}
-
-// ── ROLLOVER ─────────────────────────────────────────────────────────────────
-function runRollover() {
-  const activeDate = getActiveDateString();
-  const allKeys = storeListKeys('goals:');
-  allKeys.forEach(key => {
-    const keyDate = key.slice(6); // strip "goals:"
-    if (keyDate >= activeDate) return;
-    const goals = storeGet(key) || [];
-    const undone = goals.filter(g => !g.done);
-    if (undone.length === 0) { storeDelete(key); return; }
-    const todayGoals = storeGet('goals:' + activeDate) || [];
-    const existingTexts = new Set(todayGoals.map(g => g.text));
-    undone.forEach(g => { if (!existingTexts.has(g.text)) todayGoals.push({ text: g.text, done: false }); });
-    storeSet('goals:' + activeDate, todayGoals);
-    storeDelete(key);
-  });
-}
-
-// ── STREAK ──────────────────────────────────────────────────────────────────
-function runStreakCheck() {
-  const activeDate = getActiveDateString();
-  const streakData = storeGet('goal_streak_v1') || { count: 0, lastProcessedDate: null };
-  const allKeys = storeListKeys('goals:').sort();
-  let { count, lastProcessedDate } = streakData;
-
-  allKeys.forEach(key => {
-    const keyDate = key.slice(6);
-    if (keyDate >= activeDate) return;
-    if (lastProcessedDate && keyDate <= lastProcessedDate) return;
-    const goals = storeGet(key) || [];
-    if (goals.length === 0) { lastProcessedDate = keyDate; return; }
-    const allDone = goals.every(g => g.done);
-    count = allDone ? count + 1 : 0;
-    lastProcessedDate = keyDate;
-  });
-
-  storeSet('goal_streak_v1', { count, lastProcessedDate });
-  return count;
-}
-
-// ── RENDER STREAK ────────────────────────────────────────────────────────────
-function renderStreak() {
-  const data = storeGet('goal_streak_v1') || { count: 0 };
-  const count = data.count || 0;
-  const el = document.getElementById('gmStreak');
-  document.getElementById('gmStreakNum').textContent = count;
-  if (count > 0) el.classList.add('gm-streak-active');
-  else           el.classList.remove('gm-streak-active');
-}
-
-// ── RENDER TODAY HEADER ──────────────────────────────────────────────────────
-function renderTodayHeader() {
-  const activeDate = getActiveDateString();
-  const goals = storeGet('goals:' + activeDate) || [];
-  const done  = goals.filter(g => g.done).length;
-  const total = goals.length;
-
-  document.getElementById('todayLabel').textContent = 'Today — ' + formatDate(activeDate);
-  document.getElementById('gmProgressNum').textContent = done;
-  document.getElementById('gmProgressTotal').textContent = '/ ' + total;
-
-  let label = 'no goals yet';
-  if (total > 0 && done === total) label = 'all done — solid day';
-  else if (total > 0) label = 'complete';
-  document.getElementById('gmProgressLabel').textContent = label;
-
-  // Segmented bar
-  const bar = document.getElementById('gmBar');
-  bar.innerHTML = '';
-  goals.forEach(g => {
-    const seg = document.createElement('div');
-    seg.className = 'gm-bar-seg' + (g.done ? ' gm-bar-seg-done' : '');
-    bar.appendChild(seg);
-  });
-
-  // All-done class
-  const card = document.getElementById('todayCard');
-  if (total > 0 && done === total) card.classList.add('gm-all-done');
-  else                             card.classList.remove('gm-all-done');
-
-  // Push button
-  const pushBtn = document.getElementById('gmPushBtn');
-  const hasUnchecked = goals.some(g => !g.done);
-  pushBtn.style.display = hasUnchecked ? 'block' : 'none';
-}
-
-// ── RENDER TOMORROW COUNT ─────────────────────────────────────────────────────
-function renderTomorrowCount() {
-  const tomorrowDate = getTomorrowDateString();
-  const goals = storeGet('goals:' + tomorrowDate) || [];
-  document.getElementById('gmTomorrowCount').textContent = goals.length + ' planned';
-  document.getElementById('tomorrowLabel').textContent = 'Plan tomorrow — ' + formatDate(tomorrowDate);
-}
-
-// ── BUILD GOAL ROW ────────────────────────────────────────────────────────────
-function buildGoalRow(g, idx, goals, key, readOnly, reload) {
-  const li = document.createElement('li');
-  li.className = 'goal-row' + (g.done ? ' is-done' : '') + (g.queued ? ' is-queued' : '');
-  li.draggable = !readOnly;
-  li.dataset.idx = idx;
-
-  // Drag handle
-  const handle = document.createElement('span');
-  handle.className = 'goal-drag-handle';
-  handle.textContent = '⋮⋮';
-  if (!readOnly) li.appendChild(handle);
-
-  // Checkbox
-  const cbWrap = document.createElement('label');
-  cbWrap.className = 'goal-cb-wrap';
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  cb.checked = g.done;
-  if (readOnly) { cb.disabled = true; cb.title = 'Activates at 6 AM tomorrow'; }
-  const cbCustom = document.createElement('span');
-  cbCustom.className = 'goal-cb-custom';
-  cbWrap.appendChild(cb);
-  cbWrap.appendChild(cbCustom);
-  li.appendChild(cbWrap);
-
-  cb.addEventListener('change', () => {
-    goals[idx].done = cb.checked;
-    if (cb.checked) goals[idx].doneAt = Date.now();
-    else            delete goals[idx].doneAt;
-    storeSet(key, goals);
-    reload();
-  });
-
-  // Text
-  const textEl = document.createElement('span');
-  textEl.className = 'goal-text';
-  textEl.textContent = g.text;
-  makeInlineEdit(textEl, goals, idx, key, reload);
-  li.appendChild(textEl);
-
-  // Queue btn
-  const qBtn = document.createElement('button');
-  qBtn.className = 'gm-queue-btn' + (g.queued ? ' is-queued' : '');
-  qBtn.textContent = '⚡';
-  qBtn.title = 'Queue for productivity window';
-  if (readOnly) qBtn.disabled = true;
-  qBtn.addEventListener('click', () => {
-    goals[idx].queued = !goals[idx].queued;
-    const rank = g => g.done ? 2 : (g.queued ? 0 : 1);
-    goals.sort((a, b) => rank(a) - rank(b));
-    storeSet(key, goals);
-    li.classList.add('is-queue-flashing');
-    setTimeout(() => reload(), 480);
-  });
-  li.appendChild(qBtn);
-
-  // Delete btn
-  const delBtn = document.createElement('button');
-  delBtn.className = 'goal-delete';
-  delBtn.textContent = '×';
-  delBtn.title = 'Delete goal';
-  delBtn.addEventListener('click', () => {
-    goals.splice(idx, 1);
-    storeSet(key, goals);
-    reload();
-  });
-  li.appendChild(delBtn);
-
-  // Drag-and-drop
-  if (!readOnly) wireDragReorder(li, goals, key, reload);
-
-  return li;
-}
-
-// ── INLINE EDIT ──────────────────────────────────────────────────────────────
-function makeInlineEdit(textEl, goals, idx, key, reload) {
-  textEl.addEventListener('click', () => {
-    textEl.contentEditable = 'true';
-    textEl.focus();
-    const range = document.createRange();
-    range.selectNodeContents(textEl);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  });
-
-  textEl.addEventListener('blur', () => {
-    const newText = textEl.textContent.trim();
-    textEl.contentEditable = 'false';
-    if (newText && newText !== goals[idx].text) {
-      goals[idx].text = newText;
-      storeSet(key, goals);
-      reload();
-    } else {
-      textEl.textContent = goals[idx].text;
+  function update() {
+    const now = new Date();
+    const h = now.getHours() + now.getMinutes() / 60;
+    hello.textContent = greeting(now.getHours());
+    dateEl.textContent = fmtDateLabel();
+    let pct, txt;
+    if (h < WAKE) { pct = 0; txt = 'before wake-up'; }
+    else if (h >= SLEEP) { pct = 100; txt = 'past bedtime'; }
+    else {
+      pct = (h - WAKE) / (SLEEP - WAKE) * 100;
+      const left = SLEEP - h;
+      txt = Math.floor(left) + 'h ' + Math.round((left % 1) * 60) + 'm awake left';
     }
-  });
+    fill.style.width = pct.toFixed(1) + '%';
+    label.textContent = Math.round(pct) + '% of day · ' + txt;
+  }
+  update();
+  setInterval(update, 60 * 1000);
+  // Greeting word can change as the day rolls; expose the current one for the bot.
+  window.__aiosGreeting = () => greeting(new Date().getHours());
+})();
 
-  textEl.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); textEl.blur(); }
-    if (e.key === 'Escape') {
-      textEl.textContent = goals[idx].text;
-      textEl.contentEditable = 'false';
-    }
-  });
-}
+// =============================================================================
+// QUICK NOTES — minimalist synced inbox (key 'quicknotes_v1', in syncedPrefixes).
+// =============================================================================
+window.QuickNotes = (function () {
+  const KEY = 'quicknotes_v1';
+  const listEl = document.getElementById('notesList');
+  const countEl = document.getElementById('notesCount');
+  const form = document.getElementById('notesForm');
+  const input = document.getElementById('notesInput');
 
-// ── DRAG REORDER ─────────────────────────────────────────────────────────────
-let dragFromIdx = null;
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function persist(arr) {
+    localStorage.setItem(KEY, JSON.stringify(arr));
+    if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
+    render();
+  }
+  function add(text) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+    const arr = load(); arr.unshift({ text: t, ts: Date.now() }); persist(arr);
+    return true;
+  }
+  function del(ts) { persist(load().filter(n => n.ts !== ts)); }
 
-function wireDragReorder(li, goals, key, reload) {
-  li.addEventListener('dragstart', e => {
-    dragFromIdx = parseInt(li.dataset.idx);
-    e.dataTransfer.effectAllowed = 'move';
-  });
+  function render() {
+    if (!listEl) return;
+    const arr = load();
+    if (countEl) countEl.textContent = arr.length ? arr.length + (arr.length === 1 ? ' note' : ' notes') : '';
+    listEl.innerHTML = arr.map(n =>
+      '<li class="aios-note" data-ts="' + n.ts + '">'
+      + '<span class="aios-note-dot"></span>'
+      + '<span class="aios-note-text">' + esc(n.text) + '</span>'
+      + '<button class="aios-note-del" data-del="' + n.ts + '" aria-label="Delete note" title="Delete">×</button>'
+      + '</li>').join('');
+  }
 
-  li.addEventListener('dragover', e => {
-    e.preventDefault();
-    li.classList.add('drag-over-top');
-  });
-
-  li.addEventListener('dragleave', () => {
-    li.classList.remove('drag-over-top');
-    li.classList.remove('drag-over-bottom');
-  });
-
-  li.addEventListener('drop', e => {
-    e.preventDefault();
-    li.classList.remove('drag-over-top');
-    const toIdx = parseInt(li.dataset.idx);
-    if (dragFromIdx === null || dragFromIdx === toIdx) return;
-    const [moved] = goals.splice(dragFromIdx, 1);
-    goals.splice(toIdx, 0, moved);
-    storeSet(key, goals);
-    reload();
-    dragFromIdx = null;
-  });
-}
-
-// ── RENDER LIST ───────────────────────────────────────────────────────────────
-const SHOW_MAX = 5;
-
-function renderListInto(goals, listEl, emptyEl, key, readOnly, reload) {
-  listEl.innerHTML = '';
-
-  if (goals.length === 0) {
-    emptyEl.style.display = 'block';
-  } else {
-    emptyEl.style.display = 'none';
-    const showAll = listEl.dataset.expanded === 'true';
-    const visible = (goals.length > SHOW_MAX && !showAll) ? goals.slice(0, SHOW_MAX) : goals;
-
-    visible.forEach((g, i) => {
-      listEl.appendChild(buildGoalRow(g, i, goals, key, readOnly, reload));
+  if (form) {
+    form.addEventListener('submit', e => { e.preventDefault(); if (add(input.value)) input.value = ''; });
+  }
+  if (listEl) {
+    listEl.addEventListener('click', e => {
+      const b = e.target.closest('[data-del]');
+      if (b) del(Number(b.dataset.del));
     });
-
-    if (goals.length > SHOW_MAX) {
-      const hidden = goals.length - SHOW_MAX;
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'gm-show-more';
-      if (showAll) {
-        toggleBtn.textContent = 'Show less ▴';
-        toggleBtn.addEventListener('click', () => { listEl.dataset.expanded = 'false'; reload(); });
-      } else {
-        toggleBtn.textContent = `Show ${hidden} more ▾`;
-        toggleBtn.addEventListener('click', () => { listEl.dataset.expanded = 'true'; reload(); });
-      }
-      listEl.appendChild(toggleBtn);
-    }
   }
+  window.addEventListener('notes-changed', render);
+  window.addEventListener('storage', render);
+  render();
+  return { add, render };
+})();
 
-  if (key.startsWith('goals:') && !readOnly) {
-    renderTodayHeader();
-  } else if (readOnly) {
-    renderTomorrowCount();
-  }
-}
-
-// ── LOAD TODAY / TOMORROW ─────────────────────────────────────────────────────
-function loadToday() {
-  const key   = 'goals:' + getActiveDateString();
-  const goals = storeGet(key) || [];
-  const listEl  = document.getElementById('goalList');
-  const emptyEl = document.getElementById('emptyState');
-  renderListInto(goals, listEl, emptyEl, key, false, loadToday);
-}
-
-function loadTomorrow() {
-  const key   = 'goals:' + getTomorrowDateString();
-  const goals = storeGet(key) || [];
-  const listEl  = document.getElementById('tomorrowList');
-  const emptyEl = document.getElementById('tomorrowEmptyState');
-  renderListInto(goals, listEl, emptyEl, key, true, loadTomorrow);
-}
-
-// ── ADD HANDLERS ──────────────────────────────────────────────────────────────
-function makeAddHandlers(input, addBtn, key, reload) {
-  function doAdd() {
-    const text = input.value.trim();
-    if (!text) return;
-    const goals = storeGet(key) || [];
-    goals.push({ text, done: false });
-    storeSet(key, goals);
-    input.value = '';
-    reload();
-  }
-
-  addBtn.addEventListener('click', doAdd);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
-}
-
-// ── PUSH REMAINING ────────────────────────────────────────────────────────────
-document.getElementById('gmPushBtn').addEventListener('click', () => {
-  if (!confirm('Move all unchecked goals to tomorrow?')) return;
-  const todayKey    = 'goals:' + getActiveDateString();
-  const tomorrowKey = 'goals:' + getTomorrowDateString();
-  const todayGoals    = storeGet(todayKey) || [];
-  const tomorrowGoals = storeGet(tomorrowKey) || [];
-  const existing = new Set(tomorrowGoals.map(g => g.text));
-  const unchecked = todayGoals.filter(g => !g.done);
-  unchecked.forEach(g => { if (!existing.has(g.text)) tomorrowGoals.push({ text: g.text, done: false }); });
-  const remaining = todayGoals.filter(g => g.done);
-  storeSet(todayKey, remaining);
-  storeSet(tomorrowKey, tomorrowGoals);
-  loadToday();
-  loadTomorrow();
-});
-
-// ── DAY RING ──────────────────────────────────────────────────────────────────
-const C = 2 * Math.PI * 52;
-const ringFill  = document.getElementById('ringFill');
-const ringTrack = document.getElementById('ringTrack');
-ringFill.style.strokeDasharray = C;
-
-const SUN_PALETTE = [
-  [255,216,158],[255,205,121],[255,227,143],[255,183,106],
-  [255,149, 89],[243,111, 79],[226, 93,122],[123, 91,176],[47, 58,102]
-];
-
-function lerpColor(a, b, t) {
-  return [
-    Math.round(a[0] + (b[0]-a[0])*t),
-    Math.round(a[1] + (b[1]-a[1])*t),
-    Math.round(a[2] + (b[2]-a[2])*t)
-  ];
-}
-
-function getSunColor(pct) {
-  const stops = SUN_PALETTE;
-  const n = stops.length - 1;
-  const pos = (pct / 100) * n;
-  const lo  = Math.floor(pos);
-  const hi  = Math.min(lo + 1, n);
-  const t   = pos - lo;
-  const [r,g,b] = lerpColor(stops[lo], stops[hi], t);
-  return `rgb(${r},${g},${b})`;
-}
-
-function fmtHm(totalHours) {
-  const h = Math.floor(totalHours);
-  const m = Math.round((totalHours - h) * 60);
-  return `${h}h ${m}m`;
-}
-
-function fmtClock(now) {
-  let h = now.getHours();
-  const m = padZ(now.getMinutes());
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return `${h}:${m} ${ampm}`;
-}
-
-function updateDayRing() {
-  const now = new Date();
-  const hours = now.getHours() + now.getMinutes()/60 + now.getSeconds()/3600;
-
-  document.getElementById('ringClock').textContent = fmtClock(now);
-
-  if (hours < WAKE_HOUR) {
-    ringFill.setAttribute('stroke', '#4D4B47');
-    ringFill.style.strokeDashoffset = C;
-    document.getElementById('ringPercent').textContent   = '—';
-    document.getElementById('ringPhase').textContent     = 'SLEEPING';
-    document.getElementById('ringStatus').textContent    = '😴 Still sleeping';
-    const hoursUntil = WAKE_HOUR - hours;
-    document.getElementById('ringRemaining').textContent = fmtHm(hoursUntil) + ' until wake-up';
-  } else if (hours >= SLEEP_HOUR) {
-    ringFill.setAttribute('stroke', '#E25D7A');
-    ringFill.style.strokeDashoffset = 0;
-    document.getElementById('ringPercent').textContent   = '100%';
-    document.getElementById('ringPhase').textContent     = 'PAST BEDTIME';
-    document.getElementById('ringStatus').textContent    = '⚠️ Past bedtime';
-    document.getElementById('ringRemaining').textContent = 'Sleep!';
-  } else {
-    const pct = (hours - WAKE_HOUR) / (SLEEP_HOUR - WAKE_HOUR) * 100;
-    const offset = C * (1 - pct/100);
-    ringFill.style.strokeDashoffset = offset;
-    ringFill.setAttribute('stroke', getSunColor(pct));
-    document.getElementById('ringPercent').textContent = Math.round(pct) + '%';
-
-    let phase, status;
-    if      (pct < 25) { phase = 'MORNING';   status = '☀️ Morning — fresh start'; }
-    else if (pct < 50) { phase = 'MIDDAY';    status = '⚡ Midday — keep moving'; }
-    else if (pct < 75) { phase = 'AFTERNOON'; status = '🔥 Afternoon — push it'; }
-    else if (pct < 90) { phase = 'EVENING';   status = '⏳ Evening — wrap up'; }
-    else               { phase = 'BEDTIME';   status = '🌙 Bedtime soon'; }
-
-    document.getElementById('ringPhase').textContent    = phase;
-    document.getElementById('ringStatus').textContent   = status;
-    const remaining = SLEEP_HOUR - hours;
-    document.getElementById('ringRemaining').textContent = fmtHm(remaining) + ' awake time left';
-  }
-}
-
-// ── GOAL TICKER ───────────────────────────────────────────────────────────────
-let tickerCycleIdx = 0;
-let tickerInterval = null;
-
-function getTickerItems() {
-  const key   = 'goals:' + getActiveDateString();
-  const goals = storeGet(key) || [];
-  const total = goals.length;
-  const done  = goals.filter(g => g.done).length;
-
-  if (total === 0) return { items: [{ status: 'empty', text: 'No goals set for today — add one to get rolling.' }], done: 0, total: 0 };
-  if (done === total) return { items: [{ status: 'done', text: '✓ All goals done — solid day.' }], done, total };
-
-  const pending = goals.filter(g => !g.done).map(g => ({ status: 'pending', text: g.text }));
-  return { items: pending, done, total };
-}
-
-function tick(isFirst) {
-  const { items, done, total } = getTickerItems();
-  const stage = document.getElementById('goalTickerStage');
-  const meta  = document.getElementById('goalTickerMeta');
-
-  if (tickerCycleIdx >= items.length) tickerCycleIdx = 0;
-  const item = items[tickerCycleIdx];
-  tickerCycleIdx = (tickerCycleIdx + 1) % items.length;
-
-  meta.textContent = `${done}/${total}`;
-
-  const newRow = document.createElement('div');
-  newRow.className = 'goal-ticker-row';
-
-  const statusEl = document.createElement('span');
-  statusEl.className = 'goal-ticker-status';
-  statusEl.dataset.status = item.status;
-  statusEl.textContent = item.status === 'done' ? '✓' : item.status === 'pending' ? '○' : '·';
-
-  const textEl = document.createElement('span');
-  textEl.className = 'goal-ticker-text';
-  textEl.textContent = item.text;
-
-  newRow.appendChild(statusEl);
-  newRow.appendChild(textEl);
-
-  if (isFirst) {
-    stage.innerHTML = '';
-    stage.appendChild(newRow);
-    return;
-  }
-
-  const oldRow = stage.querySelector('.goal-ticker-row');
-  if (oldRow) {
-    oldRow.classList.add('is-leaving');
-    setTimeout(() => { if (oldRow.parentNode) oldRow.parentNode.removeChild(oldRow); }, 460);
-  }
-
-  newRow.classList.add('is-entering');
-  stage.appendChild(newRow);
-}
-
-function startTicker() {
-  tick(true);
-  tickerInterval = setInterval(() => tick(false), 5000);
-}
-
-window.addEventListener('goals-changed', () => {
-  tickerCycleIdx = 0;
-  tick(false);
-});
-
-// ── GOOGLE CALENDAR INTEGRATION ───────────────────────────────────────────────
+// =============================================================================
+// GOOGLE CALENDAR ENGINE — fetch/render/inline-edit, plus a window.AptCal API so
+// the assistant can read + mutate the schedule with the same code paths.
+// =============================================================================
 (function () {
   const PROXY = '';
   let currentEvents = [];
 
-  function todayStr() {
-    const d = new Date();
-    return d.getFullYear() + '-' +
-      String(d.getMonth() + 1).padStart(2, '0') + '-' +
-      String(d.getDate()).padStart(2, '0');
-  }
-
+  // ── formatting ──────────────────────────────────────────────────────────
   function fmtRange(startIso, endIso) {
     const s = new Date(startIso), e = new Date(endIso);
-    const sAmpm = s.getHours() >= 12 ? 'PM' : 'AM';
-    const eAmpm = e.getHours() >= 12 ? 'PM' : 'AM';
     function fmt(d, showAmpm) {
       let h = d.getHours() % 12 || 12;
       const m = d.getMinutes();
-      return h + (m ? ':' + String(m).padStart(2, '0') : '') + (showAmpm ? ' ' + (d.getHours() >= 12 ? 'PM' : 'AM') : '');
+      return h + (m ? ':' + padZ(m) : '') + (showAmpm ? ' ' + (d.getHours() >= 12 ? 'PM' : 'AM') : '');
     }
+    const sAmpm = s.getHours() >= 12 ? 'PM' : 'AM';
+    const eAmpm = e.getHours() >= 12 ? 'PM' : 'AM';
     return fmt(s, sAmpm !== eAmpm) + ' – ' + fmt(e, true);
   }
-
+  function fmtTime(iso) {
+    const d = new Date(iso);
+    let h = d.getHours() % 12 || 12;
+    const m = d.getMinutes();
+    return h + (m ? ':' + padZ(m) : '') + ' ' + (d.getHours() >= 12 ? 'PM' : 'AM');
+  }
   function fmtDateLabel() {
     const d = new Date();
-    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate();
   }
-
   function eventClass(ev) {
     if (ev.allDay) return '';
-    const now = new Date();
-    const start = new Date(ev.start);
-    const end   = new Date(ev.end);
-    if (end   < now) return 'is-past';
+    const now = new Date(), start = new Date(ev.start), end = new Date(ev.end);
+    if (end < now) return 'is-past';
     if (start <= now) return 'is-now';
     return '';
   }
+  function toLocalISO(dt) {
+    const p = n => String(n).padStart(2, '0');
+    const off = -dt.getTimezoneOffset();
+    const sign = off >= 0 ? '+' : '-';
+    const abs = Math.abs(off);
+    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate()) +
+      'T' + p(dt.getHours()) + ':' + p(dt.getMinutes()) + ':00' +
+      sign + p(Math.floor(abs / 60)) + ':' + p(abs % 60);
+  }
 
-  // ── Completion state (Google Calendar has no "done" flag, so we track it here) ─
-  // Both keys are namespaced 'cal_done:' / 'cal_manual:' and wired into
-  // initCloudSync (see index.html) so a tap on one device propagates to the
-  // others in real time via Supabase. Writing through localStorage.setItem is
-  // what triggers the shared sync helper to serialize + push the new state.
-  function doneKey()   { return 'cal_done:' + todayStr(); }
+  // ── completion state (Google Calendar has no "done" flag) ─────────────────
+  function doneKey() { return 'cal_done:' + todayStr(); }
   function manualKey() { return 'cal_manual:' + todayStr(); }
   function getDoneSet() {
-    try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); }
-    catch { return new Set(); }
+    try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); } catch (e) { return new Set(); }
   }
   function setDone(id, done) {
-    const s = getDoneSet();
-    if (done) s.add(id); else s.delete(id);
+    const s = getDoneSet(); if (done) s.add(id); else s.delete(id);
     localStorage.setItem(doneKey(), JSON.stringify([...s]));
   }
-  // Explicit user toggles, so the time-based auto-check never re-marks an event
-  // the user deliberately left (or set) a certain way. { eventId: true|false }.
   function getManualMap() {
-    try { return JSON.parse(localStorage.getItem(manualKey())) || {}; }
-    catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(manualKey())) || {}; } catch (e) { return {}; }
   }
   function setManual(id, done) {
-    const m = getManualMap();
-    m[id] = !!done;
+    const m = getManualMap(); m[id] = !!done;
     localStorage.setItem(manualKey(), JSON.stringify(m));
   }
-  // On boot / refresh, mark any timed event whose end time has already passed as
-  // completed by default — e.g. the 6:30–6:45 AM "levantarse" slot is checked
-  // automatically once that time is behind us — unless the user has explicitly
-  // overridden it. Idempotent: only writes (and thus syncs) when something flips.
   function autoCheckPastEvents(events) {
-    const now = new Date();
-    const manual = getManualMap();
-    const s = getDoneSet();
+    const now = new Date(), manual = getManualMap(), s = getDoneSet();
     let changed = false;
-    events.forEach((ev) => {
+    events.forEach(ev => {
       if (ev.allDay || !ev.end) return;
-      if (Object.prototype.hasOwnProperty.call(manual, ev.id)) return; // user decided
+      if (Object.prototype.hasOwnProperty.call(manual, ev.id)) return;
       if (new Date(ev.end) < now && !s.has(ev.id)) { s.add(ev.id); changed = true; }
     });
     if (changed) localStorage.setItem(doneKey(), JSON.stringify([...s]));
   }
-  // Re-sync checkbox / row state from storage after a remote sync applies. Reads
-  // getDoneSet() fresh from the just-merged localStorage and always refreshes the
-  // counter — even if a row update throws — so a check toggled on another device
-  // is reflected on this one without a manual refresh.
   function applyDoneStateToDOM() {
     try {
       const doneSet = getDoneSet();
-      document.querySelectorAll('#calEventList .cal-event-item').forEach((li) => {
+      document.querySelectorAll('#calEventList .cal-event-item').forEach(li => {
         const done = doneSet.has(li.dataset.id);
         const cb = li.querySelector('input[type="checkbox"]');
         if (cb) cb.checked = done;
@@ -643,131 +207,101 @@ window.addEventListener('goals-changed', () => {
     updateCount();
   }
 
-  // ── Status line helper ────────────────────────────────────────────────────────
+  // ── status helpers ────────────────────────────────────────────────────────
   function showCalStatus(msg, isError) {
     const el = document.getElementById('calStatus');
     el.textContent = msg;
     el.classList.toggle('is-error', !!isError);
     setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 4000);
   }
-
   function flashSaved(el) {
     if (!el) return;
     el.classList.add('cal-saved-flash');
     setTimeout(() => el.classList.remove('cal-saved-flash'), 600);
   }
 
-  // ── PATCH an event through the proxy, with optimistic local update ────────────
+  // ── PATCH through the proxy, optimistic ──────────────────────────────────
   async function patchEvent(ev, body, el) {
     if (el) el.classList.add('cal-saving');
     try {
       const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(body),
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      const updated = await res.json();
-      Object.assign(ev, updated);
+      Object.assign(ev, await res.json());
       flashSaved(el);
     } catch {
       showCalStatus('Update failed — is the proxy running?', true);
-      loadEvents(); // fall back to server truth
+      loadEvents();
     } finally {
       if (el) el.classList.remove('cal-saving');
     }
   }
 
-  // ── Inline text edit (title / notes) ──────────────────────────────────────────
+  // ── inline text edit (title / notes) ──────────────────────────────────────
   function restoreField(el, ev, field) {
     if (field === 'notes') el.textContent = ev.notes ? ev.notes.split('\n')[0] : '';
-    else                   el.textContent = ev.title;
+    else el.textContent = ev.title;
   }
-
   function makeFieldEdit(el, ev, field) {
     el.classList.add('cal-editable');
     el.addEventListener('click', () => {
       if (el.querySelector('input')) return;
       const current = (field === 'notes' ? ev.notes : ev.title) || '';
       const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'cal-edit-input';
-      input.value = current;
-      el.textContent = '';
-      el.appendChild(input);
-      input.focus();
-      input.select();
-
+      input.type = 'text'; input.className = 'cal-edit-input'; input.value = current;
+      el.textContent = ''; el.appendChild(input); input.focus(); input.select();
       let done = false;
       const commit = (save) => {
-        if (done) return;
-        done = true;
+        if (done) return; done = true;
         const val = input.value.trim();
         if (save && val !== current.trim()) {
-          ev[field] = val;
-          restoreField(el, ev, field);
+          ev[field] = val; restoreField(el, ev, field);
           patchEvent(ev, field === 'title' ? { title: val } : { notes: val }, el);
-        } else {
-          restoreField(el, ev, field);
-        }
+        } else { restoreField(el, ev, field); }
       };
       input.addEventListener('keydown', e => {
-        if (e.key === 'Enter')  { e.preventDefault(); commit(true); }
+        if (e.key === 'Enter') { e.preventDefault(); commit(true); }
         if (e.key === 'Escape') { e.preventDefault(); commit(false); }
       });
       input.addEventListener('blur', () => commit(true));
     });
   }
 
-  // ── Inline duration edit (start / end time inputs) ────────────────────────────
+  // ── inline duration edit ──────────────────────────────────────────────────
   function isoWithTime(originalIso, hhmm) {
     const [h, m] = hhmm.split(':').map(Number);
-    const d = new Date(originalIso);
-    d.setHours(h, m, 0, 0);
+    const d = new Date(originalIso); d.setHours(h, m, 0, 0);
     return toLocalISO(d);
   }
-
   function timeInput(d) {
     const i = document.createElement('input');
-    i.type  = 'time';
-    i.className = 'cal-edit-time';
+    i.type = 'time'; i.className = 'cal-edit-time';
     i.value = padZ(d.getHours()) + ':' + padZ(d.getMinutes());
     return i;
   }
-
   function microBtn(label, cls) {
     const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'cal-mini-btn ' + cls;
-    b.textContent = label;
+    b.type = 'button'; b.className = 'cal-mini-btn ' + cls; b.textContent = label;
     return b;
   }
-
   function makeDurationEdit(el, ev, li) {
     el.classList.add('cal-editable');
     el.addEventListener('click', () => {
       if (li.classList.contains('is-editing')) return;
       li.classList.add('is-editing');
-
       const startIn = timeInput(new Date(ev.start));
-      const endIn   = timeInput(new Date(ev.end));
+      const endIn = timeInput(new Date(ev.end));
       const wrap = document.createElement('span');
       wrap.className = 'cal-dur-edit';
       wrap.append(startIn, document.createTextNode('–'), endIn);
-      el.textContent = '';
-      el.appendChild(wrap);
-
-      // Action buttons live at the far right of the row (not the time column),
-      // so the layout stays balanced and text columns don't shift.
-      const ok      = microBtn('✓', 'cal-mini-save');
-      const cancel  = microBtn('×', 'cal-mini-cancel');
+      el.textContent = ''; el.appendChild(wrap);
+      const ok = microBtn('✓', 'cal-mini-save');
+      const cancel = microBtn('×', 'cal-mini-cancel');
       const actions = document.createElement('span');
       actions.className = 'cal-row-actions';
-      actions.append(ok, cancel);
-      li.appendChild(actions);
-
+      actions.append(ok, cancel); li.appendChild(actions);
       startIn.focus();
-
       const cleanup = () => {
         li.classList.remove('is-editing');
         if (actions.parentNode) actions.parentNode.removeChild(actions);
@@ -775,77 +309,55 @@ window.addEventListener('goals-changed', () => {
       const close = () => { cleanup(); el.textContent = fmtRange(ev.start, ev.end); };
       ok.addEventListener('click', e => {
         e.stopPropagation();
-        const newStart = isoWithTime(ev.start, startIn.value);
-        const newEnd   = isoWithTime(ev.end,   endIn.value);
-        ev.start = newStart; ev.end = newEnd;
-        // Re-sort + re-render instantly so the row jumps to its new slot.
-        cleanup();
-        sortEvents();
-        renderEvents(currentEvents);
-        patchEvent(ev, { startTime: newStart, endTime: newEnd }, null);
+        ev.start = isoWithTime(ev.start, startIn.value);
+        ev.end = isoWithTime(ev.end, endIn.value);
+        cleanup(); sortEvents(); renderEvents(currentEvents);
+        patchEvent(ev, { startTime: ev.start, endTime: ev.end }, null);
       });
       cancel.addEventListener('click', e => { e.stopPropagation(); close(); });
       wrap.addEventListener('keydown', e => {
-        if (e.key === 'Enter')  { e.preventDefault(); ok.click(); }
+        if (e.key === 'Enter') { e.preventDefault(); ok.click(); }
         if (e.key === 'Escape') { e.preventDefault(); close(); }
       });
     });
   }
 
-  // ── Build one interactive event row (4 columns) ───────────────────────────────
+  // ── build one interactive event row ───────────────────────────────────────
   function buildEventRow(ev) {
     const isDone = getDoneSet().has(ev.id);
     const li = document.createElement('li');
     li.className = 'cal-event-item ' + eventClass(ev) + (isDone ? ' is-done' : '');
     li.dataset.id = ev.id;
 
-    // Column 1 — Duration
     const dur = document.createElement('div');
     dur.className = 'cal-event-time';
     dur.textContent = ev.allDay ? 'all day' : fmtRange(ev.start, ev.end);
     if (!ev.allDay) makeDurationEdit(dur, ev, li);
     li.appendChild(dur);
 
-    // Column 2 — Event name
     const title = document.createElement('div');
-    title.className = 'cal-event-title';
-    title.textContent = ev.title;
-    makeFieldEdit(title, ev, 'title');
-    li.appendChild(title);
+    title.className = 'cal-event-title'; title.textContent = ev.title;
+    makeFieldEdit(title, ev, 'title'); li.appendChild(title);
 
-    // Column 3 — Description
     const notes = document.createElement('div');
     notes.className = 'cal-event-notes';
     notes.dataset.placeholder = 'Add note…';
     notes.textContent = ev.notes ? ev.notes.split('\n')[0] : '';
-    makeFieldEdit(notes, ev, 'notes');
-    li.appendChild(notes);
+    makeFieldEdit(notes, ev, 'notes'); li.appendChild(notes);
 
-    // Column 4 — Completion check
     const cbWrap = document.createElement('label');
-    cbWrap.className = 'cal-event-check';
-    cbWrap.title = 'Mark complete';
+    cbWrap.className = 'cal-event-check'; cbWrap.title = 'Mark complete';
     const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = isDone;
+    cb.type = 'checkbox'; cb.checked = isDone;
     const cbCustom = document.createElement('span');
     cbCustom.className = 'cal-check-custom';
     cb.addEventListener('change', () => {
-      setManual(ev.id, cb.checked); // record explicit choice so auto-check defers to it
-      setDone(ev.id, cb.checked);
+      setManual(ev.id, cb.checked); setDone(ev.id, cb.checked);
       li.classList.toggle('is-done', cb.checked);
       updateCount();
-      // Force an immediate upstream push (bypass the debounce) so a tap on mobile
-      // reaches Supabase before the tab is suspended/refreshed — otherwise the
-      // change can be lost and never propagate to other devices.
-      if (typeof window.cloudSyncFlush === 'function') {
-        try { window.cloudSyncFlush(); } catch (e) {}
-      }
+      if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
     });
-    cbWrap.appendChild(cb);
-    cbWrap.appendChild(cbCustom);
-    li.appendChild(cbWrap);
-
+    cbWrap.appendChild(cb); cbWrap.appendChild(cbCustom); li.appendChild(cbWrap);
     return li;
   }
 
@@ -855,106 +367,85 @@ window.addEventListener('goals-changed', () => {
     if (!total) { count.textContent = 'Nothing scheduled'; return; }
     const doneSet = getDoneSet();
     const doneCount = currentEvents.filter(ev => doneSet.has(ev.id)).length;
-    count.textContent = doneCount + '/' + total + ' Events Completed';
+    count.textContent = doneCount + '/' + total + ' done';
   }
-
-  function sortEvents() {
-    currentEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
-  }
+  function sortEvents() { currentEvents.sort((a, b) => new Date(a.start) - new Date(b.start)); }
 
   function renderEvents(events) {
     currentEvents = events;
-    autoCheckPastEvents(events); // default-complete elapsed events before building rows
+    autoCheckPastEvents(events);
     const list = document.getElementById('calEventList');
     list.innerHTML = '';
     if (!events.length) {
-      list.innerHTML = '<li class="cal-empty">No events today</li>';
+      list.innerHTML = '<li class="cal-empty">No blocks scheduled today</li>';
       updateCount();
-      return;
+    } else {
+      events.forEach(ev => list.appendChild(buildEventRow(ev)));
+      updateCount();
     }
-    events.forEach(ev => list.appendChild(buildEventRow(ev)));
-    updateCount();
+    window.dispatchEvent(new CustomEvent('apt:calendar-loaded'));
   }
 
   async function loadEvents() {
-    const offlineEl  = document.getElementById('calOfflineMsg');
-    const countEl    = document.getElementById('calEventCount');
+    const offlineEl = document.getElementById('calOfflineMsg');
+    const countEl = document.getElementById('calEventCount');
     const refreshBtn = document.getElementById('calRefreshBtn');
     refreshBtn.classList.add('spinning');
     setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
     try {
       const res = await fetch(PROXY + '/api/events?date=' + todayStr(), { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
-        // Distinguish an expired/revoked Google OAuth token (the proxy answers
-        // HTTP 500 {"error":"invalid_grant"}) from a plain unreachable proxy, so
-        // the banner can tell the user to re-authenticate instead of chasing a
-        // dead server. Body is read defensively — a non-JSON error just falls
-        // through to the generic offline path.
         let authExpired = false;
         try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
         throw Object.assign(new Error('HTTP ' + res.status), { authExpired });
       }
-      const events = await res.json();
       offlineEl.style.display = 'none';
-      renderEvents(events);
+      renderEvents(await res.json());
     } catch (err) {
       offlineEl.style.display = 'block';
       if (err && err.authExpired) {
-        offlineEl.innerHTML = '⚠ Sesión de Google expirada — <strong>Reautenticar</strong>';
-        countEl.textContent = 'sesión expirada';
+        offlineEl.innerHTML = '⚠ Google session expired — <strong>re-authenticate</strong>';
+        countEl.textContent = 'session expired';
       } else {
         offlineEl.innerHTML = '⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.';
         countEl.textContent = 'proxy offline';
       }
       document.getElementById('calEventList').innerHTML = '';
+      currentEvents = [];
+      window.dispatchEvent(new CustomEvent('apt:calendar-loaded'));
     }
   }
 
-  function toLocalISO(dt) {
-    const p = n => String(n).padStart(2, '0');
-    const off = -dt.getTimezoneOffset();
-    const sign = off >= 0 ? '+' : '-';
-    const abs  = Math.abs(off);
-    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate()) +
-      'T' + p(dt.getHours()) + ':' + p(dt.getMinutes()) + ':00' +
-      sign + p(Math.floor(abs / 60)) + ':' + p(abs % 60);
+  // ── create (used by the form AND the assistant) ───────────────────────────
+  async function createEvent({ title, notes, startDt, endDt }) {
+    const res = await fetch(PROXY + '/api/events', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title, notes: notes || undefined, date: todayStr(),
+        startTime: toLocalISO(startDt), endTime: toLocalISO(endDt),
+      }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
   }
 
-  async function addEvent() {
-    const titleEl  = document.getElementById('calTaskInput');
-    const descEl   = document.getElementById('calDescInput');
-    const timeEl   = document.getElementById('calTimeInput');
+  async function addEventFromForm() {
+    const titleEl = document.getElementById('calTaskInput');
+    const descEl = document.getElementById('calDescInput');
+    const timeEl = document.getElementById('calTimeInput');
     const statusEl = document.getElementById('calStatus');
-    const addBtn   = document.getElementById('calAddBtn');
-    const title    = titleEl.value.trim();
+    const addBtn = document.getElementById('calAddBtn');
+    const title = titleEl.value.trim();
     if (!title) { titleEl.focus(); return; }
-
-    const durEl   = document.getElementById('calDurInput');
-    const dur     = Math.max(1, parseInt(durEl.value) || 15);
-    const [h, m]  = timeEl.value.split(':').map(Number);
-    const startDt = new Date();
-    startDt.setHours(h, m, 0, 0);
-    const endDt = new Date(startDt.getTime() + dur * 60 * 1000);
-
+    const dur = Math.max(1, parseInt(document.getElementById('calDurInput').value) || 15);
+    const [h, m] = timeEl.value.split(':').map(Number);
+    const startDt = new Date(); startDt.setHours(h, m, 0, 0);
+    const endDt = new Date(startDt.getTime() + dur * 60000);
     addBtn.disabled = true;
-    statusEl.textContent = 'Scheduling…';
-    statusEl.classList.remove('is-error');
-
+    statusEl.textContent = 'Scheduling…'; statusEl.classList.remove('is-error');
     try {
-      const res = await fetch(PROXY + '/api/events', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          notes:     descEl.value.trim() || undefined,
-          date:      todayStr(),
-          startTime: toLocalISO(startDt),
-          endTime:   toLocalISO(endDt),
-        }),
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      titleEl.value = '';
-      descEl.value  = '';
+      await createEvent({ title, notes: descEl.value.trim(), startDt, endDt });
+      titleEl.value = ''; descEl.value = '';
       statusEl.textContent = '✓ Added to Google Calendar';
       setTimeout(() => { statusEl.textContent = ''; }, 3000);
       loadEvents();
@@ -966,43 +457,370 @@ window.addEventListener('goals-changed', () => {
     addBtn.disabled = false;
   }
 
-  // A check toggled on another device arrives via initCloudSync → onApplied,
-  // which dispatches 'calendar-synced' (and a generic 'storage' event); reflect
-  // the new state in the DOM live, no manual refresh needed.
+  // ── assistant-facing helpers ──────────────────────────────────────────────
+  // Pick the event that best matches a keyword: prefer an upcoming/active one
+  // over an already-finished slot so "move my workout" hits the right block.
+  function findEvent(match) {
+    const q = String(match || '').toLowerCase().trim();
+    if (!q) return null;
+    const hits = currentEvents.filter(ev => ev.title.toLowerCase().includes(q));
+    if (!hits.length) return null;
+    const now = new Date();
+    return hits.find(ev => new Date(ev.end) >= now) || hits[0];
+  }
+  async function apiAddEvent(title, hm, durationMin, notes) {
+    const startDt = new Date(); startDt.setHours(hm.h, hm.m, 0, 0);
+    const endDt = new Date(startDt.getTime() + (durationMin || 30) * 60000);
+    const made = await createEvent({ title, notes, startDt, endDt });
+    await loadEvents();
+    return { title, when: fmtTime(made.start || startDt.toISOString()) };
+  }
+  async function apiMoveEvent(match, hm) {
+    const ev = findEvent(match);
+    if (!ev) return { ok: false };
+    const durMs = new Date(ev.end) - new Date(ev.start);
+    const start = new Date(ev.start); start.setHours(hm.h, hm.m, 0, 0);
+    const end = new Date(start.getTime() + durMs);
+    ev.start = toLocalISO(start); ev.end = toLocalISO(end);
+    sortEvents(); renderEvents(currentEvents);
+    await patchEvent(ev, { startTime: ev.start, endTime: ev.end }, null);
+    return { ok: true, title: ev.title, when: fmtTime(ev.start) };
+  }
+  function apiCompleteEvent(match) {
+    const ev = findEvent(match);
+    if (!ev) return { ok: false };
+    setManual(ev.id, true); setDone(ev.id, true);
+    applyDoneStateToDOM();
+    if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
+    return { ok: true, title: ev.title };
+  }
+  async function apiDeleteEvent(match) {
+    const ev = findEvent(match);
+    if (!ev) return { ok: false };
+    try {
+      const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await loadEvents();
+      return { ok: true, title: ev.title };
+    } catch { return { ok: false, error: true }; }
+  }
+  function summarize() {
+    if (!currentEvents.length) {
+      const offline = document.getElementById('calOfflineMsg');
+      if (offline && offline.style.display !== 'none') {
+        return "I can't see your calendar right now — the proxy looks offline. Once it's up I'll read your blocks.";
+      }
+      return 'Nothing on the calendar today — a clean slate. Want me to add something?';
+    }
+    const now = new Date();
+    const upcoming = currentEvents.filter(ev => ev.allDay || new Date(ev.end) >= now);
+    const lines = (upcoming.length ? upcoming : currentEvents)
+      .map(ev => '• ' + ev.title + (ev.allDay ? ' (all day)' : ' at ' + fmtTime(ev.start)));
+    const n = currentEvents.length;
+    const head = (window.__aiosGreeting ? window.__aiosGreeting() : 'Hi') +
+      '! You have ' + n + ' block' + (n === 1 ? '' : 's') + ' scheduled today:';
+    return head + '\n' + lines.join('\n');
+  }
+
+  // ── wire up ───────────────────────────────────────────────────────────────
   window.addEventListener('calendar-synced', applyDoneStateToDOM);
   window.addEventListener('storage', applyDoneStateToDOM);
-
   document.getElementById('calDateLabel').textContent = fmtDateLabel();
   document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);
-  document.getElementById('calAddBtn').addEventListener('click', addEvent);
-  document.getElementById('calTaskInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') addEvent();
-  });
+  document.getElementById('calAddBtn').addEventListener('click', addEventFromForm);
+  document.getElementById('calTaskInput').addEventListener('keydown', e => { if (e.key === 'Enter') addEventFromForm(); });
   loadEvents();
   setInterval(loadEvents, 5 * 60 * 1000);
+
+  // Public API the assistant drives.
+  window.AptCal = {
+    reload: loadEvents,
+    getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
+    isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
+    summarize, addEvent: apiAddEvent, moveEvent: apiMoveEvent,
+    completeEvent: apiCompleteEvent, deleteEvent: apiDeleteEvent,
+    fmtTime,
+  };
 })();
 
-// ── INIT ──────────────────────────────────────────────────────────────────────
-runRollover();
-runStreakCheck();
+// =============================================================================
+// AI ASSISTANT — hybrid. Local synchronous parser first (instant, offline),
+// Gemini proxy fallback for free-form. Applies intents to AptCal + bridges.
+// =============================================================================
+(function () {
+  const GEMINI_ENDPOINT = '/api/gemini/assistant';
+  const log = document.getElementById('aiLog');
+  const form = document.getElementById('aiForm');
+  const input = document.getElementById('aiInput');
+  const chipsWrap = document.getElementById('aiChips');
+  if (!log || !form) return;
 
-makeAddHandlers(
-  document.getElementById('goalInput'),
-  document.getElementById('goalAddBtn'),
-  'goals:' + getActiveDateString(),
-  loadToday
-);
+  // ── message UI ─────────────────────────────────────────────────────────────
+  function scroll() { log.scrollTop = log.scrollHeight; }
+  function addMsg(role, text) {
+    const div = document.createElement('div');
+    div.className = 'aios-msg aios-msg-' + role;
+    div.textContent = text;
+    log.appendChild(div); scroll();
+    return div;
+  }
+  function addThinking() {
+    const div = document.createElement('div');
+    div.className = 'aios-msg aios-msg-ai aios-msg-think';
+    div.innerHTML = '<span class="aios-typing"><span></span><span></span><span></span></span>';
+    log.appendChild(div); scroll();
+    return div;
+  }
 
-makeAddHandlers(
-  document.getElementById('tomorrowInput'),
-  document.getElementById('tomorrowAddBtn'),
-  'goals:' + getTomorrowDateString(),
-  loadTomorrow
-);
+  // ── time parsing ─────────────────────────────────────────────────────────────
+  // Accepts "4pm", "4:30 pm", "16:00", "noon", "midnight". Returns {h,m} | null.
+  function parseTime(text) {
+    const t = text.toLowerCase();
+    if (/\bnoon\b/.test(t)) return { h: 12, m: 0 };
+    if (/\bmidnight\b/.test(t)) return { h: 0, m: 0 };
+    let m = t.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
+    if (m) {
+      let h = +m[1] % 12; if (m[3] === 'pm') h += 12;
+      return { h, m: m[2] ? +m[2] : 0 };
+    }
+    m = t.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (m) return { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]) };
+    return null;
+  }
+  function fmtHm(hm) {
+    let h = hm.h % 12 || 12;
+    return h + (hm.m ? ':' + padZ(hm.m) : '') + ' ' + (hm.h >= 12 ? 'PM' : 'AM');
+  }
+  function cleanTitle(s) {
+    return s.replace(/\s+/g, ' ').trim().replace(/^(to|a|an|the|my|me|that|some)\s+/i, '').trim()
+      .replace(/^./, c => c.toUpperCase());
+  }
 
-loadToday();
-loadTomorrow();
-renderStreak();
-updateDayRing();
-setInterval(updateDayRing, 60 * 1000);
-startTicker();
+  // ── local intent parser ─────────────────────────────────────────────────────
+  // Order matters: more specific bridges (water/food/notes) before the generic
+  // calendar verbs so "log water" never reads as "complete an event".
+  function parseLocal(raw) {
+    const t = raw.toLowerCase().trim();
+
+    // summarize / greeting
+    if (/^(summari[sz]e|recap|overview|brief)\b/.test(t) ||
+        /\b(what('?s| is)?|show|how('?s| is)?).*(today|schedule|day|plan|on|calendar|left)\b/.test(t) ||
+        /^(good\s+(morning|afternoon|evening)|hi|hey|hello)\b/.test(t)) {
+      return { action: 'summarize' };
+    }
+    // water
+    if (/\b(water|hydrat)/.test(t) || /\b(drank|drink|had)\b.*\b(glass|bottle|cup)\b/.test(t) ||
+        /^log\s+(a\s+|one\s+)?(glass|bottle|cup)\b/.test(t)) {
+      const n = (t.match(/\b(\d+)\b/) || [])[1];
+      const unit = /bottle/.test(t) ? 'bottle' : /glass|cup/.test(t) ? 'glass' : null;
+      return { action: 'log_water', servings: n ? +n : 1, unit };
+    }
+    // food
+    if (/\b(ate|eaten|eating)\b/.test(t) || (/\bfood|meal|kcal|calorie/.test(t) && /\b(log|add|track|had)\b/.test(t))) {
+      const cal = (t.match(/(\d+)\s*(kcal|cal|calorie)/) || [])[1];
+      let name = raw.replace(/\b(log|add|track)\b/gi, '').replace(/\b(that\s+)?i\s+(just\s+)?(ate|had|eaten)\b/gi, '')
+        .replace(/[~]?\d+\s*(kcal|cal|calories?)/gi, '').replace(/\bfor\b\s*$/i, '').trim();
+      return { action: 'log_food', name: cleanTitle(name) || 'Meal', calories: cal ? +cal : null };
+    }
+    // explicit note
+    if (/^note[:\-]/i.test(raw) || /\b(jot|remember to|note that|add a note)\b/.test(t)) {
+      let text = raw.replace(/^note[:\-]\s*/i, '').replace(/\b(jot down|jot|note that|add a note( to)?|remember to)\b/gi, '').trim();
+      return { action: 'note', text: text || raw };
+    }
+    // move / reschedule
+    if (/\b(move|reschedule|resched|shift|push|change)\b/.test(t)) {
+      const time = parseTime(t);
+      let match = t.replace(/\b(move|reschedule|resched|shift|push|change)\b/, '');
+      match = match.split(/\bto\b|\bat\b/)[0];
+      match = match.replace(/\b(my|the|a|an)\b/g, '').trim();
+      return { action: 'move_event', match, time };
+    }
+    // delete / cancel
+    if (/\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
+      let match = t.replace(/\b(delete|remove|cancel|clear|drop)\b/, '').replace(/\b(my|the|a|an|event|block)\b/g, '').trim();
+      return { action: 'delete_event', match };
+    }
+    // complete / log done
+    if (/\b(finish(ed)?|complete[d]?|done|mark.*(done|complete)|check off)\b/.test(t) ||
+        /^log\s+(that\s+)?i\b/.test(t)) {
+      let match = raw.replace(/\b(log|mark|check off|that|i|just|finished?|completed?|did|done|my|the)\b/gi, '').trim();
+      return { action: 'complete_event', match: match || t };
+    }
+    // add / schedule / remind (broad — last)
+    if (/\b(add|schedule|create|new|remind(er)?|set up|book|block)\b/.test(t)) {
+      const time = parseTime(t);
+      const durM = (t.match(/(\d+)\s*(min|minute|hour|hr)/) || []);
+      let durationMin = null;
+      if (durM[1]) durationMin = /hour|hr/.test(durM[2]) ? +durM[1] * 60 : +durM[1];
+      let title = raw
+        .replace(/\b(add|schedule|create|new|set up|book|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '')
+        .replace(/\bat\b\s*[\d:apm\s]+/i, '')
+        .replace(/\bfor\b\s*\d+\s*(min|minute|hour|hr)s?/i, '')
+        .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
+        .trim();
+      return { action: 'add_event', title: cleanTitle(title), time, durationMin };
+    }
+    return null; // unknown → Gemini fallback
+  }
+
+  // ── water bridge — reuse the topbar's tested add pipeline (handles ml + sync) ─
+  function logWater(servings) {
+    const btn = document.getElementById('topbarWaterAdd');
+    if (!btn) return false;
+    for (let i = 0; i < Math.max(1, servings || 1); i++) btn.click();
+    return true;
+  }
+  // ── food bridge — append to po_food_v1 (6AM-anchored day key, as health.js) ──
+  function logFood(name, calories) {
+    const KEY = 'po_food_v1';
+    function dayKey() {
+      const n = new Date(); if (n.getHours() < 6) n.setDate(n.getDate() - 1);
+      return n.getFullYear() + '-' + padZ(n.getMonth() + 1) + '-' + padZ(n.getDate());
+    }
+    let all = {}; try { all = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) {}
+    const k = dayKey();
+    (all[k] = all[k] || []).push({
+      id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      ts: Date.now(), meal_name: name, calories: calories || 0,
+      protein: 0, carbs: 0, fats: 0, source: 'assistant',
+    });
+    try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {}
+    if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
+    return true;
+  }
+
+  // ── apply a structured intent (from local parser OR Gemini) ──────────────────
+  async function applyIntent(intent) {
+    const A = window.AptCal;
+    const time = intent.time
+      ? (typeof intent.time === 'string' ? parseTime(intent.time) || (function () {
+          const m = intent.time.match(/(\d{1,2}):(\d{2})/); return m ? { h: +m[1], m: +m[2] } : null;
+        })() : intent.time)
+      : null;
+
+    switch (intent.action) {
+      case 'summarize':
+        addMsg('ai', A.summarize());
+        return;
+
+      case 'add_event': {
+        if (!intent.title) { addMsg('ai', 'What should I call that block?'); return; }
+        if (!time) { addMsg('ai', 'When should I schedule “' + intent.title + '”? Try “at 4pm”.'); return; }
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
+        try {
+          const r = await A.addEvent(intent.title, time, intent.durationMin, intent.notes);
+          addMsg('ai', '✓ Scheduled “' + r.title + '” at ' + r.when + '.');
+        } catch { addMsg('ai', 'Adding that failed — is the proxy running?'); }
+        return;
+      }
+      case 'move_event': {
+        if (!time) { addMsg('ai', 'Move it to when? Try “move workout to 4pm”.'); return; }
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to move that."); return; }
+        const r = await A.moveEvent(intent.match, time);
+        addMsg('ai', r.ok ? '✓ Moved “' + r.title + '” → ' + r.when + '.'
+          : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        return;
+      }
+      case 'complete_event': {
+        const r = A.completeEvent(intent.match);
+        addMsg('ai', r.ok ? '✓ Marked “' + r.title + '” complete. Nice.'
+          : (A.isOffline() ? "I can't see your events (proxy offline) to check that off."
+            : "I couldn't find an event matching “" + (intent.match || '') + '”.'));
+        return;
+      }
+      case 'delete_event': {
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to delete that."); return; }
+        const r = await A.deleteEvent(intent.match);
+        addMsg('ai', r.ok ? '✓ Deleted “' + r.title + '”.'
+          : r.error ? 'Deleting that failed — is the proxy running?'
+            : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        return;
+      }
+      case 'log_water': {
+        const n = intent.servings || 1;
+        const ok = logWater(n);
+        addMsg('ai', ok ? '✓ Logged ' + n + ' ' + (n === 1 ? 'serving' : 'servings') + ' of water. 💧'
+          : "I couldn't reach the water tracker from here.");
+        return;
+      }
+      case 'log_food': {
+        logFood(intent.name || 'Meal', intent.calories);
+        addMsg('ai', '✓ Logged “' + (intent.name || 'Meal') + '”'
+          + (intent.calories ? ' · ' + intent.calories + ' kcal' : '') + ' to your nutrition log.');
+        return;
+      }
+      case 'note': {
+        window.QuickNotes.add(intent.text);
+        addMsg('ai', '✓ Noted: “' + intent.text + '”.');
+        return;
+      }
+      case 'chat':
+      default:
+        addMsg('ai', intent.reply || "I'm not sure how to act on that yet.");
+        return;
+    }
+  }
+
+  // ── Gemini fallback ──────────────────────────────────────────────────────────
+  async function askGemini(message) {
+    const res = await fetch(GEMINI_ENDPOINT, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, context: { date: todayStr(), events: window.AptCal.getEvents() } }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
+
+  // ── submit flow ──────────────────────────────────────────────────────────────
+  let busy = false;
+  async function handle(text) {
+    const msg = text.trim();
+    if (!msg || busy) return;
+    busy = true;
+    addMsg('user', msg);
+    const local = parseLocal(msg);
+    if (local) {
+      try { await applyIntent(local); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
+      busy = false; return;
+    }
+    // free-form → Gemini (only reachable on the deployed proxy)
+    const thinking = addThinking();
+    try {
+      const intent = await askGemini(msg);
+      thinking.remove();
+      if (intent && intent.reply && (!intent.action || intent.action === 'chat')) addMsg('ai', intent.reply);
+      else await applyIntent(intent);
+    } catch (e) {
+      thinking.remove();
+      addMsg('ai', "I couldn't parse that locally, and the Gemini service isn't reachable here "
+        + '(it runs on the deployed proxy). Try a direct command — e.g. “add gym at 5pm”, '
+        + '“move workout to 4pm”, “log water”, or “what’s on today?”.');
+    }
+    busy = false;
+  }
+
+  // ── quick chips ──────────────────────────────────────────────────────────────
+  const CHIPS = ["What's on today?", 'Log water', 'Add lunch at 1pm', 'Move workout to 4pm'];
+  if (chipsWrap) {
+    CHIPS.forEach(c => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'aios-chip'; b.textContent = c;
+      b.addEventListener('click', () => { handle(c); });
+      chipsWrap.appendChild(b);
+    });
+  }
+
+  form.addEventListener('submit', e => { e.preventDefault(); const v = input.value; input.value = ''; handle(v); });
+
+  // ── opening greeting — once the first calendar load resolves ─────────────────
+  let greeted = false;
+  function greet() {
+    if (greeted) return; greeted = true;
+    addMsg('ai', window.AptCal.summarize());
+    addMsg('ai', 'Tell me what to change — e.g. “move my workout to 4pm”, “add a reminder to drink water at 6pm”, or “log that I finished my plank”.');
+  }
+  window.addEventListener('apt:calendar-loaded', greet, { once: true });
+  // Safety net if the calendar event never fires (e.g. very slow proxy timeout).
+  setTimeout(greet, 6000);
+})();
