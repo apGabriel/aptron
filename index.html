@@ -29,140 +29,97 @@
   </a>
 </header>
 
-<!-- Page content lives in <main> (padded + centered) so the topbar above stays
-     a flush, full-bleed body child — identical to the Health/Fitness screens. -->
+<!-- Calendar-first AI dashboard. The schedule is the core; the assistant (local
+     intent parser + Gemini proxy fallback) reads and mutates it. Padded <main>
+     keeps the topbar above flush/full-bleed, as on Health/Fitness. -->
 <main class="dash-main">
 
-<!-- COMPONENT 1 — PAGE TITLE -->
-<h1 class="dash-title">My personal Dashboard</h1>
-
-<!-- COMPONENT 2 — GOAL TICKER -->
-<div class="ticker-row">
-  <div class="goal-ticker" id="goalTicker" aria-live="polite" aria-atomic="true">
-    <div class="goal-ticker-led"><span class="goal-ticker-led-dot"></span></div>
-    <div class="goal-ticker-label">GOALS</div>
-    <div class="goal-ticker-stage" id="goalTickerStage">
-      <div class="goal-ticker-row">
-        <span class="goal-ticker-status" data-status="">—</span>
-        <span class="goal-ticker-text">Loading…</span>
-      </div>
+  <!-- HEADER — greeting + slim ambient day-progress -->
+  <header class="aios-head">
+    <div class="aios-greeting">
+      <h1 class="aios-hello" id="aiosHello">Hello</h1>
+      <div class="aios-date" id="aiosDate">—</div>
     </div>
-    <div class="goal-ticker-meta" id="goalTickerMeta">0/0</div>
-  </div>
-</div>
-
-<!-- COMPONENT 3 — DAY RING -->
-<div class="card day-ring-wrap">
-  <div class="ring-container">
-    <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <filter id="ringGlow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-      <!-- Track -->
-      <circle id="ringTrack" cx="60" cy="60" r="52"
-        stroke="rgba(255,255,255,0.06)" stroke-width="8" fill="none"/>
-      <!-- Fill -->
-      <circle id="ringFill" cx="60" cy="60" r="52"
-        fill="none" stroke-width="8" stroke-linecap="round"
-        stroke="#FFD89E"
-        transform="rotate(-90 60 60)"
-        filter="url(#ringGlow)"
-        style="transition: stroke-dashoffset 0.7s cubic-bezier(0.22,1,0.36,1), stroke 0.7s cubic-bezier(0.22,1,0.36,1);"/>
-    </svg>
-    <div class="ring-overlay">
-      <div class="ring-percent" id="ringPercent">—</div>
-      <div class="ring-phase" id="ringPhase">LOADING</div>
-      <div class="ring-clock" id="ringClock">--:-- --</div>
+    <div class="aios-dayprog" title="Awake-day progress">
+      <div class="aios-dayprog-track"><div class="aios-dayprog-fill" id="aiosDayFill"></div></div>
+      <div class="aios-dayprog-label" id="aiosDayLabel">—</div>
     </div>
-  </div>
-  <div class="ring-info">
-    <div class="ring-status" id="ringStatus">Loading…</div>
-    <div class="ring-remaining" id="ringRemaining"></div>
-    <div class="ring-range">6:30 AM – 12:00 AM</div>
-  </div>
-</div>
+  </header>
 
-<!-- COMPONENT 4 — TO DO LIST -->
-<div class="section">
-  <div class="section-title">To Do List</div>
+  <div class="aios-grid">
 
-  <!-- TODAY card -->
-  <div class="gm-card" id="todayCard">
-    <div class="gm-header-row">
-      <div class="gm-header-left">
-        <div class="gm-eyebrow" id="todayLabel">Today</div>
-        <div class="gm-progress-row">
-          <span class="gm-progress-num" id="gmProgressNum">0</span>
-          <span class="gm-progress-total" id="gmProgressTotal">/ 0</span>
-          <span class="gm-progress-label" id="gmProgressLabel">no goals yet</span>
+    <!-- CALENDAR CORE -->
+    <section class="card aios-cal" aria-label="Today's schedule">
+      <div class="aios-cal-head">
+        <div>
+          <div class="aios-eyebrow">Schedule</div>
+          <div class="aios-cal-date" id="calDateLabel">Today</div>
+        </div>
+        <div class="aios-cal-meta">
+          <span class="cal-count-label" id="calEventCount">Loading…</span>
+          <button class="cal-refresh-btn" id="calRefreshBtn" title="Refresh" aria-label="Refresh calendar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          </button>
         </div>
       </div>
-      <div class="gm-streak" id="gmStreak">
-        <span class="gm-streak-icon">⚡</span>
-        <span class="gm-streak-num" id="gmStreakNum">0</span>
-        <span class="gm-streak-label">day streak</span>
+      <div id="calOfflineMsg" class="cal-offline" style="display:none">
+        ⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.
       </div>
-    </div>
-    <div class="gm-bar" id="gmBar"></div>
-    <div id="emptyState" class="empty-state">No goals for today yet — add one below.</div>
-    <ul id="goalList" class="gm-list"></ul>
-    <button class="gm-push-btn" id="gmPushBtn">Push remaining to tomorrow →</button>
-    <div class="gm-input-wrap">
-      <input class="gm-input" id="goalInput" type="text" placeholder="Add a goal for today…" autocomplete="off"/>
-      <button class="gm-add-btn" id="goalAddBtn">+ Add</button>
-    </div>
-  </div>
-
-  <!-- TODAY'S SCHEDULE card -->
-  <div class="gm-card" id="calCard">
-    <div class="gm-header-row">
-      <div class="gm-header-left">
-        <div class="gm-eyebrow" id="calDateLabel">Today</div>
-        <div class="gm-progress-row">
-          <span class="gm-progress-label cal-count-label" id="calEventCount">Loading…</span>
+      <ul id="calEventList" class="cal-event-list"></ul>
+      <div class="gm-input-wrap cal-add-wrap">
+        <div class="cal-fields-row">
+          <input class="gm-input cal-title-input" id="calTaskInput" type="text" placeholder="Schedule a block…" autocomplete="off"/>
+          <input class="cal-desc-input" id="calDescInput" type="text" placeholder="Description (optional)…" autocomplete="off"/>
+        </div>
+        <div class="cal-controls-wrapper">
+          <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
+          <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
+          <span class="cal-dur-label">min</span>
+          <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
         </div>
       </div>
-      <button class="cal-refresh-btn" id="calRefreshBtn" title="Refresh" aria-label="Refresh calendar">↻</button>
-    </div>
-    <div id="calOfflineMsg" class="cal-offline" style="display:none">
-      ⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.
-    </div>
-    <ul id="calEventList" class="cal-event-list"></ul>
-    <div class="gm-input-wrap cal-add-wrap">
-      <div class="cal-fields-row">
-        <input class="gm-input cal-title-input" id="calTaskInput" type="text" placeholder="Schedule a task…" autocomplete="off"/>
-        <input class="cal-desc-input" id="calDescInput" type="text" placeholder="Description (optional)…" autocomplete="off"/>
+      <div class="gm-status-line" id="calStatus"></div>
+    </section>
+
+    <!-- AI COMMAND ASSISTANT -->
+    <section class="card aios-chat" aria-label="AI assistant">
+      <div class="aios-chat-head">
+        <span class="aios-chat-orb" id="aiOrb" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0l1.58 6.13A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>
+        </span>
+        <div>
+          <div class="aios-chat-title">Shenlong</div>
+          <div class="aios-chat-sub" id="aiSub">State your wishes. I shall grant them.</div>
+        </div>
       </div>
-      <div class="cal-controls-wrapper">
-        <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
-        <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
-        <span class="cal-dur-label">min</span>
-        <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
+      <!-- The 7 Dragon Balls — pulse in a wave while Shenlong is summoning. -->
+      <div class="shenlong-balls" id="shenlongBalls" aria-hidden="true">
+        <i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i>
       </div>
-    </div>
-    <div class="gm-status-line" id="calStatus"></div>
+      <div class="aios-chat-log" id="aiLog" aria-live="polite"></div>
+      <div class="aios-chips" id="aiChips"></div>
+      <form class="aios-chat-input" id="aiForm" autocomplete="off">
+        <input id="aiInput" type="text" placeholder="Ask or command your day…" autocomplete="off"/>
+        <button type="submit" id="aiSend" aria-label="Send">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </form>
+    </section>
+
   </div>
 
-  <!-- PLAN TOMORROW card -->
-  <div class="gm-card gm-card-tomorrow" id="tomorrowCard">
-    <div class="gm-header-row">
-      <div class="gm-header-left">
-        <div class="gm-eyebrow" id="tomorrowLabel">Plan tomorrow</div>
-        <div class="gm-tomorrow-sub">Write tonight, locked until 6 AM.</div>
-      </div>
-      <div class="gm-tomorrow-count" id="gmTomorrowCount">0 planned</div>
+  <!-- QUICK NOTES — the one retained, shrunk-down inbox -->
+  <section class="card aios-notes" aria-label="Quick notes">
+    <div class="aios-notes-head">
+      <span class="aios-eyebrow">Inbox</span>
+      <span class="aios-notes-count" id="notesCount"></span>
     </div>
-    <div id="tomorrowEmptyState" class="empty-state">Nothing planned for tomorrow yet.</div>
-    <ul id="tomorrowList" class="gm-list"></ul>
-    <div class="gm-input-wrap">
-      <input class="gm-input" id="tomorrowInput" type="text" placeholder="Add a goal for tomorrow…" autocomplete="off"/>
-      <button class="gm-add-btn" id="tomorrowAddBtn">+ Add</button>
-    </div>
-  </div>
-</div>
+    <ul class="aios-notes-list" id="notesList"></ul>
+    <form class="aios-notes-input" id="notesForm" autocomplete="off">
+      <input id="notesInput" type="text" placeholder="Jot a quick note…" autocomplete="off"/>
+      <button type="submit" aria-label="Add note">+</button>
+    </form>
+  </section>
 
 </main>
 
@@ -173,10 +130,10 @@ document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
   initCloudSync({
     appKey: 'goals',
-    syncedPrefixes: ['goals:', 'cal_done:', 'cal_manual:'],
+    syncedPrefixes: ['cal_done:', 'cal_manual:', 'quicknotes_v1'],
     onApplied: function () {
-      window.dispatchEvent(new CustomEvent('goals-changed'));
       window.dispatchEvent(new CustomEvent('calendar-synced'));
+      window.dispatchEvent(new CustomEvent('notes-changed'));
       window.dispatchEvent(new Event('storage'));
     }
   });

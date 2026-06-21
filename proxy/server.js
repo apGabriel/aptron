@@ -282,6 +282,78 @@ app.post('/api/gemini/meal-scan', async (req, res) => {
 });
 
 
+// ── 7. POST /api/gemini/assistant ─────────────────────────────────────────────
+// The dashboard's AI command assistant. The browser handles common tactical
+// commands locally (instant/offline); anything free-form is forwarded here and
+// Gemini returns ONE structured intent the frontend applies to the calendar /
+// modules. Same server-side key as meal-scan — never reaches the browser.
+// Body: { message: string, context?: { date, events:[{title,start,end,done}] } }
+// Returns the intent object (see responseSchema below).
+app.post('/api/gemini/assistant', async (req, res) => {
+  if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
+  const { message, context } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'message is required' });
+
+  const events = (context && Array.isArray(context.events)) ? context.events : [];
+  const sys =
+    'You are the orchestrator AI for a personal day-planner dashboard. ' +
+    'Convert the user message into EXACTLY ONE structured action. ' +
+    'Today is ' + ((context && context.date) || new Date().toISOString().slice(0, 10)) + '. ' +
+    "The user's current calendar events (JSON): " + JSON.stringify(events).slice(0, 4000) + '. ' +
+    'Rules: all times are 24-hour "HH:MM". For move_event / complete_event / delete_event, ' +
+    '"match" MUST be a distinctive keyword taken from the target event\'s title. ' +
+    'For add_event include "title" and "time" (and "durationMin" if the user implies a length). ' +
+    'For retime_event (move / reschedule / reduce / extend / "from X to Y") include "match" and the new "time"; ' +
+    'add "endTime" for a range, "durationMin" to set an absolute length, or "deltaMin" to grow (+) / shrink (-) it. ' +
+    'For log_water set "servings" (default 1) and "unit" ("glass" or "bottle"). ' +
+    'For log_food set "name" and "calories" if stated. For a quick reminder/idea with no time, use "note" with "text". ' +
+    'If the message is purely conversational with no concrete action, use action "chat". ' +
+    'ALWAYS set "reply" to a brief, warm one-line confirmation or a single clarifying question.';
+
+  const body = {
+    contents: [{ parts: [{ text: sys + '\n\nUser: ' + message }] }],
+    generationConfig: {
+      temperature: 0.3,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          action: {
+            type: 'STRING',
+            enum: ['add_event', 'move_event', 'retime_event', 'complete_event', 'uncheck_event',
+              'delete_event', 'summarize', 'log_water', 'log_food', 'note', 'chat'],
+          },
+          title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
+          endTime: { type: 'STRING' }, deltaMin: { type: 'NUMBER' },
+          durationMin: { type: 'NUMBER' }, notes: { type: 'STRING' },
+          servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
+          name: { type: 'STRING' }, calories: { type: 'NUMBER' },
+          text: { type: 'STRING' }, reply: { type: 'STRING' },
+        },
+        required: ['action', 'reply'],
+      },
+    },
+  };
+
+  try {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL +
+      ':generateContent?key=' + GEMINI_API_KEY;
+    const gr = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
+    });
+    if (!gr.ok) return res.status(502).json({ error: 'Gemini request failed (HTTP ' + gr.status + ')' });
+    const j = await gr.json();
+    const text = (((j.candidates || [])[0] || {}).content?.parts || [])[0]?.text || '';
+    let parsed;
+    try { parsed = JSON.parse(text); } catch (e) { return res.status(502).json({ error: 'Could not read the AI response' }); }
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ── Start server (local dev only) ─────────────────────────────────────────────
 if (require.main === module) {
   app.listen(PORT, () => {
