@@ -83,6 +83,31 @@
 
     <!-- AI COMMAND ASSISTANT -->
     <section class="card aios-chat" aria-label="AI assistant">
+      <!-- Shenlong watermark — faint serpentine silhouette drifting behind
+           the chat. Strictly decorative; sits at z-index 0 (below the
+           z-index:1 content) and ignores pointer events. -->
+      <div class="shenlong-bg-overlay" aria-hidden="true">
+        <svg viewBox="0 0 360 240" preserveAspectRatio="xMidYMid meet">
+          <!-- coiled, serpentine body -->
+          <path d="M250,55 C285,50 300,80 285,105 C270,130 235,128 220,152
+                   C205,176 225,205 195,220 C165,235 130,222 118,198
+                   C106,174 126,150 100,140 C74,130 52,152 58,180"/>
+          <!-- head loop + horns -->
+          <path d="M250,55 C268,47 289,57 289,76 C289,93 272,99 257,92"/>
+          <path d="M270,50 L279,31"/>
+          <path d="M256,52 L258,32"/>
+          <!-- long trailing whiskers -->
+          <path d="M250,55 C210,40 170,46 138,37"/>
+          <path d="M253,63 C214,53 178,61 148,55"/>
+          <!-- claws flicking off the lower coils -->
+          <path d="M58,180 l-8,10 M58,180 l4,12"/>
+          <path d="M118,198 l-6,11 M118,198 l6,9"/>
+          <path d="M195,220 l-7,10 M195,220 l5,11"/>
+          <!-- piercing eyes -->
+          <circle class="shenlong-eye" cx="268" cy="68" r="2.4"/>
+          <circle class="shenlong-eye" cx="279" cy="72" r="2.4"/>
+        </svg>
+      </div>
       <div class="aios-chat-head">
         <span class="aios-chat-orb" id="aiOrb" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0l1.58 6.13A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>

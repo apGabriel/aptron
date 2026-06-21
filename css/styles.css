@@ -577,3 +577,40 @@ body > * { position: relative; z-index: 1; }
   border-color: rgba(255,159,67,0.42);
   box-shadow: inset 2px 0 0 0 rgba(255,159,67,0.6);
 }
+
+/* Shenlong watermark — a faint jade dragon silhouette hovering behind the
+   chat. Stays purely decorative: `.aios-chat > *` lifts every real child to
+   z-index 1, so this z-index:0 layer is always under the bubbles, and
+   pointer-events:none keeps it from eating clicks/scroll. */
+.shenlong-bg-overlay {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  overflow: hidden; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.shenlong-bg-overlay svg {
+  width: 92%; height: 92%;
+  opacity: 0.05;                 /* premium watermark — barely-there */
+  fill: none; stroke: #2ECC71;   /* jade, matching the aura */
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  transform-origin: center;
+  animation: dragonFloat 13s ease-in-out infinite;
+  will-change: transform;
+}
+/* Piercing red eyes — drop-shadow is the SVG-native equivalent of the
+   requested box-shadow glow; pulses in sync with the float cycle. */
+.shenlong-eye {
+  fill: #FF4D4D; stroke: none;
+  filter: drop-shadow(0 0 6px #FF4D4D);
+  animation: dragonEyePulse 13s ease-in-out infinite;
+}
+@keyframes dragonFloat {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-6px) scale(1.02); }
+}
+@keyframes dragonEyePulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shenlong-bg-overlay svg, .shenlong-eye { animation: none; }
+}
