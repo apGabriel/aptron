@@ -544,24 +544,28 @@ body > * { position: relative; z-index: 1; }
   50%      { background-position: 100% 50%; }
 }
 
-/* The 7 Dragon Balls — a processing loader, not a permanent ornament. Idle, the
-   ring is collapsed and invisible so it costs no conversational space. Each
-   ball is pinned to a point on a circle via rotate()+translate() off the
-   centre and keeps a subtle continuous amber glow pulse (box-shadow only, so it
-   never disturbs the placement transform); a travelling per-ball delay makes
-   the glow chase around the ring. */
+/* The 7 Dragon Balls — a processing loader, not a permanent ornament. It floats
+   as an absolute overlay dead-centre in the chat panel, so it never reflows the
+   bubbles around it; idle it is fully hidden. Each ball is pinned to a point on
+   a circle via rotate()+translate() off the centre and keeps a subtle
+   continuous amber glow pulse (box-shadow only, so it never disturbs the
+   placement transform); a travelling per-ball delay makes the glow chase around
+   the ring. */
 .dragon-balls-ring {
-  position: relative; width: 48px; height: 0;
-  margin: 0 auto; opacity: 0; pointer-events: none;
-  transform: scale(0.8);
-  transition: opacity .3s ease, transform .3s ease, height .3s ease, margin .3s ease;
+  position: absolute; top: 50%; left: 50%; z-index: 50;
+  width: 48px; height: 48px;
+  transform: translate(-50%, -50%) scale(0.8);
+  transform-origin: center;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform, opacity;
 }
-/* Invoking the wish: fade in, expand under the header, and whirl fast like a
-   sci-fi radar until the reply is rendered. */
+/* Invoking the wish: fade in and whirl fast like a sci-fi radar until the reply
+   is rendered. The keyframes re-apply translate(-50%,-50%) so the spin stays
+   perfectly centred (the animation transform fully replaces the base one). */
 .aios-chat.is-processing .dragon-balls-ring {
-  height: 48px; margin: 2px auto 14px;
-  opacity: 1; transform: scale(1);
+  opacity: 1; visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
   animation: orbitSpin 1.5s linear infinite;
 }
 .dball {
@@ -583,7 +587,10 @@ body > * { position: relative; z-index: 1; }
 .dball:nth-child(5) { transform: rotate(205.71deg) translate(19px); animation-delay: 0.8s; }
 .dball:nth-child(6) { transform: rotate(257.14deg) translate(19px); animation-delay: 1.0s; }
 .dball:nth-child(7) { transform: rotate(308.57deg) translate(19px); animation-delay: 1.2s; }
-@keyframes orbitSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes orbitSpin {
+  from { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
+  to   { transform: translate(-50%, -50%) rotate(360deg) scale(1); }
+}
 @keyframes dballGlow {
   0%, 100% { box-shadow: 0 0 5px rgba(255,159,67,0.45), inset 0 -1px 2px rgba(120,50,0,0.55); }
   50%      { box-shadow: 0 0 11px rgba(255,159,67,0.9),  inset 0 -1px 2px rgba(120,50,0,0.55); }
