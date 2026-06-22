@@ -605,8 +605,9 @@ window.QuickNotes = (function () {
   // ── message UI ─────────────────────────────────────────────────────────────
   const chatEl = document.querySelector('.aios-chat');
   function scroll() { log.scrollTop = log.scrollHeight; }
-  // Toggle the Dragon-Balls "summoning" wave while Shenlong is working.
-  function setSummoning(on) { if (chatEl) chatEl.classList.toggle('is-summoning', !!on); }
+  // Reveal/spin the Dragon-Balls processing loader while Shenlong is working;
+  // it stays hidden the rest of the time so the chat reads clean.
+  function setSummoning(on) { if (chatEl) chatEl.classList.toggle('is-processing', !!on); }
   function addMsg(role, text) {
     const div = document.createElement('div');
     div.className = 'aios-msg aios-msg-' + role;

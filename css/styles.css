@@ -422,8 +422,8 @@ body > * { position: relative; z-index: 1; }
 .aios-chat-orb .orb-emblem {
   width: 30px; height: 30px;
   background: currentColor;
-  -webkit-mask: url("../img/shelron.png") center / contain no-repeat;
-          mask: url("../img/shelron.png") center / contain no-repeat;
+  -webkit-mask: url("../img/shenlong.png") center / contain no-repeat;
+          mask: url("../img/shenlong.png") center / contain no-repeat;
 }
 @keyframes aiOrbPulse {
   0%, 100% { box-shadow: 0 0 12px rgba(210,188,138,0.18); }
@@ -544,17 +544,25 @@ body > * { position: relative; z-index: 1; }
   50%      { background-position: 100% 50%; }
 }
 
-/* The 7 Dragon Balls — arranged on a circle that orbits slowly and
-   seamlessly. The ring container spins (orbitSpin); each ball is pinned to a
-   point on the circle via rotate()+translate() off the centre, then keeps a
-   subtle continuous amber glow pulse (box-shadow only, so it never disturbs
-   the placement transform). A travelling per-ball delay makes the glow chase
-   around the ring. */
-.shenlong-balls {
-  position: relative; width: 48px; height: 48px;
-  margin: 2px auto 14px;
-  animation: orbitSpin 9s linear infinite;
-  will-change: transform;
+/* The 7 Dragon Balls — a processing loader, not a permanent ornament. Idle, the
+   ring is collapsed and invisible so it costs no conversational space. Each
+   ball is pinned to a point on a circle via rotate()+translate() off the
+   centre and keeps a subtle continuous amber glow pulse (box-shadow only, so it
+   never disturbs the placement transform); a travelling per-ball delay makes
+   the glow chase around the ring. */
+.dragon-balls-ring {
+  position: relative; width: 48px; height: 0;
+  margin: 0 auto; opacity: 0; pointer-events: none;
+  transform: scale(0.8);
+  transition: opacity .3s ease, transform .3s ease, height .3s ease, margin .3s ease;
+  will-change: transform, opacity;
+}
+/* Invoking the wish: fade in, expand under the header, and whirl fast like a
+   sci-fi radar until the reply is rendered. */
+.aios-chat.is-processing .dragon-balls-ring {
+  height: 48px; margin: 2px auto 14px;
+  opacity: 1; transform: scale(1);
+  animation: orbitSpin 1.5s linear infinite;
 }
 .dball {
   position: absolute; top: 50%; left: 50%;
@@ -575,15 +583,12 @@ body > * { position: relative; z-index: 1; }
 .dball:nth-child(5) { transform: rotate(205.71deg) translate(19px); animation-delay: 0.8s; }
 .dball:nth-child(6) { transform: rotate(257.14deg) translate(19px); animation-delay: 1.0s; }
 .dball:nth-child(7) { transform: rotate(308.57deg) translate(19px); animation-delay: 1.2s; }
-/* Summoning — the ring whirls faster and the glow burns brighter. */
-.aios-chat.is-summoning .shenlong-balls { animation-duration: 3.4s; }
-.aios-chat.is-summoning .dball { animation-duration: 1s; }
-@keyframes orbitSpin { to { transform: rotate(360deg); } }
+@keyframes orbitSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @keyframes dballGlow {
   0%, 100% { box-shadow: 0 0 5px rgba(255,159,67,0.45), inset 0 -1px 2px rgba(120,50,0,0.55); }
   50%      { box-shadow: 0 0 11px rgba(255,159,67,0.9),  inset 0 -1px 2px rgba(120,50,0,0.55); }
 }
-@media (prefers-reduced-motion: reduce) { .shenlong-balls { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .aios-chat.is-processing .dragon-balls-ring { animation: none; } }
 
 /* Shenlong reply bubbles — jade outline; granted (✓) commands get an amber accent. */
 .aios-msg-ai.shenlong-reply {
@@ -606,7 +611,7 @@ body > * { position: relative; z-index: 1; }
   display: flex; align-items: flex-end; justify-content: center;
 }
 .kame-bg-overlay svg {
-  width: 68%; height: auto; max-width: 420px;
+  width: 92%; height: auto; max-width: 560px;
   margin-bottom: 8px;
   opacity: 0.05;            /* faint, high-end vector watermark */
 }
@@ -627,8 +632,8 @@ body > * { position: relative; z-index: 1; }
   .aios-grid { grid-template-columns: 1fr; gap: 12px; }
   .aios-chat { padding: 14px 14px; min-height: 380px; }
   .aios-chat-log { max-height: 300px; }
-  /* Let the watermark span a touch wider on small screens. */
-  .kame-bg-overlay svg { width: 86%; max-width: 360px; }
+  /* Let the watermark span the full width on small screens. */
+  .kame-bg-overlay svg { width: 98%; max-width: 460px; }
   /* Suggestion chips wrap into clean rows instead of clipping. */
   .aios-chips { flex-wrap: wrap; gap: 6px; }
   .aios-chip { white-space: nowrap; }
