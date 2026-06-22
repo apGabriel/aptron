@@ -606,8 +606,30 @@ window.QuickNotes = (function () {
   const chatEl = document.querySelector('.aios-chat');
   function scroll() { log.scrollTop = log.scrollHeight; }
   // Reveal/spin the Dragon-Balls processing loader while Shenlong is working;
-  // it stays hidden the rest of the time so the chat reads clean.
-  function setSummoning(on) { if (chatEl) chatEl.classList.toggle('is-processing', !!on); }
+  // it stays hidden the rest of the time so the chat reads clean. Local
+  // commands resolve in a single microtask, so without a floor the class is
+  // added and removed before the browser ever paints the spin — keep it up for
+  // at least MIN_SPIN_MS so the rotation is always actually visible.
+  const MIN_SPIN_MS = 900;
+  let processingSince = 0, hideTimer = 0;
+  function setSummoning(on) {
+    if (!chatEl) return;
+    if (on) {
+      clearTimeout(hideTimer);
+      processingSince = Date.now();
+      chatEl.classList.add('is-processing');
+    } else {
+      const wait = Math.max(0, MIN_SPIN_MS - (Date.now() - processingSince));
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => chatEl.classList.remove('is-processing'), wait);
+    }
+  }
+  // ── coreference memory ───────────────────────────────────────────────────────
+  // The last event the user successfully acted on, so a follow-up pronoun
+  // ("move it to 4pm", "delete that") can be resolved to a real title.
+  let lastMentionedEventTaskName = null;
+  function remember(name) { if (name) lastMentionedEventTaskName = name; }
+
   function addMsg(role, text) {
     const div = document.createElement('div');
     div.className = 'aios-msg aios-msg-' + role;
@@ -707,10 +729,17 @@ window.QuickNotes = (function () {
     const FILLER = /\b(the|my|a|an|that|this|please|it|i|just|to|item|entry|event|block|task|as|off|for|on|today|tonight|already|done|complete[d]?|finished?)\b/gi;
     const phraseFrom = (re) => raw.replace(re, ' ').replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
     const resolve = (phrase) => (A && A.matchTitle ? A.matchTitle(phrase) : null);
+    // Coreference: a phrase that is empty or just a pronoun ("it", "that",
+    // "this task", "the event") refers back to the last event acted on.
+    const PRONOUN_ONLY = /^(it|that|this|this (task|event|one)|the (task|event|one))$/i;
+    const coref = (phrase) => {
+      const p = (phrase || '').trim();
+      return ((!p || PRONOUN_ONLY.test(p)) && lastMentionedEventTaskName) ? lastMentionedEventTaskName : p;
+    };
 
     // UNCHECK / unmark / undo / incomplete  → toggle done:false
     if (/\b(uncheck|unmark|un-?mark|undo|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
-      const phrase = phraseFrom(/\b(uncheck|unmark|un-?mark|undo|incomplete|untick(ed)?|not\s+done)\b/gi);
+      const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|undo|incomplete|untick(ed)?|not\s+done)\b/gi));
       const title = resolve(phrase);
       if (title) return { action: 'uncheck_event', match: title };
       if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
@@ -718,14 +747,14 @@ window.QuickNotes = (function () {
     // CHECK / complete / finish / done / tick / "log that I…"  → toggle done:true
     if (/\b(check(\s*off)?|complete[d]?|finish(ed)?|done|tick(ed)?)\b/.test(t) ||
         /\bmark\b[\s\S]*\b(done|complete[d]?)\b/.test(t) || /^log\s+(that\s+)?i\b/.test(t)) {
-      const phrase = phraseFrom(/\b(log|check(\s*off)?|checkoff|complete[d]?|finish(ed)?|done|tick(ed)?|mark|did)\b/gi);
+      const phrase = coref(phraseFrom(/\b(log|check(\s*off)?|checkoff|complete[d]?|finish(ed)?|done|tick(ed)?|mark|did)\b/gi));
       const title = resolve(phrase);
       if (title) return { action: 'complete_event', match: title };
       if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
     }
     // DELETE / remove / cancel  → remove the block entirely
     if (/\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
-      const phrase = phraseFrom(/\b(delete|remove|cancel|clear|drop)\b/gi);
+      const phrase = coref(phraseFrom(/\b(delete|remove|cancel|clear|drop)\b/gi));
       return { action: 'delete_event', match: resolve(phrase) || phrase };
     }
     // RE-TIME — move / reschedule / shift / reduce / extend / shorten / lengthen.
@@ -739,12 +768,12 @@ window.QuickNotes = (function () {
       const toDur = t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
       const conv = (mm) => (/hour|hr/.test(mm[2]) ? +mm[1] * 60 : +mm[1]);
       if (times.length || byMatch || toDur) {
-        const phrase = raw
+        const phrase = coref(raw
           .replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ')
           .replace(/\bfrom\b|\bto\b|\bat\b|\bby\b/gi, ' ')
           .replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ')
-          .replace(/\s+/g, ' ').trim();
+          .replace(/\s+/g, ' ').trim());
         const out = { action: 'retime_event', match: resolve(phrase) || phrase };
         if (times.length >= 2) { out.time = times[0]; out.endTime = times[1]; }
         else if (times.length === 1) { out.time = times[0]; }
@@ -775,8 +804,8 @@ window.QuickNotes = (function () {
     {
       const times = parseTimes(t);
       if (times.length >= 2) {
-        const phrase = raw.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
-          .replace(/\b(my|the|a|an)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+        const phrase = coref(raw.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
+          .replace(/\b(my|the|a|an)\b/gi, ' ').replace(/\s+/g, ' ').trim());
         const title = resolve(phrase);
         if (title) return { action: 'retime_event', match: title, time: times[0], endTime: times[1] };
       }
@@ -831,6 +860,7 @@ window.QuickNotes = (function () {
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
         try {
           const r = await A.addEvent(intent.title, time, intent.durationMin, intent.notes);
+          remember(r.title);
           addMsg('ai', '✓ Scheduled “' + r.title + '” at ' + r.when + '.');
         } catch { addMsg('ai', 'Adding that failed — is the proxy running?'); }
         return;
@@ -848,6 +878,7 @@ window.QuickNotes = (function () {
         }
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to re-time that."); return; }
         const r = await A.retimeEvent(intent.match, opts);
+        if (r.ok) remember(r.title);
         addMsg('ai', r.ok
           ? '✓ Updated “' + r.title + '” → ' + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
@@ -855,6 +886,7 @@ window.QuickNotes = (function () {
       }
       case 'complete_event': {
         const r = A.completeEvent(intent.match);
+        if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? '✓ Awesome — marked “' + r.title + '” as completed.'
           : (A.isOffline() ? "I can't see your events (proxy offline) to check that off."
             : "I couldn't find an event matching “" + (intent.match || '') + '”.'));
@@ -862,6 +894,7 @@ window.QuickNotes = (function () {
       }
       case 'uncheck_event': {
         const r = A.uncheckEvent(intent.match);
+        if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? "✓ I've unchecked “" + r.title + '” — back on your list.'
           : (A.isOffline() ? "I can't see your events (proxy offline) to uncheck that."
             : "I couldn't find an event matching “" + (intent.match || '') + '”.'));

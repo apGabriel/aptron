@@ -552,21 +552,20 @@ body > * { position: relative; z-index: 1; }
    placement transform); a travelling per-ball delay makes the glow chase around
    the ring. */
 .dragon-balls-ring {
-  position: absolute; top: 50%; left: 50%; z-index: 50;
+  position: absolute !important; top: 50%; left: 50%; z-index: 9999;
   width: 48px; height: 48px;
-  transform: translate(-50%, -50%) scale(0.8);
+  transform: translate(-50%, -50%) rotate(0deg) scale(0.8);
   transform-origin: center;
   opacity: 0; visibility: hidden; pointer-events: none;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.3s ease, visibility 0.3s ease;
   will-change: transform, opacity;
 }
 /* Invoking the wish: fade in and whirl fast like a sci-fi radar until the reply
    is rendered. The keyframes re-apply translate(-50%,-50%) so the spin stays
    perfectly centred (the animation transform fully replaces the base one). */
 .aios-chat.is-processing .dragon-balls-ring {
-  opacity: 1; visibility: visible;
-  transform: translate(-50%, -50%) scale(1);
-  animation: orbitSpin 1.5s linear infinite;
+  opacity: 1 !important; visibility: visible !important;
+  animation: globalOrbitSpin 1.5s linear infinite !important;
 }
 .dball {
   position: absolute; top: 50%; left: 50%;
@@ -587,7 +586,7 @@ body > * { position: relative; z-index: 1; }
 .dball:nth-child(5) { transform: rotate(205.71deg) translate(19px); animation-delay: 0.8s; }
 .dball:nth-child(6) { transform: rotate(257.14deg) translate(19px); animation-delay: 1.0s; }
 .dball:nth-child(7) { transform: rotate(308.57deg) translate(19px); animation-delay: 1.2s; }
-@keyframes orbitSpin {
+@keyframes globalOrbitSpin {
   from { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
   to   { transform: translate(-50%, -50%) rotate(360deg) scale(1); }
 }
