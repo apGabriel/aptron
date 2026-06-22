@@ -238,10 +238,18 @@ window.QuickNotes = (function () {
     }
   }
 
+  // Sentence case for display only (stored title is left untouched so edits see
+  // the real value): first letter upper, the rest lower.
+  function formatEventTitle(title) {
+    if (!title) return '';
+    const trimmed = title.trim();
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  }
+
   // ── inline text edit (title / notes) ──────────────────────────────────────
   function restoreField(el, ev, field) {
     if (field === 'notes') el.textContent = ev.notes ? ev.notes.split('\n')[0] : '';
-    else el.textContent = ev.title;
+    else el.textContent = formatEventTitle(ev.title);
   }
   function makeFieldEdit(el, ev, field) {
     el.classList.add('cal-editable');
@@ -336,7 +344,7 @@ window.QuickNotes = (function () {
     li.appendChild(dur);
 
     const title = document.createElement('div');
-    title.className = 'cal-event-title'; title.textContent = ev.title;
+    title.className = 'cal-event-title'; title.textContent = formatEventTitle(ev.title);
     makeFieldEdit(title, ev, 'title'); li.appendChild(title);
 
     const notes = document.createElement('div');
