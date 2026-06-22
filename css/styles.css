@@ -414,12 +414,16 @@ body > * { position: relative; z-index: 1; }
   display: flex; align-items: center; justify-content: center;
   color: var(--accent);
   background: radial-gradient(circle at 35% 30%, rgba(210,188,138,0.35), rgba(149,101,52,0.16));
-  border: 1px solid rgba(210,188,138,0.40);
   animation: aiOrbPulse 3.6s ease-in-out infinite;
 }
-.aios-chat-orb svg {
-  width: 18px; height: 18px;
-  fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+/* Dragon emblem — shelron.png silhouette painted with the orb's gold
+   currentColor via a CSS mask, so the black artwork inherits the aura.
+   The image already contains its own ring, so it fills the orb edge-to-edge. */
+.aios-chat-orb .orb-emblem {
+  width: 30px; height: 30px;
+  background: currentColor;
+  -webkit-mask: url("../img/shenlong.png") center / contain no-repeat;
+          mask: url("../img/shenlong.png") center / contain no-repeat;
 }
 @keyframes aiOrbPulse {
   0%, 100% { box-shadow: 0 0 12px rgba(210,188,138,0.18); }
@@ -430,7 +434,17 @@ body > * { position: relative; z-index: 1; }
 .aios-chat-log {
   flex: 1; display: flex; flex-direction: column; gap: 8px;
   overflow-y: auto; max-height: 340px; padding: 4px 2px; min-height: 120px;
+  /* Firefox — ultra-thin, blends into the dark theme. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
+/* WebKit — minimalist 5px scrollbar that stays out of the way. */
+.aios-chat-log::-webkit-scrollbar { width: 5px; }
+.aios-chat-log::-webkit-scrollbar-track { background: transparent; }
+.aios-chat-log::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1); border-radius: 10px;
+}
+.aios-chat-log::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
 .aios-msg {
   max-width: 86%; padding: 9px 12px; border-radius: 14px;
   font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word;
@@ -540,33 +554,57 @@ body > * { position: relative; z-index: 1; }
   50%      { background-position: 100% 50%; }
 }
 
-/* The 7 Dragon Balls */
-.shenlong-balls {
-  display: flex; gap: 7px; align-items: center; justify-content: center;
-  margin: -2px 0 12px;
+/* The 7 Dragon Balls — a processing loader, not a permanent ornament. It floats
+   as an absolute overlay dead-centre in the chat panel, so it never reflows the
+   bubbles around it; idle it is fully hidden. Each ball is pinned to a point on
+   a circle via rotate()+translate() off the centre and keeps a subtle
+   continuous amber glow pulse (box-shadow only, so it never disturbs the
+   placement transform); a travelling per-ball delay makes the glow chase around
+   the ring. */
+.dragon-balls-ring {
+  position: absolute !important; top: 50%; left: 50%; z-index: 9999;
+  width: 48px; height: 48px;
+  transform: translate(-50%, -50%) rotate(0deg) scale(0.8);
+  transform-origin: center;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+  will-change: transform, opacity;
+}
+/* Invoking the wish: fade in and whirl fast like a sci-fi radar until the reply
+   is rendered. The keyframes re-apply translate(-50%,-50%) so the spin stays
+   perfectly centred (the animation transform fully replaces the base one). */
+.aios-chat.is-processing .dragon-balls-ring {
+  opacity: 1 !important; visibility: visible !important;
+  animation: globalOrbitSpin 1.5s linear infinite !important;
 }
 .dball {
-  width: 9px; height: 9px; border-radius: 50%; position: relative;
+  position: absolute; top: 50%; left: 50%;
+  width: 9px; height: 9px; margin: -4.5px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #ffd9a8 0%, #FF9F43 60%, #e07b1f 100%);
   box-shadow: 0 0 6px rgba(255,159,67,0.55), inset 0 -1px 2px rgba(120,50,0,0.55);
+  animation: dballGlow 2.8s ease-in-out infinite;
 }
 .dball::after {   /* tiny center star/shadow */
   content: ''; position: absolute; inset: 0; margin: auto;
   width: 2px; height: 2px; border-radius: 50%; background: rgba(120,50,0,0.6);
 }
-/* Summoning — a left-to-right pulse wave while Shenlong is working. */
-.aios-chat.is-summoning .dball { animation: dballWave 1.1s ease-in-out infinite; }
-.aios-chat.is-summoning .dball:nth-child(1) { animation-delay: 0s; }
-.aios-chat.is-summoning .dball:nth-child(2) { animation-delay: 0.09s; }
-.aios-chat.is-summoning .dball:nth-child(3) { animation-delay: 0.18s; }
-.aios-chat.is-summoning .dball:nth-child(4) { animation-delay: 0.27s; }
-.aios-chat.is-summoning .dball:nth-child(5) { animation-delay: 0.36s; }
-.aios-chat.is-summoning .dball:nth-child(6) { animation-delay: 0.45s; }
-.aios-chat.is-summoning .dball:nth-child(7) { animation-delay: 0.54s; }
-@keyframes dballWave {
-  0%, 65%, 100% { transform: translateY(0); box-shadow: 0 0 6px rgba(255,159,67,0.55), inset 0 -1px 2px rgba(120,50,0,0.55); }
-  32%           { transform: translateY(-4px); box-shadow: 0 0 12px rgba(255,159,67,0.95), inset 0 -1px 2px rgba(120,50,0,0.55); }
+/* Pin each ball to its slot on the 360/7 ≈ 51.43° circle (radius 19px). */
+.dball:nth-child(1) { transform: rotate(0deg)      translate(19px); }
+.dball:nth-child(2) { transform: rotate(51.43deg)  translate(19px); animation-delay: 0.2s; }
+.dball:nth-child(3) { transform: rotate(102.86deg) translate(19px); animation-delay: 0.4s; }
+.dball:nth-child(4) { transform: rotate(154.29deg) translate(19px); animation-delay: 0.6s; }
+.dball:nth-child(5) { transform: rotate(205.71deg) translate(19px); animation-delay: 0.8s; }
+.dball:nth-child(6) { transform: rotate(257.14deg) translate(19px); animation-delay: 1.0s; }
+.dball:nth-child(7) { transform: rotate(308.57deg) translate(19px); animation-delay: 1.2s; }
+@keyframes globalOrbitSpin {
+  from { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
+  to   { transform: translate(-50%, -50%) rotate(360deg) scale(1); }
 }
+@keyframes dballGlow {
+  0%, 100% { box-shadow: 0 0 5px rgba(255,159,67,0.45), inset 0 -1px 2px rgba(120,50,0,0.55); }
+  50%      { box-shadow: 0 0 11px rgba(255,159,67,0.9),  inset 0 -1px 2px rgba(120,50,0,0.55); }
+}
+@media (prefers-reduced-motion: reduce) { .aios-chat.is-processing .dragon-balls-ring { animation: none; } }
 
 /* Shenlong reply bubbles — jade outline; granted (✓) commands get an amber accent. */
 .aios-msg-ai.shenlong-reply {
@@ -576,4 +614,43 @@ body > * { position: relative; z-index: 1; }
 .aios-msg-ai.shenlong-reply.is-granted {
   border-color: rgba(255,159,67,0.42);
   box-shadow: inset 2px 0 0 0 rgba(255,159,67,0.6);
+}
+
+/* Kame House watermark — a minimalist architectural silhouette resting at the
+   bottom of the chat. Purely decorative: `.aios-chat > *` lifts every real
+   child to z-index 1, so this z-index:0 layer is always under the bubbles, and
+   pointer-events:none keeps it from eating clicks/scroll. */
+.kame-bg-overlay {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  overflow: hidden; border-radius: 16px;
+  /* Anchor the silhouette along the bottom edge, like a watermark. */
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.kame-bg-overlay svg {
+  width: 100%; height: auto; max-width: 760px;
+  margin-bottom: 8px;
+  opacity: 0.05;            /* faint, high-end vector watermark */
+}
+/* One flat desaturated charcoal-jade fill keeps it premium and dark-mode safe. */
+.kame-art { fill: #7f9c8f; }
+.kame-label {
+  fill: #7f9c8f; font-family: inherit; font-weight: 700;
+  font-size: 9px; letter-spacing: 1.6px;
+}
+
+/* =====================================================================
+   Mobile — single-column stack (Schedule → Shenlong chat), tighter
+   chat chrome, and a slightly wider Kame House watermark for narrow
+   viewports. (The .aios-grid already collapses ≤860px; this layer
+   tunes the chat itself.)
+   ===================================================================== */
+@media (max-width: 768px) {
+  .aios-grid { grid-template-columns: 1fr; gap: 12px; }
+  .aios-chat { padding: 14px 14px; min-height: 380px; }
+  .aios-chat-log { max-height: 300px; }
+  /* Let the watermark span the full width on small screens. */
+  .kame-bg-overlay svg { width: 98%; max-width: 460px; }
+  /* Suggestion chips wrap into clean rows instead of clipping. */
+  .aios-chips { flex-wrap: wrap; gap: 6px; }
+  .aios-chip { white-space: nowrap; }
 }

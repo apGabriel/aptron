@@ -83,17 +83,63 @@
 
     <!-- AI COMMAND ASSISTANT -->
     <section class="card aios-chat" aria-label="AI assistant">
+      <!-- Kame House watermark — a minimalist architectural silhouette (island,
+           domed house with "KAME HOUSE" on the roofline, two geometric palms)
+           resting at the bottom of the chat. Strictly decorative: z-index 0
+           (below the z-index:1 content) and pointer-events none. One flat
+           desaturated-jade fill at opacity 0.05 reads as a high-end vector
+           watermark, not a cartoon. -->
+      <div class="kame-bg-overlay" aria-hidden="true">
+        <svg viewBox="0 0 400 150" preserveAspectRatio="xMidYMax meet">
+          <g class="kame-art">
+            <!-- Island: flat sandbar + low mound. -->
+            <ellipse cx="200" cy="138" rx="150" ry="10"/>
+            <path d="M70,138 C92,116 150,110 200,110 C250,110 308,116 330,138 Z"/>
+
+            <!-- Left geometric palm. -->
+            <path d="M108,120 C112,100 106,82 102,68 L98,68 C100,84 104,102 104,120 Z"/>
+            <path d="M100,66 L72,58 L78,68 Z"/>
+            <path d="M100,66 L74,73 L83,77 Z"/>
+            <path d="M100,66 L99,43 L108,57 Z"/>
+            <path d="M100,66 L126,52 L120,64 Z"/>
+            <path d="M100,66 L128,70 L118,75 Z"/>
+
+            <!-- House: rectangular body + domed roof, round door, port-windows. -->
+            <rect x="170" y="80" width="60" height="38" rx="2"/>
+            <path d="M162,82 C162,57 238,57 238,82 Z"/>
+            <rect x="193" y="98" width="14" height="20" rx="7"/>
+            <circle cx="180" cy="93" r="3.6"/>
+            <circle cx="220" cy="93" r="3.6"/>
+            <!-- "KAME HOUSE" simplified along the roofline. -->
+            <text class="kame-label" x="200" y="74" text-anchor="middle">KAME HOUSE</text>
+
+            <!-- Right geometric palm (mirror of the left). -->
+            <path d="M296,120 C292,100 298,82 302,68 L306,68 C304,84 300,102 300,120 Z"/>
+            <path d="M304,66 L332,58 L326,68 Z"/>
+            <path d="M304,66 L330,73 L321,77 Z"/>
+            <path d="M304,66 L305,43 L296,57 Z"/>
+            <path d="M304,66 L278,52 L284,64 Z"/>
+            <path d="M304,66 L276,70 L286,75 Z"/>
+          </g>
+        </svg>
+      </div>
       <div class="aios-chat-head">
         <span class="aios-chat-orb" id="aiOrb" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0l1.58 6.13A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>
+          <!-- Coiled-dragon emblem — the shenlong.png silhouette used as a CSS
+               mask so it inherits the orb's gold aura (currentColor) instead of
+               showing as a flat black image. The artwork's own ring frames the
+               orb; the gradient bg + pulse glow keep the established style. -->
+          <span class="orb-emblem"></span>
         </span>
         <div>
           <div class="aios-chat-title">Shenlong</div>
           <div class="aios-chat-sub" id="aiSub">State your wishes. I shall grant them.</div>
         </div>
       </div>
-      <!-- The 7 Dragon Balls — pulse in a wave while Shenlong is summoning. -->
-      <div class="shenlong-balls" id="shenlongBalls" aria-hidden="true">
+      <!-- The 7 Dragon Balls — a processing loader. Hidden while idle; fades in
+           and spins as an energetic orbit only while Shenlong is granting the
+           wish (.is-processing on the chat card). -->
+      <div class="dragon-balls-ring" id="shenlongBalls" aria-hidden="true">
         <i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i><i class="dball"></i>
       </div>
       <div class="aios-chat-log" id="aiLog" aria-live="polite"></div>
