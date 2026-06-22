@@ -184,13 +184,14 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   </a>
 </header>`;
 
+  // Tab order, left → right: Health, Main, Fitness.
   const bottombarHtml = `
 <nav class="bottombar" id="bottombar" role="navigation" aria-label="Main tabs">
-  <a href="index.html" class="bottombar-tab" data-page="main">
-    <span class="bottombar-tab-icon">${ICON_HOME}</span><span>Main</span>
-  </a>
   <a href="health.html" class="bottombar-tab" data-page="health">
     <span class="bottombar-tab-icon">${ICON_PILL}</span><span>Health</span>
+  </a>
+  <a href="index.html" class="bottombar-tab" data-page="main">
+    <span class="bottombar-tab-icon">${ICON_HOME}</span><span>Main</span>
   </a>
   <a href="gym.html" class="bottombar-tab" data-page="fitness">
     <span class="bottombar-tab-icon">${ICON_DUMBBELL}</span><span>Fitness</span>
@@ -202,10 +203,13 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   }
   function shouldShowChrome() { return !isEmbedded(); }
   function currentPageKey() {
-    const p = (window.location.pathname || '').toLowerCase();
-    if (p.endsWith('health.html')) return 'health';
-    if (p.endsWith('gym.html')) return 'fitness';
-    return 'main';
+    // Match the last path segment with or without the .html extension, so it
+    // works under both raw files (/health.html) and clean URLs (/health).
+    const seg = (window.location.pathname || '/').toLowerCase()
+      .replace(/\/+$/, '').split('/').pop().replace(/\.html$/, '');
+    if (seg === 'health') return 'health';
+    if (seg === 'gym') return 'fitness';
+    return 'main'; // '', 'index', or anything else
   }
 
   function injectStyleAndHTML() {
