@@ -83,74 +83,44 @@
 
     <!-- AI COMMAND ASSISTANT -->
     <section class="card aios-chat" aria-label="AI assistant">
-      <!-- Shenlong watermark — a coiled, maned dragon (à la the eternal dragon)
-           weaving behind the chat over a faint sunset glow. Strictly
-           decorative; z-index 0 (below the z-index:1 content), pointer-events
-           none. The body is a thick stroked tube; head/whiskers/claws are
-           filled shapes. -->
-      <div class="shenlong-bg-overlay" aria-hidden="true">
-        <svg viewBox="0 0 400 400" preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <linearGradient id="dragonGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%"   stop-color="#3fce75"/>   <!-- bright jade -->
-              <stop offset="50%"  stop-color="#1f8c4d"/>
-              <stop offset="100%" stop-color="#0c4026"/>   <!-- deep jade -->
-            </linearGradient>
-            <radialGradient id="sunGlow" cx="50%" cy="42%" r="55%">
-              <stop offset="0%"  stop-color="#ff8a2a"/>
-              <stop offset="55%" stop-color="#c0431a"/>
-              <stop offset="100%" stop-color="#c0431a" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
+      <!-- Kame House watermark — a minimalist architectural silhouette (island,
+           domed house with "KAME HOUSE" on the roofline, two geometric palms)
+           resting at the bottom of the chat. Strictly decorative: z-index 0
+           (below the z-index:1 content) and pointer-events none. One flat
+           desaturated-jade fill at opacity 0.05 reads as a high-end vector
+           watermark, not a cartoon. -->
+      <div class="kame-bg-overlay" aria-hidden="true">
+        <svg viewBox="0 0 400 150" preserveAspectRatio="xMidYMax meet">
+          <g class="kame-art">
+            <!-- Island: flat sandbar + low mound. -->
+            <ellipse cx="200" cy="138" rx="150" ry="10"/>
+            <path d="M70,138 C92,116 150,110 200,110 C250,110 308,116 330,138 Z"/>
 
-          <!-- Warm sunset haze behind the dragon. -->
-          <ellipse class="shenlong-glow" cx="200" cy="180" rx="220" ry="170"/>
+            <!-- Left geometric palm. -->
+            <path d="M108,120 C112,100 106,82 102,68 L98,68 C100,84 104,102 104,120 Z"/>
+            <path d="M100,66 L72,58 L78,68 Z"/>
+            <path d="M100,66 L74,73 L83,77 Z"/>
+            <path d="M100,66 L99,43 L108,57 Z"/>
+            <path d="M100,66 L126,52 L120,64 Z"/>
+            <path d="M100,66 L128,70 L118,75 Z"/>
 
-          <g class="shenlong-body">
-            <!-- Upper coil weaving up behind the head. -->
-            <path class="sl-tube" d="M232,150 C292,118 352,142 356,196
-                                     C358,232 332,256 300,246"/>
-            <!-- Main serpentine body: big right loop, cross-back, then a
-                 long tail spiralling down the centre. -->
-            <path class="sl-tube" d="M196,196 C266,182 322,212 314,266
-                                     C308,308 250,322 214,296 C188,278 184,246 210,234
-                                     C244,218 286,238 290,282 C294,322 262,352 236,372
-                                     C220,386 224,398 238,402"/>
-            <!-- Belly highlight tracing the same flow. -->
-            <path class="sl-belly" d="M200,198 C264,186 314,214 306,262
-                                      C300,300 250,312 220,290"/>
-            <!-- Spiked mane radiating around the head. -->
-            <path class="sl-fill" d="M150,150 L120,140 L150,166 Z"/>
-            <path class="sl-fill" d="M156,120 L140,86 L172,118 Z"/>
-            <path class="sl-fill" d="M186,108 L182,70 L206,108 Z"/>
-            <path class="sl-fill" d="M220,110 L232,74 L242,114 Z"/>
-            <path class="sl-fill" d="M250,124 L278,96 L262,134 Z"/>
-            <path class="sl-fill" d="M150,184 L120,196 L154,196 Z"/>
-            <!-- Horns sweeping back. -->
-            <path class="sl-fill" d="M178,116 C162,92 150,74 146,52
-                                     C160,72 178,98 192,120 Z"/>
-            <path class="sl-fill" d="M232,112 C244,86 258,70 270,52
-                                     C262,78 252,102 244,122 Z"/>
-            <!-- Head + snout. -->
-            <path class="sl-fill" d="M168,128 C176,108 224,108 234,128
-                                     C246,150 244,176 224,190 C210,200 190,200 176,190
-                                     C156,176 156,150 168,128 Z"/>
-            <!-- Open jaw — a dark notch under the snout. -->
-            <path class="sl-jaw" d="M182,182 C192,196 210,196 220,182
-                                    C214,200 188,200 182,182 Z"/>
-            <!-- Long flowing whiskers trailing back from the snout. -->
-            <path class="sl-fill" d="M170,168 C108,150 60,176 24,160
-                                     C58,184 110,186 172,182 Z"/>
-            <path class="sl-fill" d="M230,168 C292,150 340,176 376,160
-                                     C342,184 290,186 228,182 Z"/>
-            <!-- Clawed hands flung out from the coils. -->
-            <path class="sl-claw" d="M314,250 l16,-6 m-16,6 l18,2 m-18,-2 l12,12"/>
-            <path class="sl-claw" d="M210,300 l-16,-4 m16,4 l-16,8 m16,-8 l-8,16"/>
+            <!-- House: rectangular body + domed roof, round door, port-windows. -->
+            <rect x="170" y="80" width="60" height="38" rx="2"/>
+            <path d="M162,82 C162,57 238,57 238,82 Z"/>
+            <rect x="193" y="98" width="14" height="20" rx="7"/>
+            <circle cx="180" cy="93" r="3.6"/>
+            <circle cx="220" cy="93" r="3.6"/>
+            <!-- "KAME HOUSE" simplified along the roofline. -->
+            <text class="kame-label" x="200" y="74" text-anchor="middle">KAME HOUSE</text>
+
+            <!-- Right geometric palm (mirror of the left). -->
+            <path d="M296,120 C292,100 298,82 302,68 L306,68 C304,84 300,102 300,120 Z"/>
+            <path d="M304,66 L332,58 L326,68 Z"/>
+            <path d="M304,66 L330,73 L321,77 Z"/>
+            <path d="M304,66 L305,43 L296,57 Z"/>
+            <path d="M304,66 L278,52 L284,64 Z"/>
+            <path d="M304,66 L276,70 L286,75 Z"/>
           </g>
-
-          <!-- Blazing eyes — full opacity, over the head. -->
-          <ellipse class="shenlong-eye" cx="184" cy="150" rx="6" ry="4"/>
-          <ellipse class="shenlong-eye" cx="216" cy="150" rx="6" ry="4"/>
         </svg>
       </div>
       <div class="aios-chat-head">
