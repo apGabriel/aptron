@@ -414,20 +414,16 @@ body > * { position: relative; z-index: 1; }
   display: flex; align-items: center; justify-content: center;
   color: var(--accent);
   background: radial-gradient(circle at 35% 30%, rgba(210,188,138,0.35), rgba(149,101,52,0.16));
-  border: 1px solid rgba(210,188,138,0.40);
   animation: aiOrbPulse 3.6s ease-in-out infinite;
 }
-.aios-chat-orb svg {
-  width: 18px; height: 18px;
-  fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
-}
-/* Dragon emblem parts — filled silhouette + ring + spiral whisker, all in
-   currentColor so they pick up the orb's gold aura. */
-.aios-chat-orb svg .orb-dragon { fill: currentColor; stroke: none; }
-.aios-chat-orb svg .orb-ring { fill: none; stroke: currentColor; stroke-width: 5; }
-.aios-chat-orb svg .orb-whisker {
-  fill: none; stroke: currentColor; stroke-width: 3;
-  stroke-linecap: round; stroke-linejoin: round;
+/* Dragon emblem — shelron.png silhouette painted with the orb's gold
+   currentColor via a CSS mask, so the black artwork inherits the aura.
+   The image already contains its own ring, so it fills the orb edge-to-edge. */
+.aios-chat-orb .orb-emblem {
+  width: 30px; height: 30px;
+  background: currentColor;
+  -webkit-mask: url("../img/shelron.png") center / contain no-repeat;
+          mask: url("../img/shelron.png") center / contain no-repeat;
 }
 @keyframes aiOrbPulse {
   0%, 100% { box-shadow: 0 0 12px rgba(210,188,138,0.18); }

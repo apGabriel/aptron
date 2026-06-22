@@ -155,34 +155,11 @@
       </div>
       <div class="aios-chat-head">
         <span class="aios-chat-orb" id="aiOrb" aria-hidden="true">
-          <!-- Coiled-dragon emblem — hand-coded inline SVG (no external image),
-               filled with currentColor so it inherits the orb's gold aura.
-               Ring frame + silhouette with spiral whisker, back spines, open
-               jaws, back-swept horns and a clawed lower body breaking the ring. -->
-          <svg viewBox="0 0 100 100">
-            <!-- outer ring frame -->
-            <circle class="orb-ring" cx="50" cy="50" r="45"/>
-            <!-- dragon silhouette — head/jaws on the RIGHT toward the whisker;
-                 spined back arcs to the upper-left, claws at the bottom.
-                 (eye is an evenodd cut-out) -->
-            <path class="orb-dragon" fill-rule="evenodd" d="M76,58
-              C72,52 70,48 64,44 C56,38 48,33 38,32 C28,31 21,38 17,48
-              C14,54 9,56 7,58 C11,60 15,61 19,62 C23,68 23,78 29,76
-              C32,74 32,70 35,69 C39,72 43,86 48,78 C50,74 51,71 54,69
-              C58,68 62,70 66,66 C70,64 73,62 76,62 C72,61 69,60 67,59
-              C70,59 74,59 76,58 Z
-              M64,50 a2.3,2.3 0 1,0 0.01,0 Z"/>
-            <!-- spined back hump (upper-left) -->
-            <path class="orb-dragon" d="M44,31 L40,21 L52,29 Z"/>
-            <path class="orb-dragon" d="M35,31 L30,22 L44,30 Z"/>
-            <path class="orb-dragon" d="M27,33 L20,26 L35,32 Z"/>
-            <!-- back-swept horns on the head crown (right) -->
-            <path class="orb-dragon" d="M62,44 C58,34 58,28 61,26 C63,31 65,38 66,45 Z"/>
-            <path class="orb-dragon" d="M55,40 C52,31 53,26 56,25 C58,30 59,36 60,43 Z"/>
-            <!-- whisker from the snout, curling into a spiral -->
-            <path class="orb-whisker" d="M75,56 C88,50 95,37 85,30
-              C78,26 75,34 83,36 C87,37 86,31 83,30"/>
-          </svg>
+          <!-- Coiled-dragon emblem — the shelron.png silhouette used as a CSS
+               mask so it inherits the orb's gold aura (currentColor) instead of
+               showing as a flat black image. The artwork's own ring frames the
+               orb; the gradient bg + pulse glow keep the established style. -->
+          <span class="orb-emblem"></span>
         </span>
         <div>
           <div class="aios-chat-title">Shenlong</div>
