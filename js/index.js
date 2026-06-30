@@ -585,7 +585,11 @@ window.QuickNotes = (function () {
     const endDt = new Date(startDt.getTime() + (durationMin || 30) * 60000);
     const made = await createEvent({ title, notes, startDt, endDt });
     await loadEvents();
-    return { title, when: fmtTime(made.start || startDt.toISOString()) };
+    return {
+      title,
+      when: fmtTime(made.start || startDt.toISOString()),
+      end: fmtTime(made.end || endDt.toISOString()),
+    };
   }
   // Re-time a block. opts: { start:{h,m}?, end:{h,m}?, durationMin?, deltaMin? }
   //   • start only          → shift, keep duration
@@ -808,6 +812,42 @@ window.QuickNotes = (function () {
     }
     return out;
   }
+  // Parse a SINGLE clock token, including a bare hour ("22" → 22:00). Bare hours
+  // are read 24-hour because the only caller is the range parser, where a number
+  // unmistakably denotes a clock. `mer` flags whether am/pm was explicit, so the
+  // range parser can lend the end's meridiem to a bare start ("10 to 11:30pm").
+  function parseClockToken(tok) {
+    const t = String(tok).toLowerCase().trim();
+    if (/noon/.test(t)) return { h: 12, m: 0, mer: true };
+    if (/midnight/.test(t)) return { h: 0, m: 0, mer: true };
+    let m = t.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+    if (m) { let h = +m[1] % 12; if (m[3] === 'pm') h += 12; return { h, m: m[2] ? +m[2] : 0, mer: true }; }
+    m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) return { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]), mer: false };
+    m = t.match(/^(\d{1,2})$/);
+    if (m && +m[1] >= 0 && +m[1] <= 23) return { h: +m[1], m: 0, mer: false };
+    return null;
+  }
+  // Recognise a "X to Y" time range — 24-hour ("22 to 23:30"), 12-hour
+  // ("10 to 11:30pm"), or mixed. Returns { start, end, durationMin, raw } where
+  // `raw` is the exact matched span so callers can excise it from the title.
+  // A bare start borrows the end's am/pm; an end ≤ start wraps past midnight.
+  function parseTimeRange(text) {
+    const re = /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|until|till|through|thru|-|–|—)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i;
+    const m = text.match(re);
+    if (!m) return null;
+    const start = parseClockToken(m[1]);
+    const end = parseClockToken(m[2]);
+    if (!start || !end) return null;
+    // Lend the end's meridiem to a bare 12-hour start ("10 to 11:30pm" → 10pm).
+    if (!start.mer && end.mer && start.h <= 12) {
+      const endPm = end.h >= 12;
+      start.h = (start.h % 12) + (endPm ? 12 : 0);
+    }
+    let durationMin = (end.h * 60 + end.m) - (start.h * 60 + start.m);
+    if (durationMin <= 0) durationMin += 24 * 60;          // crosses midnight
+    return { start: { h: start.h, m: start.m }, end: { h: end.h, m: end.m }, durationMin, raw: m[0] };
+  }
   // Strip every time/duration token so what's left is the task phrase.
   const TIME_TOKENS = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:noon|midnight)\b|\b\d+\s*(?:min|minute|hour|hr)s?\b/gi;
   function fmtHm(hm) {
@@ -908,13 +948,17 @@ window.QuickNotes = (function () {
     // "by/to N min|hr" resizes. "set"/"make" are excluded (they collide with the
     // "set up" create verb). The branch only fires when a time/duration is given.
     if (/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/.test(t)) {
-      const times = parseTimes(t);
+      // Prefer an explicit "X to Y" range (handles bare 24h hours like "22 to
+      // 23:30"); fall back to the looser am/pm/colon scanner for "10pm to 12am".
+      const range = parseTimeRange(t);
+      const times = range ? [range.start, range.end] : parseTimes(t);
       const byMatch = t.match(/\bby\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
-      const toDur = t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
+      const toDur = !range && t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
       const conv = (mm) => (/hour|hr/.test(mm[2]) ? +mm[1] * 60 : +mm[1]);
       if (times.length || byMatch || toDur) {
-        const phrase = coref(raw
-          .replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ')
+        let stripped = raw.replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ');
+        if (range) stripped = stripped.replace(range.raw, ' ');
+        const phrase = coref(stripped
           .replace(/\bfrom\b|\bto\b|\bat\b|\bby\b/gi, ' ')
           .replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ')
@@ -932,24 +976,39 @@ window.QuickNotes = (function () {
     // ADD / schedule / remind (broad — LAST). "book" is intentionally NOT a
     // trigger: it collides with real titles like "read a book".
     if (/\b(add|schedule|create|new|remind(er)?|set up|block)\b/.test(t)) {
-      const time = parseTime(t);
-      const durM = (t.match(/(\d+)\s*(min|minute|hour|hr)/) || []);
-      let durationMin = null;
-      if (durM[1]) durationMin = /hour|hr/.test(durM[2]) ? +durM[1] * 60 : +durM[1];
+      // A "X to Y" range ("22 to 23:30") wins: it pins start + auto-duration and
+      // is excised whole from the title so no clock fragment leaks through.
+      const range = parseTimeRange(raw);
+      let time, endTime = null, durationMin = null;
+      if (range) {
+        time = range.start; endTime = range.end; durationMin = range.durationMin;
+      } else {
+        time = parseTime(t);
+        const durM = (t.match(/(\d+)\s*(min|minute|hour|hr)/) || []);
+        if (durM[1]) durationMin = /hour|hr/.test(durM[2]) ? +durM[1] * 60 : +durM[1];
+      }
       let title = raw
-        .replace(/\b(add|schedule|create|new|set up|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '')
+        .replace(/\b(add|schedule|create|new|set up|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '');
+      if (range) title = title.replace(range.raw, ' ');
+      title = title
+        .replace(/\bfrom\b/gi, ' ')
         .replace(/\bat\b\s*[\d:apm\s]+/i, '')
         .replace(/\bfor\b\s*\d+\s*(min|minute|hour|hr)s?/i, '')
         .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
+        .replace(/\s+/g, ' ').trim()
+        .replace(/\b(event|block)s?\s*$/i, '')   // drop a dangling connector noun
         .trim();
-      return { action: 'add_event', title: cleanTitle(title), time, durationMin };
+      return { action: 'add_event', title: cleanTitle(title), time, durationMin, endTime };
     }
     // Bare "TASK from X to Y" (no verb) — re-time, but ONLY when the phrase maps
     // to an existing block, so it never hijacks creation of a brand-new entry.
     {
-      const times = parseTimes(t);
+      const range = parseTimeRange(t);
+      const times = range ? [range.start, range.end] : parseTimes(t);
       if (times.length >= 2) {
-        const phrase = coref(raw.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
+        let stripped = raw;
+        if (range) stripped = stripped.replace(range.raw, ' ');
+        const phrase = coref(stripped.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ').replace(/\s+/g, ' ').trim());
         const title = resolve(phrase);
         if (title) return { action: 'retime_event', match: title, time: times[0], endTime: times[1] };
@@ -1003,10 +1062,22 @@ window.QuickNotes = (function () {
         if (!intent.title) { addMsg('ai', 'What should I call that block?'); return; }
         if (!time) { addMsg('ai', 'When should I schedule “' + intent.title + '”? Try “at 4pm”.'); return; }
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
+        // Derive duration from an end time when only a range was supplied (e.g.
+        // a Gemini intent that gives endTime but no durationMin).
+        let durationMin = intent.durationMin;
+        const endHm = asTime(intent.endTime);
+        if (durationMin == null && endHm && time) {
+          durationMin = (endHm.h * 60 + endHm.m) - (time.h * 60 + time.m);
+          if (durationMin <= 0) durationMin += 24 * 60;
+        }
         try {
-          const r = await A.addEvent(intent.title, time, intent.durationMin, intent.notes);
+          const r = await A.addEvent(intent.title, time, durationMin, intent.notes);
           remember(r.title);
-          addMsg('ai', '✓ Scheduled “' + r.title + '” at ' + r.when + '.');
+          // Show the full span when an explicit length/range was given; otherwise
+          // just the start (default 30-min blocks read cleaner as a single time).
+          addMsg('ai', (intent.durationMin != null || intent.endTime)
+            ? '✓ Scheduled “' + r.title + '” from ' + r.when + ' to ' + r.end + '.'
+            : '✓ Scheduled “' + r.title + '” at ' + r.when + '.');
         } catch { addMsg('ai', 'Adding that failed — is the proxy running?'); }
         return;
       }
