@@ -635,6 +635,18 @@ window.QuickNotes = (function () {
     if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
     return { ok: true, title: ev.title };
   }
+  // Rename a block in place via the proxy PATCH (same path the inline title edit
+  // uses) — no delete+recreate dance, so id/time/notes are preserved untouched.
+  async function apiRenameEvent(match, newTitle) {
+    const ev = findEvent(match);
+    if (!ev) return { ok: false };
+    const title = String(newTitle || '').trim();
+    if (!title) return { ok: false, noTitle: true };
+    ev.title = title;
+    renderEvents(currentEvents);            // reflect instantly (display sentence-cases)
+    await patchEvent(ev, { title }, null);  // reverts via loadEvents() on failure
+    return { ok: true, title: ev.title };
+  }
   async function apiDeleteEvent(match) {
     const ev = findEvent(match);
     if (!ev) return { ok: false };
@@ -719,9 +731,10 @@ window.QuickNotes = (function () {
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
     moveEvent: (m, hm) => apiRetimeEvent(m, { start: hm }),   // back-compat alias
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
+    renameEvent: apiRenameEvent,
     restoreEvent: apiRestoreEvent, undoLastAction: apiRestoreEvent,   // undo == restore last deletion
     hasUndo: () => !!lastDeletedEvent,
-    matchTitle, fmtTime,
+    matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
 })();
 
@@ -907,6 +920,28 @@ window.QuickNotes = (function () {
       const p = (phrase || '').trim();
       return ((!p || PRONOUN_ONLY.test(p)) && lastMentionedEventTaskName) ? lastMentionedEventTaskName : p;
     };
+
+    // RENAME — change an existing block's title. Checked before re-time / delete
+    // / add so "change the name of X to Y" is read as a title edit (there's no
+    // time involved) rather than a re-time, a delete, or a brand-new event.
+    // Captures the target (match) and the new title; the new title drops a
+    // trailing "without …" aside and any wrapping quotes, then sentence-cases.
+    {
+      const rm =
+        raw.match(/\b(?:change|update|set|edit|fix|correct)\s+(?:the\s+)?(?:name|title)\s+of\s+(.+?)\s+(?:to|into)\s+(.+)$/i) ||
+        raw.match(/\b(?:change|update|set|edit|fix|correct)\s+(.+?)(?:'s)?\s+(?:name|title)\s+(?:to|into)\s+(.+)$/i) ||
+        raw.match(/\brename\s+(.+?)\s+(?:to|as|into)\s+(.+)$/i);
+      if (rm) {
+        const target = coref(rm[1].replace(FILLER, ' ').replace(/\s+/g, ' ').trim());
+        const newTitle = cleanTitle(
+          rm[2].trim()
+            .replace(/\s+without\b.*$/i, '')          // "…to Walk without the typo"
+            .replace(/^["'“”`]+|["'“”`]+$/g, '')       // wrapping quotes
+            .trim()
+        );
+        if (newTitle) return { action: 'rename_event', match: resolve(target) || target, newTitle };
+      }
+    }
 
     // RECOVER / UNDO / regret — TOP PRIORITY among mutations. A correction like
     // "sorry, my mistake — recover the walk and delete the run" must RESTORE the
@@ -1097,6 +1132,18 @@ window.QuickNotes = (function () {
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok
           ? '✓ Updated “' + r.title + '” → ' + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
+          : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        return;
+      }
+      case 'rename_event':
+      case 'update_event_title': {
+        // Gemini may carry the new name in "title"; the local parser uses "newTitle".
+        const next = intent.newTitle || intent.title;
+        if (!next) { addMsg('ai', 'What should I rename it to?'); return; }
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to rename that."); return; }
+        const r = await A.renameEvent(intent.match, next);
+        if (r.ok) { remember(r.title); addMsg('ai', '✓ Renamed event to “' + A.fmtTitle(r.title) + '”.'); }
+        else addMsg('ai', r.noTitle ? 'What should I rename it to?'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
         return;
       }
