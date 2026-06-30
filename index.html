@@ -66,17 +66,22 @@
         ⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.
       </div>
       <ul id="calEventList" class="cal-event-list"></ul>
-      <div class="gm-input-wrap cal-add-wrap">
-        <div class="cal-fields-row">
-          <input class="gm-input cal-title-input" id="calTaskInput" type="text" placeholder="Schedule a block…" autocomplete="off"/>
-          <input class="cal-desc-input" id="calDescInput" type="text" placeholder="Description (optional)…" autocomplete="off"/>
+
+      <!-- Interactive month-view calendar. Replaces the old manual-add form:
+           the chat assistant now owns event creation/mutation, and this grid
+           lets you browse any day of the year. Click a day → the schedule list
+           above filters to that date. Cells render dynamically in js/index.js;
+           a tiny gold dot under a number means that day has blocks planned. -->
+      <div class="dashboard-calendar-widget" id="calWidget" aria-label="Month calendar">
+        <div class="dcw-head">
+          <button class="dcw-nav" id="dcwPrev" type="button" aria-label="Previous month">‹</button>
+          <div class="dcw-title" id="dcwTitle">—</div>
+          <button class="dcw-nav" id="dcwNext" type="button" aria-label="Next month">›</button>
         </div>
-        <div class="cal-controls-wrapper">
-          <input class="cal-time-input" id="calTimeInput" type="time" value="09:00"/>
-          <input class="cal-dur-input" id="calDurInput" type="number" value="15" min="1" max="1440" title="Duration in minutes"/>
-          <span class="cal-dur-label">min</span>
-          <button class="gm-add-btn" id="calAddBtn">+ Schedule</button>
+        <div class="dcw-dows" aria-hidden="true">
+          <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
         </div>
+        <div class="dcw-grid" id="dcwGrid" role="grid"></div>
       </div>
       <div class="gm-status-line" id="calStatus"></div>
     </section>

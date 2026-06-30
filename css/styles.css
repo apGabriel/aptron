@@ -265,29 +265,6 @@ body > * { position: relative; z-index: 1; }
 .cal-event-check input:checked + .cal-check-custom::after {
   transform: rotate(45deg) scale(1);
 }
-.cal-time-input {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 10px; color: #FAFAFA;
-  font-size: 13px; padding: 8px 10px;
-  width: 100px; flex-shrink: 0;
-  color-scheme: dark;
-}
-.cal-dur-input {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 10px; color: #FAFAFA;
-  font-size: 13px; padding: 8px 8px;
-  width: 54px; flex-shrink: 0; text-align: center;
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
-.cal-dur-input::-webkit-inner-spin-button,
-.cal-dur-input::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
-.cal-dur-label {
-  font-size: 12px; color: rgba(255,255,255,0.4);
-  flex-shrink: 0; margin-left: -4px;
-}
 .cal-offline {
   font-size: 12px; color: #fbbf24; padding: 6px 2px 2px;
 }
@@ -307,46 +284,88 @@ body > * { position: relative; z-index: 1; }
 .cal-refresh-btn:hover { color: #FAFAFA; background: rgba(255,255,255,0.08); }
 .cal-refresh-btn.spinning { animation: cal-spin 0.7s linear; }
 @keyframes cal-spin { to { transform: rotate(360deg); } }
-.cal-add-wrap { flex-wrap: wrap; }
-.cal-fields-row { display: flex; gap: 8px; width: 100%; }
-.cal-title-input { flex: 1.5; min-width: 0; }
-.cal-desc-input {
-  flex: 1; min-width: 0;
+/* =====================================================================
+   DASHBOARD MONTH CALENDAR — replaces the old manual-add form. Compact
+   grid; the chat owns event creation, this just browses + filters days.
+   Gold theme, micro-typography, a tiny accent dot under days with blocks.
+   ===================================================================== */
+.dashboard-calendar-widget {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.dcw-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.dcw-title {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+.dcw-nav {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-secondary);
+  width: 26px; height: 26px; border-radius: 8px;
+  font-size: 15px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.dcw-nav:hover {
+  background: rgba(210,188,138,0.14);
+  border-color: rgba(210,188,138,0.4);
+  color: var(--accent);
+}
+.dcw-dows {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 6px;
+}
+.dcw-dows span {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.dcw-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.dcw-day {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 9px; cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+  transition: background 0.14s, border-color 0.14s, color 0.14s, box-shadow 0.14s;
+}
+.dcw-day.is-pad { pointer-events: none; cursor: default; }
+.dcw-day:not(.is-pad):hover {
   background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 10px; color: #FAFAFA;
-  font-size: 13px; padding: 8px 12px;
-  transition: border-color 0.2s;
+  color: var(--text-primary);
 }
-.cal-desc-input::placeholder { color: rgba(255,255,255,0.25); }
-.cal-desc-input:focus { outline: none; border-color: rgba(255,255,255,0.35); }
+.dcw-day.is-today { color: var(--accent); font-weight: 700; }
+.dcw-day.is-selected {
+  border-color: rgba(210,188,138,0.85);
+  background: rgba(210,188,138,0.12);
+  color: #fff; font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(210,188,138,0.35), 0 0 14px rgba(210,188,138,0.30);
+}
+/* Tiny accent dot under days that have scheduled blocks. */
+.dcw-dot {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--accent); opacity: 0; transition: opacity 0.14s;
+}
+.dcw-day.has-events .dcw-dot { opacity: 0.85; }
+.dcw-day.is-selected.has-events .dcw-dot { background: #fff; opacity: 1; }
 
-/* Centered scheduling controls (time · duration · button) */
-.cal-controls-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-  margin-top: 2px;
-}
-.cal-controls-wrapper .cal-time-input:focus,
-.cal-controls-wrapper .cal-dur-input:focus {
-  outline: none; border-color: rgba(125,211,252,0.45);
-}
-/* Schedule button adopts the panel's blue accent instead of the gold CTA */
-.cal-controls-wrapper .gm-add-btn {
-  background: rgba(125,211,252,0.12);
-  color: #7DD3FC;
-  border: 1px solid rgba(125,211,252,0.35);
-  box-shadow: none;
-}
-.cal-controls-wrapper .gm-add-btn:hover {
-  background: rgba(125,211,252,0.20);
-  border-color: #7DD3FC;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(125,211,252,0.18);
+@media (max-width: 768px) {
+  .dcw-grid { gap: 2px; }
+  .dcw-day { border-radius: 8px; font-size: 12px; }
+  .dcw-dot { bottom: 3px; width: 3.5px; height: 3.5px; }
+  .dcw-dows span { font-size: 9px; }
 }
 
 /* =====================================================================

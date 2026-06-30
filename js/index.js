@@ -126,6 +126,31 @@ window.QuickNotes = (function () {
   const PROXY = '';
   let currentEvents = [];
 
+  // ── multi-day state ──────────────────────────────────────────────────────
+  //   selectedDate — the day the schedule list + completion state reflect.
+  //   viewY/viewM   — the month the grid is showing (may differ from selected).
+  //   eventsByDate  — keyed cache "YYYY-MM-DD" → [events]; Google Calendar stays
+  //                   the source of truth, this just lets the grid show dots and
+  //                   switch days instantly. One range fetch fills a whole month.
+  let selectedDate = todayStr();
+  const now0 = new Date();
+  let viewY = now0.getFullYear(), viewM = now0.getMonth();
+  const eventsByDate = Object.create(null);
+
+  function ymd(y, m, d) { return y + '-' + padZ(m + 1) + '-' + padZ(d); }
+  function partsOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); return { y, m: m - 1, d }; }
+  function dateObj(dateStr) { const p = partsOf(dateStr); return new Date(p.y, p.m, p.d); }
+  // A local Date on the selected day at h:m — so the assistant/create paths
+  // schedule onto whatever day is in view, not always today.
+  function dtOnSelected(h, m) { const p = partsOf(selectedDate); return new Date(p.y, p.m, p.d, h, m, 0, 0); }
+  // The local calendar day an event belongs to (handles all-day + timed).
+  function eventDateKey(ev) {
+    const s = ev.start || '';
+    if (ev.allDay) return s.slice(0, 10);
+    const d = new Date(s);
+    return ymd(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
   // ── formatting ──────────────────────────────────────────────────────────
   function fmtRange(startIso, endIso) {
     const s = new Date(startIso), e = new Date(endIso);
@@ -144,11 +169,12 @@ window.QuickNotes = (function () {
     const m = d.getMinutes();
     return h + (m ? ':' + padZ(m) : '') + ' ' + (d.getHours() >= 12 ? 'PM' : 'AM');
   }
-  function fmtDateLabel() {
-    const d = new Date();
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate();
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmtDateLabel(d) {
+    d = d || new Date();
+    return DAY_NAMES[d.getDay()] + ', ' + MONTH_ABBR[d.getMonth()] + ' ' + d.getDate();
   }
   function eventClass(ev) {
     if (ev.allDay) return '';
@@ -168,8 +194,8 @@ window.QuickNotes = (function () {
   }
 
   // ── completion state (Google Calendar has no "done" flag) ─────────────────
-  function doneKey() { return 'cal_done:' + todayStr(); }
-  function manualKey() { return 'cal_manual:' + todayStr(); }
+  function doneKey() { return 'cal_done:' + selectedDate; }
+  function manualKey() { return 'cal_manual:' + selectedDate; }
   function getDoneSet() {
     try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); } catch (e) { return new Set(); }
   }
@@ -385,7 +411,8 @@ window.QuickNotes = (function () {
     const list = document.getElementById('calEventList');
     list.innerHTML = '';
     if (!events.length) {
-      list.innerHTML = '<li class="cal-empty">No blocks scheduled today</li>';
+      const when = selectedDate === todayStr() ? 'today' : 'this day';
+      list.innerHTML = '<li class="cal-empty">No blocks scheduled ' + when + '</li>';
       updateCount();
     } else {
       events.forEach(ev => list.appendChild(buildEventRow(ev)));
@@ -394,6 +421,8 @@ window.QuickNotes = (function () {
     window.dispatchEvent(new CustomEvent('apt:calendar-loaded'));
   }
 
+  // Refresh the schedule list for whichever day is selected. Caches the result
+  // in eventsByDate and re-syncs that day's dot on the grid.
   async function loadEvents() {
     const offlineEl = document.getElementById('calOfflineMsg');
     const countEl = document.getElementById('calEventCount');
@@ -401,14 +430,17 @@ window.QuickNotes = (function () {
     refreshBtn.classList.add('spinning');
     setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
     try {
-      const res = await fetch(PROXY + '/api/events?date=' + todayStr(), { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(PROXY + '/api/events?date=' + selectedDate, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
         let authExpired = false;
         try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
         throw Object.assign(new Error('HTTP ' + res.status), { authExpired });
       }
       offlineEl.style.display = 'none';
-      renderEvents(await res.json());
+      const events = await res.json();
+      eventsByDate[selectedDate] = events;
+      renderEvents(events);
+      markGridDot(selectedDate, events.length > 0);
     } catch (err) {
       offlineEl.style.display = 'block';
       if (err && err.authExpired) {
@@ -424,12 +456,35 @@ window.QuickNotes = (function () {
     }
   }
 
-  // ── create (used by the form AND the assistant) ───────────────────────────
+  // Bulk-fetch the visible month in one range call, group events into the
+  // per-date cache, and (re)paint the grid so days with blocks show a dot.
+  async function loadMonth() {
+    const start = ymd(viewY, viewM, 1);
+    const last = new Date(viewY, viewM + 1, 0).getDate();
+    const end = ymd(viewY, viewM, last);
+    try {
+      const res = await fetch(PROXY + '/api/events/range?start=' + start + '&end=' + end,
+        { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const all = await res.json();
+      // Clear this month's cache buckets, then refill from the range payload.
+      for (let d = 1; d <= last; d++) eventsByDate[ymd(viewY, viewM, d)] = [];
+      all.forEach(ev => {
+        const k = eventDateKey(ev);
+        (eventsByDate[k] = eventsByDate[k] || []).push(ev);
+      });
+    } catch (e) {
+      // Offline/range failure: leave the grid dot-less, day fetch handles errors.
+    }
+    renderGrid();
+  }
+
+  // ── create (used by the assistant) ────────────────────────────────────────
   async function createEvent({ title, notes, startDt, endDt }) {
     const res = await fetch(PROXY + '/api/events', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        title, notes: notes || undefined, date: todayStr(),
+        title, notes: notes || undefined, date: selectedDate,
         startTime: toLocalISO(startDt), endTime: toLocalISO(endDt),
       }),
     });
@@ -437,32 +492,53 @@ window.QuickNotes = (function () {
     return res.json();
   }
 
-  async function addEventFromForm() {
-    const titleEl = document.getElementById('calTaskInput');
-    const descEl = document.getElementById('calDescInput');
-    const timeEl = document.getElementById('calTimeInput');
-    const statusEl = document.getElementById('calStatus');
-    const addBtn = document.getElementById('calAddBtn');
-    const title = titleEl.value.trim();
-    if (!title) { titleEl.focus(); return; }
-    const dur = Math.max(1, parseInt(document.getElementById('calDurInput').value) || 15);
-    const [h, m] = timeEl.value.split(':').map(Number);
-    const startDt = new Date(); startDt.setHours(h, m, 0, 0);
-    const endDt = new Date(startDt.getTime() + dur * 60000);
-    addBtn.disabled = true;
-    statusEl.textContent = 'Scheduling…'; statusEl.classList.remove('is-error');
-    try {
-      await createEvent({ title, notes: descEl.value.trim(), startDt, endDt });
-      titleEl.value = ''; descEl.value = '';
-      statusEl.textContent = '✓ Added to Google Calendar';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-      loadEvents();
-    } catch {
-      statusEl.textContent = 'Failed — is the proxy running?';
-      statusEl.classList.add('is-error');
-      setTimeout(() => { statusEl.textContent = ''; statusEl.classList.remove('is-error'); }, 4000);
+  // ── month grid ────────────────────────────────────────────────────────────
+  function hasEvents(dateStr) {
+    const arr = eventsByDate[dateStr];
+    return Array.isArray(arr) && arr.length > 0;
+  }
+  function markGridDot(dateStr, on) {
+    const cell = document.querySelector('#dcwGrid .dcw-day[data-date="' + dateStr + '"]');
+    if (cell) cell.classList.toggle('has-events', !!on);
+  }
+  function renderGrid() {
+    const grid = document.getElementById('dcwGrid');
+    const titleEl = document.getElementById('dcwTitle');
+    if (!grid || !titleEl) return;
+    titleEl.textContent = MONTH_NAMES[viewM] + ' ' + viewY;
+    const firstDow = new Date(viewY, viewM, 1).getDay();
+    const daysInMonth = new Date(viewY, viewM + 1, 0).getDate();
+    const today = todayStr();
+    let html = '';
+    for (let i = 0; i < firstDow; i++) html += '<span class="dcw-day is-pad" aria-hidden="true"></span>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = ymd(viewY, viewM, d);
+      const cls = ['dcw-day'];
+      if (ds === today) cls.push('is-today');
+      if (ds === selectedDate) cls.push('is-selected');
+      if (hasEvents(ds)) cls.push('has-events');
+      html += '<button type="button" class="' + cls.join(' ') + '" role="gridcell"'
+        + ' data-date="' + ds + '"' + (ds === selectedDate ? ' aria-current="date"' : '')
+        + '><span class="dcw-num">' + d + '</span><span class="dcw-dot" aria-hidden="true"></span></button>';
     }
-    addBtn.disabled = false;
+    grid.innerHTML = html;
+  }
+  // Switch the schedule to a given day: repaint the grid highlight, refresh the
+  // header, show cached events instantly, then re-fetch that day to stay live.
+  function selectDay(dateStr) {
+    selectedDate = dateStr;
+    const p = partsOf(dateStr);
+    if (p.y !== viewY || p.m !== viewM) { viewY = p.y; viewM = p.m; loadMonth(); }
+    document.getElementById('calDateLabel').textContent = fmtDateLabel(dateObj(dateStr));
+    renderGrid();
+    if (eventsByDate[dateStr]) renderEvents(eventsByDate[dateStr]);
+    loadEvents();
+  }
+  function shiftMonth(delta) {
+    const d = new Date(viewY, viewM + delta, 1);
+    viewY = d.getFullYear(); viewM = d.getMonth();
+    renderGrid();
+    loadMonth();
   }
 
   // ── assistant-facing helpers ──────────────────────────────────────────────
@@ -498,7 +574,7 @@ window.QuickNotes = (function () {
   // between mutating an existing block and creating a new one.
   function matchTitle(q) { const ev = findEvent(q); return ev ? ev.title : null; }
   async function apiAddEvent(title, hm, durationMin, notes) {
-    const startDt = new Date(); startDt.setHours(hm.h, hm.m, 0, 0);
+    const startDt = dtOnSelected(hm.h, hm.m);
     const endDt = new Date(startDt.getTime() + (durationMin || 30) * 60000);
     const made = await createEvent({ title, notes, startDt, endDt });
     await loadEvents();
@@ -564,31 +640,48 @@ window.QuickNotes = (function () {
       if (offline && offline.style.display !== 'none') {
         return "I can't see your calendar right now — the proxy looks offline. Once it's up I'll read your blocks.";
       }
-      return 'Nothing on the calendar today — a clean slate. Want me to add something?';
+      const where = selectedDate === todayStr() ? 'today' : 'on ' + fmtDateLabel(dateObj(selectedDate));
+      return 'Nothing on the calendar ' + where + ' — a clean slate. Want me to add something?';
     }
+    const isToday = selectedDate === todayStr();
     const now = new Date();
-    const upcoming = currentEvents.filter(ev => ev.allDay || new Date(ev.end) >= now);
+    // "Upcoming" only filters by clock-time on today; on other days show all.
+    const upcoming = isToday ? currentEvents.filter(ev => ev.allDay || new Date(ev.end) >= now) : currentEvents;
     const lines = (upcoming.length ? upcoming : currentEvents)
       .map(ev => '• ' + ev.title + (ev.allDay ? ' (all day)' : ' at ' + fmtTime(ev.start)));
     const n = currentEvents.length;
+    const when = isToday ? 'today' : fmtDateLabel(dateObj(selectedDate));
     const head = (window.__aiosGreeting ? window.__aiosGreeting() : 'Hi') +
-      '! You have ' + n + ' block' + (n === 1 ? '' : 's') + ' scheduled today:';
+      '! You have ' + n + ' block' + (n === 1 ? '' : 's') + ' scheduled ' + when + ':';
     return head + '\n' + lines.join('\n');
   }
 
   // ── wire up ───────────────────────────────────────────────────────────────
   window.addEventListener('calendar-synced', applyDoneStateToDOM);
   window.addEventListener('storage', applyDoneStateToDOM);
-  document.getElementById('calDateLabel').textContent = fmtDateLabel();
-  document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);
-  document.getElementById('calAddBtn').addEventListener('click', addEventFromForm);
-  document.getElementById('calTaskInput').addEventListener('keydown', e => { if (e.key === 'Enter') addEventFromForm(); });
+  document.getElementById('calDateLabel').textContent = fmtDateLabel(dateObj(selectedDate));
+  document.getElementById('calRefreshBtn').addEventListener('click', () => { loadEvents(); loadMonth(); });
+
+  // Month-calendar widget: prev/next month + click-to-select a day.
+  const gridEl = document.getElementById('dcwGrid');
+  document.getElementById('dcwPrev').addEventListener('click', () => shiftMonth(-1));
+  document.getElementById('dcwNext').addEventListener('click', () => shiftMonth(1));
+  if (gridEl) {
+    gridEl.addEventListener('click', e => {
+      const cell = e.target.closest('.dcw-day[data-date]');
+      if (cell && cell.dataset.date !== selectedDate) selectDay(cell.dataset.date);
+    });
+  }
+  renderGrid();
+  loadMonth();
   loadEvents();
-  setInterval(loadEvents, 5 * 60 * 1000);
+  // Keep TODAY's view live; other days refresh on demand when selected.
+  setInterval(() => { if (selectedDate === todayStr()) loadEvents(); }, 5 * 60 * 1000);
 
   // Public API the assistant drives.
   window.AptCal = {
     reload: loadEvents,
+    selectDay,
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
