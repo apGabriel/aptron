@@ -300,13 +300,25 @@ app.post('/api/gemini/assistant', async (req, res) => {
     'Convert the user message into EXACTLY ONE structured action. ' +
     'Today is ' + ((context && context.date) || new Date().toISOString().slice(0, 10)) + '. ' +
     "The user's current calendar events (JSON): " + JSON.stringify(events).slice(0, 4000) + '. ' +
-    'Rules: all times are 24-hour "HH:MM". For move_event / complete_event / delete_event, ' +
+    'Rules: all times are 24-hour "HH:MM". For move_event / complete_event / delete_event / rename_event, ' +
     '"match" MUST be a distinctive keyword taken from the target event\'s title. ' +
+    'For rename_event (the user wants to change/correct an event\'s NAME or TITLE, e.g. ' +
+    '"rename X to Y", "change the name of X to Y", "call X Y") set "match" to the existing block and ' +
+    '"title" to the new name. NEVER refuse a rename or suggest deleting + re-adding — rename_event is native. ' +
     'For add_event include "title" and "time" (and "durationMin" if the user implies a length). ' +
     'For retime_event (move / reschedule / reduce / extend / "from X to Y") include "match" and the new "time"; ' +
     'add "endTime" for a range, "durationMin" to set an absolute length, or "deltaMin" to grow (+) / shrink (-) it. ' +
     'For log_water set "servings" (default 1) and "unit" ("glass" or "bottle"). ' +
     'For log_food set "name" and "calories" if stated. For a quick reminder/idea with no time, use "note" with "text". ' +
+    'CORRECTIONS & UNDO: If the user expresses regret or reversal — "sorry", "my mistake", ' +
+    '"cancel that", "undo", "recover [X]", "bring back [X]", "restore [X]" — do NOT blindly parse ' +
+    'any following negative keywords as a NEW delete. Instead use action "restore_event" to reverse ' +
+    'the previous deletion (set "match" to the name of the block to bring back if given). Prioritise ' +
+    'healing the user\'s mistake over executing further destructive actions. ' +
+    'COMPOUND COMMANDS: If one message contains several instructions ' +
+    '(e.g. "recover the walk and delete the run"), process them SEQUENTIALLY in order and return them ' +
+    'as the "steps" array — each element a full intent object — restoring/healing BEFORE deleting. ' +
+    'Use a single top-level action only when there is exactly one instruction. ' +
     'If the message is purely conversational with no concrete action, use action "chat". ' +
     'ALWAYS set "reply" to a brief, warm one-line confirmation or a single clarifying question.';
 
@@ -320,8 +332,8 @@ app.post('/api/gemini/assistant', async (req, res) => {
         properties: {
           action: {
             type: 'STRING',
-            enum: ['add_event', 'move_event', 'retime_event', 'complete_event', 'uncheck_event',
-              'delete_event', 'summarize', 'log_water', 'log_food', 'note', 'chat'],
+            enum: ['add_event', 'move_event', 'retime_event', 'rename_event', 'complete_event', 'uncheck_event',
+              'delete_event', 'restore_event', 'summarize', 'log_water', 'log_food', 'note', 'chat'],
           },
           title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
           endTime: { type: 'STRING' }, deltaMin: { type: 'NUMBER' },
@@ -329,6 +341,25 @@ app.post('/api/gemini/assistant', async (req, res) => {
           servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
           name: { type: 'STRING' }, calories: { type: 'NUMBER' },
           text: { type: 'STRING' }, reply: { type: 'STRING' },
+          // Ordered intents for a compound message; healing/restore comes first.
+          steps: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                action: {
+                  type: 'STRING',
+                  enum: ['add_event', 'move_event', 'retime_event', 'rename_event', 'complete_event', 'uncheck_event',
+                    'delete_event', 'restore_event', 'log_water', 'log_food', 'note'],
+                },
+                title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
+                endTime: { type: 'STRING' }, deltaMin: { type: 'NUMBER' }, durationMin: { type: 'NUMBER' },
+                notes: { type: 'STRING' }, servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
+                name: { type: 'STRING' }, calories: { type: 'NUMBER' }, text: { type: 'STRING' },
+              },
+              required: ['action'],
+            },
+          },
         },
         required: ['action', 'reply'],
       },

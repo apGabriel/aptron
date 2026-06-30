@@ -126,6 +126,38 @@ window.QuickNotes = (function () {
   const PROXY = '';
   let currentEvents = [];
 
+  // ── multi-day state ──────────────────────────────────────────────────────
+  //   selectedDate — the day the schedule list + completion state reflect.
+  //   viewY/viewM   — the month the grid is showing (may differ from selected).
+  //   eventsByDate  — keyed cache "YYYY-MM-DD" → [events]; Google Calendar stays
+  //                   the source of truth, this just lets the grid show dots and
+  //                   switch days instantly. One range fetch fills a whole month.
+  let selectedDate = todayStr();
+  const now0 = new Date();
+  let viewY = now0.getFullYear(), viewM = now0.getMonth();
+  const eventsByDate = Object.create(null);
+
+  // ── volatile undo memory ─────────────────────────────────────────────────
+  // The last block dropped via the assistant, snapshotted *before* deletion so
+  // a regret/correction ("recover the walk", "undo", "my mistake") can re-create
+  // it verbatim. One slot, cleared once consumed. Stores the raw stored title so
+  // restore round-trips through the same sentence-case display path.
+  let lastDeletedEvent = null;
+
+  function ymd(y, m, d) { return y + '-' + padZ(m + 1) + '-' + padZ(d); }
+  function partsOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); return { y, m: m - 1, d }; }
+  function dateObj(dateStr) { const p = partsOf(dateStr); return new Date(p.y, p.m, p.d); }
+  // A local Date on the selected day at h:m — so the assistant/create paths
+  // schedule onto whatever day is in view, not always today.
+  function dtOnSelected(h, m) { const p = partsOf(selectedDate); return new Date(p.y, p.m, p.d, h, m, 0, 0); }
+  // The local calendar day an event belongs to (handles all-day + timed).
+  function eventDateKey(ev) {
+    const s = ev.start || '';
+    if (ev.allDay) return s.slice(0, 10);
+    const d = new Date(s);
+    return ymd(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
   // ── formatting ──────────────────────────────────────────────────────────
   function fmtRange(startIso, endIso) {
     const s = new Date(startIso), e = new Date(endIso);
@@ -144,11 +176,12 @@ window.QuickNotes = (function () {
     const m = d.getMinutes();
     return h + (m ? ':' + padZ(m) : '') + ' ' + (d.getHours() >= 12 ? 'PM' : 'AM');
   }
-  function fmtDateLabel() {
-    const d = new Date();
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return days[d.getDay()] + ', ' + months[d.getMonth()] + ' ' + d.getDate();
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fmtDateLabel(d) {
+    d = d || new Date();
+    return DAY_NAMES[d.getDay()] + ', ' + MONTH_ABBR[d.getMonth()] + ' ' + d.getDate();
   }
   function eventClass(ev) {
     if (ev.allDay) return '';
@@ -168,8 +201,8 @@ window.QuickNotes = (function () {
   }
 
   // ── completion state (Google Calendar has no "done" flag) ─────────────────
-  function doneKey() { return 'cal_done:' + todayStr(); }
-  function manualKey() { return 'cal_manual:' + todayStr(); }
+  function doneKey() { return 'cal_done:' + selectedDate; }
+  function manualKey() { return 'cal_manual:' + selectedDate; }
   function getDoneSet() {
     try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); } catch (e) { return new Set(); }
   }
@@ -385,7 +418,8 @@ window.QuickNotes = (function () {
     const list = document.getElementById('calEventList');
     list.innerHTML = '';
     if (!events.length) {
-      list.innerHTML = '<li class="cal-empty">No blocks scheduled today</li>';
+      const when = selectedDate === todayStr() ? 'today' : 'this day';
+      list.innerHTML = '<li class="cal-empty">No blocks scheduled ' + when + '</li>';
       updateCount();
     } else {
       events.forEach(ev => list.appendChild(buildEventRow(ev)));
@@ -394,6 +428,8 @@ window.QuickNotes = (function () {
     window.dispatchEvent(new CustomEvent('apt:calendar-loaded'));
   }
 
+  // Refresh the schedule list for whichever day is selected. Caches the result
+  // in eventsByDate and re-syncs that day's dot on the grid.
   async function loadEvents() {
     const offlineEl = document.getElementById('calOfflineMsg');
     const countEl = document.getElementById('calEventCount');
@@ -401,14 +437,17 @@ window.QuickNotes = (function () {
     refreshBtn.classList.add('spinning');
     setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
     try {
-      const res = await fetch(PROXY + '/api/events?date=' + todayStr(), { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(PROXY + '/api/events?date=' + selectedDate, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
         let authExpired = false;
         try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
         throw Object.assign(new Error('HTTP ' + res.status), { authExpired });
       }
       offlineEl.style.display = 'none';
-      renderEvents(await res.json());
+      const events = await res.json();
+      eventsByDate[selectedDate] = events;
+      renderEvents(events);
+      markGridDot(selectedDate, events.length > 0);
     } catch (err) {
       offlineEl.style.display = 'block';
       if (err && err.authExpired) {
@@ -424,12 +463,35 @@ window.QuickNotes = (function () {
     }
   }
 
-  // ── create (used by the form AND the assistant) ───────────────────────────
+  // Bulk-fetch the visible month in one range call, group events into the
+  // per-date cache, and (re)paint the grid so days with blocks show a dot.
+  async function loadMonth() {
+    const start = ymd(viewY, viewM, 1);
+    const last = new Date(viewY, viewM + 1, 0).getDate();
+    const end = ymd(viewY, viewM, last);
+    try {
+      const res = await fetch(PROXY + '/api/events/range?start=' + start + '&end=' + end,
+        { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const all = await res.json();
+      // Clear this month's cache buckets, then refill from the range payload.
+      for (let d = 1; d <= last; d++) eventsByDate[ymd(viewY, viewM, d)] = [];
+      all.forEach(ev => {
+        const k = eventDateKey(ev);
+        (eventsByDate[k] = eventsByDate[k] || []).push(ev);
+      });
+    } catch (e) {
+      // Offline/range failure: leave the grid dot-less, day fetch handles errors.
+    }
+    renderGrid();
+  }
+
+  // ── create (used by the assistant) ────────────────────────────────────────
   async function createEvent({ title, notes, startDt, endDt }) {
     const res = await fetch(PROXY + '/api/events', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        title, notes: notes || undefined, date: todayStr(),
+        title, notes: notes || undefined, date: selectedDate,
         startTime: toLocalISO(startDt), endTime: toLocalISO(endDt),
       }),
     });
@@ -437,32 +499,53 @@ window.QuickNotes = (function () {
     return res.json();
   }
 
-  async function addEventFromForm() {
-    const titleEl = document.getElementById('calTaskInput');
-    const descEl = document.getElementById('calDescInput');
-    const timeEl = document.getElementById('calTimeInput');
-    const statusEl = document.getElementById('calStatus');
-    const addBtn = document.getElementById('calAddBtn');
-    const title = titleEl.value.trim();
-    if (!title) { titleEl.focus(); return; }
-    const dur = Math.max(1, parseInt(document.getElementById('calDurInput').value) || 15);
-    const [h, m] = timeEl.value.split(':').map(Number);
-    const startDt = new Date(); startDt.setHours(h, m, 0, 0);
-    const endDt = new Date(startDt.getTime() + dur * 60000);
-    addBtn.disabled = true;
-    statusEl.textContent = 'Scheduling…'; statusEl.classList.remove('is-error');
-    try {
-      await createEvent({ title, notes: descEl.value.trim(), startDt, endDt });
-      titleEl.value = ''; descEl.value = '';
-      statusEl.textContent = '✓ Added to Google Calendar';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-      loadEvents();
-    } catch {
-      statusEl.textContent = 'Failed — is the proxy running?';
-      statusEl.classList.add('is-error');
-      setTimeout(() => { statusEl.textContent = ''; statusEl.classList.remove('is-error'); }, 4000);
+  // ── month grid ────────────────────────────────────────────────────────────
+  function hasEvents(dateStr) {
+    const arr = eventsByDate[dateStr];
+    return Array.isArray(arr) && arr.length > 0;
+  }
+  function markGridDot(dateStr, on) {
+    const cell = document.querySelector('#dcwGrid .dcw-day[data-date="' + dateStr + '"]');
+    if (cell) cell.classList.toggle('has-events', !!on);
+  }
+  function renderGrid() {
+    const grid = document.getElementById('dcwGrid');
+    const titleEl = document.getElementById('dcwTitle');
+    if (!grid || !titleEl) return;
+    titleEl.textContent = MONTH_NAMES[viewM] + ' ' + viewY;
+    const firstDow = new Date(viewY, viewM, 1).getDay();
+    const daysInMonth = new Date(viewY, viewM + 1, 0).getDate();
+    const today = todayStr();
+    let html = '';
+    for (let i = 0; i < firstDow; i++) html += '<span class="dcw-day is-pad" aria-hidden="true"></span>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = ymd(viewY, viewM, d);
+      const cls = ['dcw-day'];
+      if (ds === today) cls.push('is-today');
+      if (ds === selectedDate) cls.push('is-selected');
+      if (hasEvents(ds)) cls.push('has-events');
+      html += '<button type="button" class="' + cls.join(' ') + '" role="gridcell"'
+        + ' data-date="' + ds + '"' + (ds === selectedDate ? ' aria-current="date"' : '')
+        + '><span class="dcw-num">' + d + '</span><span class="dcw-dot" aria-hidden="true"></span></button>';
     }
-    addBtn.disabled = false;
+    grid.innerHTML = html;
+  }
+  // Switch the schedule to a given day: repaint the grid highlight, refresh the
+  // header, show cached events instantly, then re-fetch that day to stay live.
+  function selectDay(dateStr) {
+    selectedDate = dateStr;
+    const p = partsOf(dateStr);
+    if (p.y !== viewY || p.m !== viewM) { viewY = p.y; viewM = p.m; loadMonth(); }
+    document.getElementById('calDateLabel').textContent = fmtDateLabel(dateObj(dateStr));
+    renderGrid();
+    if (eventsByDate[dateStr]) renderEvents(eventsByDate[dateStr]);
+    loadEvents();
+  }
+  function shiftMonth(delta) {
+    const d = new Date(viewY, viewM + delta, 1);
+    viewY = d.getFullYear(); viewM = d.getMonth();
+    renderGrid();
+    loadMonth();
   }
 
   // ── assistant-facing helpers ──────────────────────────────────────────────
@@ -498,11 +581,15 @@ window.QuickNotes = (function () {
   // between mutating an existing block and creating a new one.
   function matchTitle(q) { const ev = findEvent(q); return ev ? ev.title : null; }
   async function apiAddEvent(title, hm, durationMin, notes) {
-    const startDt = new Date(); startDt.setHours(hm.h, hm.m, 0, 0);
+    const startDt = dtOnSelected(hm.h, hm.m);
     const endDt = new Date(startDt.getTime() + (durationMin || 30) * 60000);
     const made = await createEvent({ title, notes, startDt, endDt });
     await loadEvents();
-    return { title, when: fmtTime(made.start || startDt.toISOString()) };
+    return {
+      title,
+      when: fmtTime(made.start || startDt.toISOString()),
+      end: fmtTime(made.end || endDt.toISOString()),
+    };
   }
   // Re-time a block. opts: { start:{h,m}?, end:{h,m}?, durationMin?, deltaMin? }
   //   • start only          → shift, keep duration
@@ -548,14 +635,47 @@ window.QuickNotes = (function () {
     if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
     return { ok: true, title: ev.title };
   }
+  // Rename a block in place via the proxy PATCH (same path the inline title edit
+  // uses) — no delete+recreate dance, so id/time/notes are preserved untouched.
+  async function apiRenameEvent(match, newTitle) {
+    const ev = findEvent(match);
+    if (!ev) return { ok: false };
+    const title = String(newTitle || '').trim();
+    if (!title) return { ok: false, noTitle: true };
+    ev.title = title;
+    renderEvents(currentEvents);            // reflect instantly (display sentence-cases)
+    await patchEvent(ev, { title }, null);  // reverts via loadEvents() on failure
+    return { ok: true, title: ev.title };
+  }
   async function apiDeleteEvent(match) {
     const ev = findEvent(match);
     if (!ev) return { ok: false };
+    // Snapshot BEFORE the network call so a follow-up "recover/undo" can restore
+    // it even if the user immediately regrets the deletion.
+    const snapshot = { title: ev.title, start: ev.start, end: ev.end, notes: ev.notes || '', allDay: !!ev.allDay };
     try {
       const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
+      lastDeletedEvent = snapshot;
       await loadEvents();
       return { ok: true, title: ev.title };
+    } catch { return { ok: false, error: true }; }
+  }
+  // Recover the last block dropped this session, re-creating it on its ORIGINAL
+  // day/time (falls back to the selected day at 9am if it was somehow missing).
+  // `match` is an optional name hint used only to confirm/relay what was brought
+  // back; the single-slot history is the source of truth.
+  async function apiRestoreEvent(match) {
+    const snap = lastDeletedEvent;
+    if (!snap) return { ok: false, empty: true };
+    try {
+      const startDt = snap.start ? new Date(snap.start) : dtOnSelected(9, 0);
+      const endDt = snap.end ? new Date(snap.end) : new Date(startDt.getTime() + 30 * 60000);
+      const made = await createEvent({ title: snap.title, notes: snap.notes, startDt, endDt });
+      lastDeletedEvent = null;             // consumed — don't double-restore
+      await loadEvents();
+      loadMonth();                         // refresh dots in case it landed off the selected day
+      return { ok: true, title: snap.title, when: fmtTime(made.start || startDt.toISOString()) };
     } catch { return { ok: false, error: true }; }
   }
   function summarize() {
@@ -564,37 +684,57 @@ window.QuickNotes = (function () {
       if (offline && offline.style.display !== 'none') {
         return "I can't see your calendar right now — the proxy looks offline. Once it's up I'll read your blocks.";
       }
-      return 'Nothing on the calendar today — a clean slate. Want me to add something?';
+      const where = selectedDate === todayStr() ? 'today' : 'on ' + fmtDateLabel(dateObj(selectedDate));
+      return 'Nothing on the calendar ' + where + ' — a clean slate. Want me to add something?';
     }
+    const isToday = selectedDate === todayStr();
     const now = new Date();
-    const upcoming = currentEvents.filter(ev => ev.allDay || new Date(ev.end) >= now);
+    // "Upcoming" only filters by clock-time on today; on other days show all.
+    const upcoming = isToday ? currentEvents.filter(ev => ev.allDay || new Date(ev.end) >= now) : currentEvents;
     const lines = (upcoming.length ? upcoming : currentEvents)
       .map(ev => '• ' + ev.title + (ev.allDay ? ' (all day)' : ' at ' + fmtTime(ev.start)));
     const n = currentEvents.length;
+    const when = isToday ? 'today' : fmtDateLabel(dateObj(selectedDate));
     const head = (window.__aiosGreeting ? window.__aiosGreeting() : 'Hi') +
-      '! You have ' + n + ' block' + (n === 1 ? '' : 's') + ' scheduled today:';
+      '! You have ' + n + ' block' + (n === 1 ? '' : 's') + ' scheduled ' + when + ':';
     return head + '\n' + lines.join('\n');
   }
 
   // ── wire up ───────────────────────────────────────────────────────────────
   window.addEventListener('calendar-synced', applyDoneStateToDOM);
   window.addEventListener('storage', applyDoneStateToDOM);
-  document.getElementById('calDateLabel').textContent = fmtDateLabel();
-  document.getElementById('calRefreshBtn').addEventListener('click', loadEvents);
-  document.getElementById('calAddBtn').addEventListener('click', addEventFromForm);
-  document.getElementById('calTaskInput').addEventListener('keydown', e => { if (e.key === 'Enter') addEventFromForm(); });
+  document.getElementById('calDateLabel').textContent = fmtDateLabel(dateObj(selectedDate));
+  document.getElementById('calRefreshBtn').addEventListener('click', () => { loadEvents(); loadMonth(); });
+
+  // Month-calendar widget: prev/next month + click-to-select a day.
+  const gridEl = document.getElementById('dcwGrid');
+  document.getElementById('dcwPrev').addEventListener('click', () => shiftMonth(-1));
+  document.getElementById('dcwNext').addEventListener('click', () => shiftMonth(1));
+  if (gridEl) {
+    gridEl.addEventListener('click', e => {
+      const cell = e.target.closest('.dcw-day[data-date]');
+      if (cell && cell.dataset.date !== selectedDate) selectDay(cell.dataset.date);
+    });
+  }
+  renderGrid();
+  loadMonth();
   loadEvents();
-  setInterval(loadEvents, 5 * 60 * 1000);
+  // Keep TODAY's view live; other days refresh on demand when selected.
+  setInterval(() => { if (selectedDate === todayStr()) loadEvents(); }, 5 * 60 * 1000);
 
   // Public API the assistant drives.
   window.AptCal = {
     reload: loadEvents,
+    selectDay,
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
     moveEvent: (m, hm) => apiRetimeEvent(m, { start: hm }),   // back-compat alias
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
-    matchTitle, fmtTime,
+    renameEvent: apiRenameEvent,
+    restoreEvent: apiRestoreEvent, undoLastAction: apiRestoreEvent,   // undo == restore last deletion
+    hasUndo: () => !!lastDeletedEvent,
+    matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
 })();
 
@@ -685,6 +825,42 @@ window.QuickNotes = (function () {
     }
     return out;
   }
+  // Parse a SINGLE clock token, including a bare hour ("22" → 22:00). Bare hours
+  // are read 24-hour because the only caller is the range parser, where a number
+  // unmistakably denotes a clock. `mer` flags whether am/pm was explicit, so the
+  // range parser can lend the end's meridiem to a bare start ("10 to 11:30pm").
+  function parseClockToken(tok) {
+    const t = String(tok).toLowerCase().trim();
+    if (/noon/.test(t)) return { h: 12, m: 0, mer: true };
+    if (/midnight/.test(t)) return { h: 0, m: 0, mer: true };
+    let m = t.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+    if (m) { let h = +m[1] % 12; if (m[3] === 'pm') h += 12; return { h, m: m[2] ? +m[2] : 0, mer: true }; }
+    m = t.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) return { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]), mer: false };
+    m = t.match(/^(\d{1,2})$/);
+    if (m && +m[1] >= 0 && +m[1] <= 23) return { h: +m[1], m: 0, mer: false };
+    return null;
+  }
+  // Recognise a "X to Y" time range — 24-hour ("22 to 23:30"), 12-hour
+  // ("10 to 11:30pm"), or mixed. Returns { start, end, durationMin, raw } where
+  // `raw` is the exact matched span so callers can excise it from the title.
+  // A bare start borrows the end's am/pm; an end ≤ start wraps past midnight.
+  function parseTimeRange(text) {
+    const re = /\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|until|till|through|thru|-|–|—)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i;
+    const m = text.match(re);
+    if (!m) return null;
+    const start = parseClockToken(m[1]);
+    const end = parseClockToken(m[2]);
+    if (!start || !end) return null;
+    // Lend the end's meridiem to a bare 12-hour start ("10 to 11:30pm" → 10pm).
+    if (!start.mer && end.mer && start.h <= 12) {
+      const endPm = end.h >= 12;
+      start.h = (start.h % 12) + (endPm ? 12 : 0);
+    }
+    let durationMin = (end.h * 60 + end.m) - (start.h * 60 + start.m);
+    if (durationMin <= 0) durationMin += 24 * 60;          // crosses midnight
+    return { start: { h: start.h, m: start.m }, end: { h: end.h, m: end.m }, durationMin, raw: m[0] };
+  }
   // Strip every time/duration token so what's left is the task phrase.
   const TIME_TOKENS = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:noon|midnight)\b|\b\d+\s*(?:min|minute|hour|hr)s?\b/gi;
   function fmtHm(hm) {
@@ -745,9 +921,45 @@ window.QuickNotes = (function () {
       return ((!p || PRONOUN_ONLY.test(p)) && lastMentionedEventTaskName) ? lastMentionedEventTaskName : p;
     };
 
-    // UNCHECK / unmark / undo / incomplete  → toggle done:false
-    if (/\b(uncheck|unmark|un-?mark|undo|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
-      const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|undo|incomplete|untick(ed)?|not\s+done)\b/gi));
+    // RENAME — change an existing block's title. Checked before re-time / delete
+    // / add so "change the name of X to Y" is read as a title edit (there's no
+    // time involved) rather than a re-time, a delete, or a brand-new event.
+    // Captures the target (match) and the new title; the new title drops a
+    // trailing "without …" aside and any wrapping quotes, then sentence-cases.
+    {
+      const rm =
+        raw.match(/\b(?:change|update|set|edit|fix|correct)\s+(?:the\s+)?(?:name|title)\s+of\s+(.+?)\s+(?:to|into)\s+(.+)$/i) ||
+        raw.match(/\b(?:change|update|set|edit|fix|correct)\s+(.+?)(?:'s)?\s+(?:name|title)\s+(?:to|into)\s+(.+)$/i) ||
+        raw.match(/\brename\s+(.+?)\s+(?:to|as|into)\s+(.+)$/i);
+      if (rm) {
+        const target = coref(rm[1].replace(FILLER, ' ').replace(/\s+/g, ' ').trim());
+        const newTitle = cleanTitle(
+          rm[2].trim()
+            .replace(/\s+without\b.*$/i, '')          // "…to Walk without the typo"
+            .replace(/^["'“”`]+|["'“”`]+$/g, '')       // wrapping quotes
+            .trim()
+        );
+        if (newTitle) return { action: 'rename_event', match: resolve(target) || target, newTitle };
+      }
+    }
+
+    // RECOVER / UNDO / regret — TOP PRIORITY among mutations. A correction like
+    // "sorry, my mistake — recover the walk and delete the run" must RESTORE the
+    // last dropped block; its negative keywords must never read as a fresh
+    // delete. Compound clauses are split upstream in handle(), so by the time a
+    // clause reaches here it carries a single intent ("recover the walk").
+    if (/\b(recover|restore|re-?add|un-?delete|bring\s+back|put\s+back|revert)\b/.test(t) ||
+        /\bundo\b/.test(t) ||
+        /\bcancel\s+(that|it|this|the\s+last)\b/.test(t) ||
+        /\b(my\s+mistake|my\s+bad|wrong\s+(one|event|block)|did\s?n'?t\s+mean)\b/.test(t)) {
+      // Optional name hint of what to bring back (relayed in the confirmation);
+      // the volatile history is the actual source of truth for what's restored.
+      const phrase = phraseFrom(/\b(recover|restore|re-?add|un-?delete|bring|back|put|revert|undo|cancel|sorry|mean|meant|want|mistake|bad|wrong|did|did\s?n'?t|last)\b/gi);
+      return { action: 'restore_event', match: phrase || null };
+    }
+    // UNCHECK / unmark / incomplete  → toggle done:false
+    if (/\b(uncheck|unmark|un-?mark|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
+      const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|incomplete|untick(ed)?|not\s+done)\b/gi));
       const title = resolve(phrase);
       if (title) return { action: 'uncheck_event', match: title };
       if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
@@ -771,13 +983,17 @@ window.QuickNotes = (function () {
     // "by/to N min|hr" resizes. "set"/"make" are excluded (they collide with the
     // "set up" create verb). The branch only fires when a time/duration is given.
     if (/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/.test(t)) {
-      const times = parseTimes(t);
+      // Prefer an explicit "X to Y" range (handles bare 24h hours like "22 to
+      // 23:30"); fall back to the looser am/pm/colon scanner for "10pm to 12am".
+      const range = parseTimeRange(t);
+      const times = range ? [range.start, range.end] : parseTimes(t);
       const byMatch = t.match(/\bby\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
-      const toDur = t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
+      const toDur = !range && t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
       const conv = (mm) => (/hour|hr/.test(mm[2]) ? +mm[1] * 60 : +mm[1]);
       if (times.length || byMatch || toDur) {
-        const phrase = coref(raw
-          .replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ')
+        let stripped = raw.replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ');
+        if (range) stripped = stripped.replace(range.raw, ' ');
+        const phrase = coref(stripped
           .replace(/\bfrom\b|\bto\b|\bat\b|\bby\b/gi, ' ')
           .replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ')
@@ -795,24 +1011,39 @@ window.QuickNotes = (function () {
     // ADD / schedule / remind (broad — LAST). "book" is intentionally NOT a
     // trigger: it collides with real titles like "read a book".
     if (/\b(add|schedule|create|new|remind(er)?|set up|block)\b/.test(t)) {
-      const time = parseTime(t);
-      const durM = (t.match(/(\d+)\s*(min|minute|hour|hr)/) || []);
-      let durationMin = null;
-      if (durM[1]) durationMin = /hour|hr/.test(durM[2]) ? +durM[1] * 60 : +durM[1];
+      // A "X to Y" range ("22 to 23:30") wins: it pins start + auto-duration and
+      // is excised whole from the title so no clock fragment leaks through.
+      const range = parseTimeRange(raw);
+      let time, endTime = null, durationMin = null;
+      if (range) {
+        time = range.start; endTime = range.end; durationMin = range.durationMin;
+      } else {
+        time = parseTime(t);
+        const durM = (t.match(/(\d+)\s*(min|minute|hour|hr)/) || []);
+        if (durM[1]) durationMin = /hour|hr/.test(durM[2]) ? +durM[1] * 60 : +durM[1];
+      }
       let title = raw
-        .replace(/\b(add|schedule|create|new|set up|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '')
+        .replace(/\b(add|schedule|create|new|set up|block|a reminder to|reminder to|remind me to|reminder|remind)\b/gi, '');
+      if (range) title = title.replace(range.raw, ' ');
+      title = title
+        .replace(/\bfrom\b/gi, ' ')
         .replace(/\bat\b\s*[\d:apm\s]+/i, '')
         .replace(/\bfor\b\s*\d+\s*(min|minute|hour|hr)s?/i, '')
         .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
+        .replace(/\s+/g, ' ').trim()
+        .replace(/\b(event|block)s?\s*$/i, '')   // drop a dangling connector noun
         .trim();
-      return { action: 'add_event', title: cleanTitle(title), time, durationMin };
+      return { action: 'add_event', title: cleanTitle(title), time, durationMin, endTime };
     }
     // Bare "TASK from X to Y" (no verb) — re-time, but ONLY when the phrase maps
     // to an existing block, so it never hijacks creation of a brand-new entry.
     {
-      const times = parseTimes(t);
+      const range = parseTimeRange(t);
+      const times = range ? [range.start, range.end] : parseTimes(t);
       if (times.length >= 2) {
-        const phrase = coref(raw.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
+        let stripped = raw;
+        if (range) stripped = stripped.replace(range.raw, ' ');
+        const phrase = coref(stripped.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ').replace(/\s+/g, ' ').trim());
         const title = resolve(phrase);
         if (title) return { action: 'retime_event', match: title, time: times[0], endTime: times[1] };
@@ -866,10 +1097,22 @@ window.QuickNotes = (function () {
         if (!intent.title) { addMsg('ai', 'What should I call that block?'); return; }
         if (!time) { addMsg('ai', 'When should I schedule “' + intent.title + '”? Try “at 4pm”.'); return; }
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
+        // Derive duration from an end time when only a range was supplied (e.g.
+        // a Gemini intent that gives endTime but no durationMin).
+        let durationMin = intent.durationMin;
+        const endHm = asTime(intent.endTime);
+        if (durationMin == null && endHm && time) {
+          durationMin = (endHm.h * 60 + endHm.m) - (time.h * 60 + time.m);
+          if (durationMin <= 0) durationMin += 24 * 60;
+        }
         try {
-          const r = await A.addEvent(intent.title, time, intent.durationMin, intent.notes);
+          const r = await A.addEvent(intent.title, time, durationMin, intent.notes);
           remember(r.title);
-          addMsg('ai', '✓ Scheduled “' + r.title + '” at ' + r.when + '.');
+          // Show the full span when an explicit length/range was given; otherwise
+          // just the start (default 30-min blocks read cleaner as a single time).
+          addMsg('ai', (intent.durationMin != null || intent.endTime)
+            ? '✓ Scheduled “' + r.title + '” from ' + r.when + ' to ' + r.end + '.'
+            : '✓ Scheduled “' + r.title + '” at ' + r.when + '.');
         } catch { addMsg('ai', 'Adding that failed — is the proxy running?'); }
         return;
       }
@@ -889,6 +1132,18 @@ window.QuickNotes = (function () {
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok
           ? '✓ Updated “' + r.title + '” → ' + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
+          : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        return;
+      }
+      case 'rename_event':
+      case 'update_event_title': {
+        // Gemini may carry the new name in "title"; the local parser uses "newTitle".
+        const next = intent.newTitle || intent.title;
+        if (!next) { addMsg('ai', 'What should I rename it to?'); return; }
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to rename that."); return; }
+        const r = await A.renameEvent(intent.match, next);
+        if (r.ok) { remember(r.title); addMsg('ai', '✓ Renamed event to “' + A.fmtTitle(r.title) + '”.'); }
+        else addMsg('ai', r.noTitle ? 'What should I rename it to?'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
         return;
       }
@@ -914,6 +1169,15 @@ window.QuickNotes = (function () {
         addMsg('ai', r.ok ? '✓ Deleted “' + r.title + '”.'
           : r.error ? 'Deleting that failed — is the proxy running?'
             : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        return;
+      }
+      case 'restore_event':
+      case 'undo': {
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to recover that."); return; }
+        const r = await A.restoreEvent(intent.match);
+        if (r.ok) { remember(r.title); addMsg('ai', '✓ Recovered “' + r.title + '” at ' + r.when + '.'); }
+        else if (r.empty) addMsg('ai', "There's nothing for me to undo — I haven't deleted anything recently.");
+        else addMsg('ai', 'Bringing that back failed — is the proxy running?');
         return;
       }
       case 'log_water': {
@@ -952,6 +1216,20 @@ window.QuickNotes = (function () {
     return res.json();
   }
 
+  // ── compound command splitting ───────────────────────────────────────────────
+  // Break "recover the walk and delete the run" into ordered clauses so each is
+  // handled as its own intent. We only treat a message as compound when ≥2
+  // clauses each resolve to a real local intent — otherwise it's a single command
+  // that merely contains "and"/"then" (e.g. "add read a book and relax") and we
+  // fall back to parsing the whole message intact.
+  const CLAUSE_SPLIT = /\s*(?:,\s*(?:and|then)?\s+|\band\s+then\b|\bthen\b|\band\b|;|&|\+|\balso\b)\s*/i;
+  function parseCompound(msg) {
+    const clauses = msg.split(CLAUSE_SPLIT).map(s => s.trim()).filter(Boolean);
+    if (clauses.length < 2) return null;
+    const intents = clauses.map(c => parseLocal(c)).filter(Boolean);
+    return intents.length >= 2 ? intents : null;
+  }
+
   // ── submit flow ──────────────────────────────────────────────────────────────
   let busy = false;
   async function handle(text) {
@@ -959,6 +1237,15 @@ window.QuickNotes = (function () {
     if (!msg || busy) return;
     busy = true; setSummoning(true);
     addMsg('user', msg);
+    // Multi-intent corrections first: applying a restore BEFORE a delete is what
+    // stops "recover X and delete Y" from collapsing into a second deletion.
+    const compound = parseCompound(msg);
+    if (compound) {
+      for (const it of compound) {
+        try { await applyIntent(it); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
+      }
+      busy = false; setSummoning(false); return;
+    }
     const local = parseLocal(msg);
     if (local) {
       try { await applyIntent(local); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
@@ -969,7 +1256,10 @@ window.QuickNotes = (function () {
     try {
       const intent = await askGemini(msg);
       thinking.remove();
-      if (intent && intent.reply && (!intent.action || intent.action === 'chat')) addMsg('ai', intent.reply);
+      // Gemini may return a compound plan in "steps" (restore-before-delete, etc.).
+      if (intent && Array.isArray(intent.steps) && intent.steps.length) {
+        for (const step of intent.steps) { try { await applyIntent(step); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); } }
+      } else if (intent && intent.reply && (!intent.action || intent.action === 'chat')) addMsg('ai', intent.reply);
       else await applyIntent(intent);
     } catch (e) {
       thinking.remove();
@@ -1005,5 +1295,5 @@ window.QuickNotes = (function () {
   setTimeout(greet, 6000);
 
   // Exposed for debugging / tests — inspect how a phrase is parsed locally.
-  window.Assistant = { parse: parseLocal, handle };
+  window.Assistant = { parse: parseLocal, parseCompound, handle };
 })();
