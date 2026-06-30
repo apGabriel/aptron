@@ -137,6 +137,13 @@ window.QuickNotes = (function () {
   let viewY = now0.getFullYear(), viewM = now0.getMonth();
   const eventsByDate = Object.create(null);
 
+  // ── volatile undo memory ─────────────────────────────────────────────────
+  // The last block dropped via the assistant, snapshotted *before* deletion so
+  // a regret/correction ("recover the walk", "undo", "my mistake") can re-create
+  // it verbatim. One slot, cleared once consumed. Stores the raw stored title so
+  // restore round-trips through the same sentence-case display path.
+  let lastDeletedEvent = null;
+
   function ymd(y, m, d) { return y + '-' + padZ(m + 1) + '-' + padZ(d); }
   function partsOf(dateStr) { const [y, m, d] = dateStr.split('-').map(Number); return { y, m: m - 1, d }; }
   function dateObj(dateStr) { const p = partsOf(dateStr); return new Date(p.y, p.m, p.d); }
@@ -627,11 +634,32 @@ window.QuickNotes = (function () {
   async function apiDeleteEvent(match) {
     const ev = findEvent(match);
     if (!ev) return { ok: false };
+    // Snapshot BEFORE the network call so a follow-up "recover/undo" can restore
+    // it even if the user immediately regrets the deletion.
+    const snapshot = { title: ev.title, start: ev.start, end: ev.end, notes: ev.notes || '', allDay: !!ev.allDay };
     try {
       const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
+      lastDeletedEvent = snapshot;
       await loadEvents();
       return { ok: true, title: ev.title };
+    } catch { return { ok: false, error: true }; }
+  }
+  // Recover the last block dropped this session, re-creating it on its ORIGINAL
+  // day/time (falls back to the selected day at 9am if it was somehow missing).
+  // `match` is an optional name hint used only to confirm/relay what was brought
+  // back; the single-slot history is the source of truth.
+  async function apiRestoreEvent(match) {
+    const snap = lastDeletedEvent;
+    if (!snap) return { ok: false, empty: true };
+    try {
+      const startDt = snap.start ? new Date(snap.start) : dtOnSelected(9, 0);
+      const endDt = snap.end ? new Date(snap.end) : new Date(startDt.getTime() + 30 * 60000);
+      const made = await createEvent({ title: snap.title, notes: snap.notes, startDt, endDt });
+      lastDeletedEvent = null;             // consumed — don't double-restore
+      await loadEvents();
+      loadMonth();                         // refresh dots in case it landed off the selected day
+      return { ok: true, title: snap.title, when: fmtTime(made.start || startDt.toISOString()) };
     } catch { return { ok: false, error: true }; }
   }
   function summarize() {
@@ -687,6 +715,8 @@ window.QuickNotes = (function () {
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
     moveEvent: (m, hm) => apiRetimeEvent(m, { start: hm }),   // back-compat alias
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
+    restoreEvent: apiRestoreEvent, undoLastAction: apiRestoreEvent,   // undo == restore last deletion
+    hasUndo: () => !!lastDeletedEvent,
     matchTitle, fmtTime,
   };
 })();
@@ -838,9 +868,23 @@ window.QuickNotes = (function () {
       return ((!p || PRONOUN_ONLY.test(p)) && lastMentionedEventTaskName) ? lastMentionedEventTaskName : p;
     };
 
-    // UNCHECK / unmark / undo / incomplete  → toggle done:false
-    if (/\b(uncheck|unmark|un-?mark|undo|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
-      const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|undo|incomplete|untick(ed)?|not\s+done)\b/gi));
+    // RECOVER / UNDO / regret — TOP PRIORITY among mutations. A correction like
+    // "sorry, my mistake — recover the walk and delete the run" must RESTORE the
+    // last dropped block; its negative keywords must never read as a fresh
+    // delete. Compound clauses are split upstream in handle(), so by the time a
+    // clause reaches here it carries a single intent ("recover the walk").
+    if (/\b(recover|restore|re-?add|un-?delete|bring\s+back|put\s+back|revert)\b/.test(t) ||
+        /\bundo\b/.test(t) ||
+        /\bcancel\s+(that|it|this|the\s+last)\b/.test(t) ||
+        /\b(my\s+mistake|my\s+bad|wrong\s+(one|event|block)|did\s?n'?t\s+mean)\b/.test(t)) {
+      // Optional name hint of what to bring back (relayed in the confirmation);
+      // the volatile history is the actual source of truth for what's restored.
+      const phrase = phraseFrom(/\b(recover|restore|re-?add|un-?delete|bring|back|put|revert|undo|cancel|sorry|mean|meant|want|mistake|bad|wrong|did|did\s?n'?t|last)\b/gi);
+      return { action: 'restore_event', match: phrase || null };
+    }
+    // UNCHECK / unmark / incomplete  → toggle done:false
+    if (/\b(uncheck|unmark|un-?mark|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
+      const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|incomplete|untick(ed)?|not\s+done)\b/gi));
       const title = resolve(phrase);
       if (title) return { action: 'uncheck_event', match: title };
       if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
@@ -1009,6 +1053,15 @@ window.QuickNotes = (function () {
             : "I couldn't find an event matching “" + (intent.match || '') + '”.');
         return;
       }
+      case 'restore_event':
+      case 'undo': {
+        if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to recover that."); return; }
+        const r = await A.restoreEvent(intent.match);
+        if (r.ok) { remember(r.title); addMsg('ai', '✓ Recovered “' + r.title + '” at ' + r.when + '.'); }
+        else if (r.empty) addMsg('ai', "There's nothing for me to undo — I haven't deleted anything recently.");
+        else addMsg('ai', 'Bringing that back failed — is the proxy running?');
+        return;
+      }
       case 'log_water': {
         const n = intent.servings || 1;
         const ok = logWater(n);
@@ -1045,6 +1098,20 @@ window.QuickNotes = (function () {
     return res.json();
   }
 
+  // ── compound command splitting ───────────────────────────────────────────────
+  // Break "recover the walk and delete the run" into ordered clauses so each is
+  // handled as its own intent. We only treat a message as compound when ≥2
+  // clauses each resolve to a real local intent — otherwise it's a single command
+  // that merely contains "and"/"then" (e.g. "add read a book and relax") and we
+  // fall back to parsing the whole message intact.
+  const CLAUSE_SPLIT = /\s*(?:,\s*(?:and|then)?\s+|\band\s+then\b|\bthen\b|\band\b|;|&|\+|\balso\b)\s*/i;
+  function parseCompound(msg) {
+    const clauses = msg.split(CLAUSE_SPLIT).map(s => s.trim()).filter(Boolean);
+    if (clauses.length < 2) return null;
+    const intents = clauses.map(c => parseLocal(c)).filter(Boolean);
+    return intents.length >= 2 ? intents : null;
+  }
+
   // ── submit flow ──────────────────────────────────────────────────────────────
   let busy = false;
   async function handle(text) {
@@ -1052,6 +1119,15 @@ window.QuickNotes = (function () {
     if (!msg || busy) return;
     busy = true; setSummoning(true);
     addMsg('user', msg);
+    // Multi-intent corrections first: applying a restore BEFORE a delete is what
+    // stops "recover X and delete Y" from collapsing into a second deletion.
+    const compound = parseCompound(msg);
+    if (compound) {
+      for (const it of compound) {
+        try { await applyIntent(it); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
+      }
+      busy = false; setSummoning(false); return;
+    }
     const local = parseLocal(msg);
     if (local) {
       try { await applyIntent(local); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
@@ -1062,7 +1138,10 @@ window.QuickNotes = (function () {
     try {
       const intent = await askGemini(msg);
       thinking.remove();
-      if (intent && intent.reply && (!intent.action || intent.action === 'chat')) addMsg('ai', intent.reply);
+      // Gemini may return a compound plan in "steps" (restore-before-delete, etc.).
+      if (intent && Array.isArray(intent.steps) && intent.steps.length) {
+        for (const step of intent.steps) { try { await applyIntent(step); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); } }
+      } else if (intent && intent.reply && (!intent.action || intent.action === 'chat')) addMsg('ai', intent.reply);
       else await applyIntent(intent);
     } catch (e) {
       thinking.remove();
@@ -1098,5 +1177,5 @@ window.QuickNotes = (function () {
   setTimeout(greet, 6000);
 
   // Exposed for debugging / tests — inspect how a phrase is parsed locally.
-  window.Assistant = { parse: parseLocal, handle };
+  window.Assistant = { parse: parseLocal, parseCompound, handle };
 })();
