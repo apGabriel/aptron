@@ -18,8 +18,8 @@
   // Stores gym state as one JSONB row in public.app_state, keyed by
   // APP_KEY. Supabase's realtime channel pushes changes to every device.
   // ============================================================
-  const SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
   const APP_KEY = 'po-coach';
   const PC_SYNCED_KEYS = ['po_coach_v1', 'po_coach_workout_done', 'po_coach_photos'];
 

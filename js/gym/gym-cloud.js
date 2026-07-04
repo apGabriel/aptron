@@ -8,8 +8,8 @@
    ============================================================ */
 (function () {
   // Same Supabase project + publishable (anon) key as the blob sync.
-  const SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
   const RB_KEY        = 'rb_routines_v1';
   const COACH_KEY     = 'po_coach_v1';
   const QUEUE_KEY     = 'local_sync_queue';        // pending ops, keyed for idempotency

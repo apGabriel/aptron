@@ -3,8 +3,8 @@
 // =============================================================
 (function () {
   'use strict';
-  const SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
 
   window.initCloudSync = function (config) {
     const appKey = config && config.appKey;

@@ -11,8 +11,8 @@
   'use strict';
 
   // -------- Supabase config --------
-  const TOPBAR_SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const TOPBAR_SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const TOPBAR_SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const TOPBAR_SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
 
   // -------- CSS --------
   const css = `
