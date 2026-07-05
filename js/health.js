@@ -1351,7 +1351,8 @@ const CONFIG = {
   async function analyzeMealImage(base64Image, mime) {
     const r = await fetch(PROXY + '/api/gemini/meal-scan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+        window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
       body: JSON.stringify({ image: base64Image, mime: mime || 'image/jpeg' }),
       signal: AbortSignal.timeout(30000),
     });

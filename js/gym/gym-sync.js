@@ -18,8 +18,8 @@
   // Stores gym state as one JSONB row in public.app_state, keyed by
   // APP_KEY. Supabase's realtime channel pushes changes to every device.
   // ============================================================
-  const SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
   const APP_KEY = 'po-coach';
   const PC_SYNCED_KEYS = ['po_coach_v1', 'po_coach_workout_done', 'po_coach_photos'];
 
@@ -166,7 +166,7 @@
         method: 'POST',
         headers: {
           'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (window.__appAccessToken || SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'resolution=merge-duplicates',
         },
@@ -183,7 +183,12 @@
     if (!window.supabase || !SUPABASE_URL || !SUPABASE_KEY) return;
     // Skip if the placeholder values are still in place (local-only mode)
     if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) return;
-    pcSupa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    // Wait for the login gate, then reuse the one authed client (js/auth.js) so
+    // the JWT rides along for RLS. A fresh createClient() would carry only the
+    // anon key and be denied.
+    await (window.APP_AUTH_READY || Promise.resolve());
+    pcSupa = window.APP_SUPABASE;
+    if (!pcSupa) return;
     G.pcSupa = pcSupa;   // shared so the photo uploader (gym-ui.js) can use it
     try {
       const { data, error } = await pcSupa

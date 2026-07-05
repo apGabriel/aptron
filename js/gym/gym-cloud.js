@@ -8,8 +8,8 @@
    ============================================================ */
 (function () {
   // Same Supabase project + publishable (anon) key as the blob sync.
-  const SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
   const RB_KEY        = 'rb_routines_v1';
   const COACH_KEY     = 'po_coach_v1';
   const QUEUE_KEY     = 'local_sync_queue';        // pending ops, keyed for idempotency
@@ -17,7 +17,10 @@
 
   const ready = !!(window.supabase && SUPABASE_URL && SUPABASE_KEY &&
                    SUPABASE_URL.indexOf('PASTE-') !== 0 && SUPABASE_KEY.indexOf('PASTE-') !== 0);
-  const supa = ready ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+  // The one authed client is created by js/auth.js; we attach to it in init()
+  // once APP_AUTH_READY resolves. A second createClient() would carry only the
+  // anon key and be denied by RLS. Until then, ops queue in localStorage.
+  let supa = null;
 
   // ── Offline queue (a map keyed by op-key so retries collapse) ──
   function loadQueue() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || {}; } catch { return {}; } }
@@ -58,12 +61,12 @@
 
   // Try immediately; stash for retry on failure / no connectivity.
   async function attempt(op) {
-    if (!ready || !navigator.onLine) { enqueue(op); return; }
+    if (!ready || !navigator.onLine || !supa) { enqueue(op); return; }
     const ok = await runOp(op);
     if (ok) dequeue(op.key); else enqueue(op);
   }
   async function flushQueue() {
-    if (!ready || !navigator.onLine) return;
+    if (!ready || !navigator.onLine || !supa) return;
     const q = loadQueue();
     for (const k of Object.keys(q)) {
       const ok = await runOp(q[k]);
@@ -191,7 +194,10 @@
   }
 
   async function init() {
-    if (!ready) return;     // no client → app stays local-only (writes still queue)
+    if (!ready) return;     // not configured → app stays local-only (writes still queue)
+    await (window.APP_AUTH_READY || Promise.resolve());
+    supa = window.APP_SUPABASE;
+    if (!supa) return;      // signed out / local-only → ops stay queued
     await flushQueue();     // retry anything stranded from a past offline session
     backfillOnce();         // one-time seed of existing local data
     await pullRoutines();   // bring in routines from other devices

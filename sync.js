@@ -3,8 +3,8 @@
 // =============================================================
 (function () {
   'use strict';
-  const SUPABASE_URL = 'https://vcuqcjtzdjtonvaqolzm.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_JEudB5hgyn38SkUiO6oWhw_9Qrtr36b';
+  const SUPABASE_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
+  const SUPABASE_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
 
   window.initCloudSync = function (config) {
     const appKey = config && config.appKey;
@@ -154,7 +154,7 @@
           method: 'POST',
           headers: {
             'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Authorization': 'Bearer ' + (window.__appAccessToken || SUPABASE_KEY),
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates',
           },
@@ -165,7 +165,12 @@
       } catch (e) {}
     }
     (async function init() {
-      supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      // Wait for the login gate, then reuse the one authed client (js/auth.js).
+      // Its JWT is what RLS checks; a fresh createClient() here would only carry
+      // the anon key and get denied.
+      await (window.APP_AUTH_READY || Promise.resolve());
+      supa = window.APP_SUPABASE;
+      if (!supa) return;
       try {
         const { data, error } = await supa.from('app_state').select('data,updated_at').eq('key', appKey).maybeSingle();
         if (!error && data && data.data && Object.keys(data.data).length > 0) {
