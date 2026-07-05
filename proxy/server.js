@@ -45,6 +45,20 @@ if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
   console.error('ERROR: Missing Google OAuth credentials in environment variables.');
 }
 
+// ── Supabase auth (gate /api behind the dashboard login) ──────────────────────
+// The frontend attaches the logged-in user's JWT as `Authorization: Bearer …`.
+// We validate it by asking Supabase's GoTrue `/auth/v1/user` endpoint (no extra
+// dependency — just fetch), then cache the result briefly so a burst of calendar
+// calls doesn't hit Supabase once each.
+const SUPABASE_URL      = process.env.SUPABASE_URL      || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '';
+const AUTH_CONFIGURED   = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+if (!AUTH_CONFIGURED) {
+  console.error('ERROR: SUPABASE_URL / SUPABASE_ANON_KEY missing — /api is locked (all requests 503).');
+}
+const tokenCache = new Map();   // jwt → { user, exp(ms) }
+const TOKEN_TTL_MS = 60 * 1000;
+
 // Build an OAuth2 client that auto-refreshes the access token using the
 // stored refresh token — no manual re-auth needed after the first setup.
 const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, 'http://localhost:3002/callback');
@@ -54,6 +68,35 @@ const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '8mb' }));   // meal-scan posts a base64 image
+
+// Require a valid Supabase session on every /api route. `/health` stays open so
+// uptime checks work without a token. Fails CLOSED: if auth isn't configured, or
+// the token is missing/invalid/expired, no calendar or Gemini access is granted.
+async function requireAuth(req, res, next) {
+  if (!AUTH_CONFIGURED) return res.status(503).json({ error: 'Auth not configured on the proxy' });
+  const hdr = req.headers.authorization || '';
+  const token = hdr.startsWith('Bearer ') ? hdr.slice(7).trim() : '';
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+  const cached = tokenCache.get(token);
+  if (cached && cached.exp > Date.now()) { req.user = cached.user; return next(); }
+
+  try {
+    const r = await fetch(SUPABASE_URL.replace(/\/$/, '') + '/auth/v1/user', {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return res.status(401).json({ error: 'Invalid or expired session' });
+    const user = await r.json();
+    if (!user || !user.id) return res.status(401).json({ error: 'Invalid session' });
+    tokenCache.set(token, { user, exp: Date.now() + TOKEN_TTL_MS });
+    req.user = user;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Auth check failed' });
+  }
+}
+app.use('/api', requireAuth);   // registered before the /api routes below
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function dayBounds(dateStr) {

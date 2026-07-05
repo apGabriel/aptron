@@ -126,6 +126,17 @@ window.QuickNotes = (function () {
   const PROXY = '';
   let currentEvents = [];
 
+  // Every calendar call goes through the proxy, which now requires the login
+  // JWT (js/auth.js keeps window.__appAccessToken fresh). Attach it as a bearer
+  // token; without a session the proxy answers 401 and the UI shows "offline".
+  function authedFetch(url, opts) {
+    opts = opts || {};
+    const headers = Object.assign({}, opts.headers);
+    const token = window.__appAccessToken;
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(url, Object.assign({}, opts, { headers }));
+  }
+
   // ── multi-day state ──────────────────────────────────────────────────────
   //   selectedDate — the day the schedule list + completion state reflect.
   //   viewY/viewM   — the month the grid is showing (may differ from selected).
@@ -257,7 +268,7 @@ window.QuickNotes = (function () {
   async function patchEvent(ev, body, el) {
     if (el) el.classList.add('cal-saving');
     try {
-      const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), {
+      const res = await authedFetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -437,7 +448,7 @@ window.QuickNotes = (function () {
     refreshBtn.classList.add('spinning');
     setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
     try {
-      const res = await fetch(PROXY + '/api/events?date=' + selectedDate, { signal: AbortSignal.timeout(5000) });
+      const res = await authedFetch(PROXY + '/api/events?date=' + selectedDate, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
         let authExpired = false;
         try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
@@ -470,7 +481,7 @@ window.QuickNotes = (function () {
     const last = new Date(viewY, viewM + 1, 0).getDate();
     const end = ymd(viewY, viewM, last);
     try {
-      const res = await fetch(PROXY + '/api/events/range?start=' + start + '&end=' + end,
+      const res = await authedFetch(PROXY + '/api/events/range?start=' + start + '&end=' + end,
         { signal: AbortSignal.timeout(6000) });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const all = await res.json();
@@ -488,7 +499,7 @@ window.QuickNotes = (function () {
 
   // ── create (used by the assistant) ────────────────────────────────────────
   async function createEvent({ title, notes, startDt, endDt }) {
-    const res = await fetch(PROXY + '/api/events', {
+    const res = await authedFetch(PROXY + '/api/events', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title, notes: notes || undefined, date: selectedDate,
@@ -654,7 +665,7 @@ window.QuickNotes = (function () {
     // it even if the user immediately regrets the deletion.
     const snapshot = { title: ev.title, start: ev.start, end: ev.end, notes: ev.notes || '', allDay: !!ev.allDay };
     try {
-      const res = await fetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
+      const res = await authedFetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       lastDeletedEvent = snapshot;
       await loadEvents();
@@ -1208,7 +1219,9 @@ window.QuickNotes = (function () {
   // ── Gemini fallback ──────────────────────────────────────────────────────────
   async function askGemini(message) {
     const res = await fetch(GEMINI_ENDPOINT, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+        window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
       body: JSON.stringify({ message, context: { date: todayStr(), events: window.AptCal.getEvents() } }),
       signal: AbortSignal.timeout(15000),
     });
