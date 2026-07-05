@@ -32,8 +32,18 @@ sync and a small Express proxy (`proxy/`) that fronts the Google Calendar API.
   2. `gym.js` uses normalized `routines` + `exercise_logs` tables
      (migration in `supabase/migrations/`). `gym.html` runs BOTH the app_state
      blob and the normalized tables on purpose.
-- **No auth flow.** Personal-use; Supabase anon/publishable key in root `.env`
-  (safe to expose, gated by RLS). The proxy holds the Google secrets server-side.
+- **Single-owner auth (Supabase Auth + RLS).** `js/auth.js` gates every page
+  with an email+password login and creates the ONE shared authenticated client,
+  `window.APP_SUPABASE`. Tables are scoped to `auth.uid()` (RLS, migration
+  `0003`); the anon key alone reads nothing. The publishable/anon key in
+  `js/config.js` is still public, but it's only an entry point — the JWT is what
+  grants access. The proxy holds the Google secrets server-side. See `AUTH.md`.
+  - **Any new Supabase code MUST reuse `window.APP_SUPABASE`** (await
+    `window.APP_AUTH_READY` first) — a second `createClient()` carries only the
+    anon key and is denied by RLS.
+  - **Any new calendar/proxy call MUST go through `authedFetch`** (js/index.js)
+    or otherwise attach `Authorization: Bearer ${window.__appAccessToken}` — the
+    proxy's `/api/*` middleware rejects requests without a valid session JWT.
 
 ## Big files
 
@@ -45,7 +55,9 @@ Each feature is a self-contained IIFE communicating only via `window`/`CONFIG`.
 
 - Root `.env`: `SUPABASE_URL`, `SUPABASE_KEY`.
 - `proxy/.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`,
-  `GOOGLE_CALENDAR_ID`, `TIMEZONE`, `PORT`. Both `.env` files are gitignored.
+  `GOOGLE_CALENDAR_ID`, `TIMEZONE`, `PORT`, plus `SUPABASE_URL` +
+  `SUPABASE_ANON_KEY` (used to validate the login JWT on `/api`; without them
+  `/api` fails closed). Both `.env` files are gitignored.
 
 ## Git workflow
 
