@@ -136,9 +136,46 @@ window.QuickNotes = (function () {
     await (window.APP_AUTH_READY || Promise.resolve());
     opts = opts || {};
     const headers = Object.assign({}, opts.headers);
-    const token = window.__appAccessToken;
+    let token = window.__appAccessToken;
+    // Rare race: APP_AUTH_READY resolved but the mirrored token isn't set yet
+    // (or was rotated). Pull it straight from the live session so the very first
+    // post-login request still carries a valid bearer.
+    if (!token && window.APP_SUPABASE) {
+      try {
+        const { data } = await window.APP_SUPABASE.auth.getSession();
+        token = data && data.session && data.session.access_token;
+      } catch (e) {}
+    }
     if (token) headers['Authorization'] = 'Bearer ' + token;
     return fetch(url, Object.assign({}, opts, { headers }));
+  }
+
+  // Turn a calendar failure into a specific, debuggable message. Distinguishes a
+  // genuinely unreachable proxy (no HTTP status — fetch threw or timed out) from
+  // an auth handshake failure (401/403), a misconfigured proxy (503), a proxy
+  // that can't reach Supabase (502), and Google re-auth (invalid_grant).
+  function calShowError(offlineEl, countEl, err) {
+    const status = err && err.status;
+    if (err && err.authExpired) {
+      offlineEl.innerHTML = '⚠ Google session expired — <strong>re-authenticate</strong>';
+      countEl.textContent = 'session expired';
+    } else if (status === 401 || status === 403) {
+      offlineEl.innerHTML = '⚠ Your login wasn’t accepted by the proxy — <strong>sign out and in again</strong>.';
+      countEl.textContent = 'auth error';
+    } else if (status === 503) {
+      offlineEl.textContent = '⚠ Proxy is missing its Supabase keys (auth not configured on the server).';
+      countEl.textContent = 'proxy misconfigured';
+    } else if (status === 502) {
+      offlineEl.textContent = '⚠ Proxy can’t reach the auth server to verify your session.';
+      countEl.textContent = 'auth unreachable';
+    } else if (status) {
+      offlineEl.textContent = '⚠ Calendar error (HTTP ' + status + ').';
+      countEl.textContent = 'error ' + status;
+    } else {
+      // No status → the request never completed: proxy down, network, or timeout.
+      offlineEl.innerHTML = '⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.';
+      countEl.textContent = 'proxy offline';
+    }
   }
 
   // ── multi-day state ──────────────────────────────────────────────────────
@@ -454,9 +491,10 @@ window.QuickNotes = (function () {
     try {
       const res = await authedFetch(PROXY + '/api/events?date=' + selectedDate, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
-        let authExpired = false;
-        try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
-        throw Object.assign(new Error('HTTP ' + res.status), { authExpired });
+        let body = null;
+        try { body = await res.json(); } catch (e) {}
+        const authExpired = /invalid_grant/i.test((body && body.error) || '');
+        throw Object.assign(new Error('HTTP ' + res.status), { status: res.status, authExpired });
       }
       offlineEl.style.display = 'none';
       const events = await res.json();
@@ -465,13 +503,7 @@ window.QuickNotes = (function () {
       markGridDot(selectedDate, events.length > 0);
     } catch (err) {
       offlineEl.style.display = 'block';
-      if (err && err.authExpired) {
-        offlineEl.innerHTML = '⚠ Google session expired — <strong>re-authenticate</strong>';
-        countEl.textContent = 'session expired';
-      } else {
-        offlineEl.innerHTML = '⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.';
-        countEl.textContent = 'proxy offline';
-      }
+      calShowError(offlineEl, countEl, err);
       document.getElementById('calEventList').innerHTML = '';
       currentEvents = [];
       window.dispatchEvent(new CustomEvent('apt:calendar-loaded'));

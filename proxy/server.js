@@ -54,7 +54,15 @@ const SUPABASE_URL      = process.env.SUPABASE_URL      || '';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '';
 const AUTH_CONFIGURED   = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 if (!AUTH_CONFIGURED) {
-  console.error('ERROR: SUPABASE_URL / SUPABASE_ANON_KEY missing — /api is locked (all requests 503).');
+  const missing = [!SUPABASE_URL && 'SUPABASE_URL', !SUPABASE_ANON_KEY && 'SUPABASE_ANON_KEY']
+    .filter(Boolean).join(' and ');
+  console.error(
+    '\n  [auth] DISABLED — missing ' + missing + ' in the environment.\n' +
+    '  Every /api request will return 503 until these are set in proxy/.env\n' +
+    '  (and on the host, e.g. Render). /health stays open.\n'
+  );
+} else {
+  console.log('  [auth] enabled — validating JWTs against ' + SUPABASE_URL.replace(/\/$/, '') + '/auth/v1/user');
 }
 const tokenCache = new Map();   // jwt → { user, exp(ms) }
 const TOKEN_TTL_MS = 60 * 1000;
@@ -66,14 +74,28 @@ oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
 const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors());
+// Explicit CORS so the Authorization (JWT) header is always allowed and OPTIONS
+// preflights are answered up-front. In production the dashboard reaches /api
+// same-origin (Vercel rewrite), so this mainly matters for local cross-origin dev.
+app.use(cors({
+  origin: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json({ limit: '8mb' }));   // meal-scan posts a base64 image
 
 // Require a valid Supabase session on every /api route. `/health` stays open so
 // uptime checks work without a token. Fails CLOSED: if auth isn't configured, or
 // the token is missing/invalid/expired, no calendar or Gemini access is granted.
 async function requireAuth(req, res, next) {
-  if (!AUTH_CONFIGURED) return res.status(503).json({ error: 'Auth not configured on the proxy' });
+  // Never gate CORS preflight — it carries no auth header by design. cors() above
+  // already answers OPTIONS; this is belt-and-suspenders against a future reorder.
+  if (req.method === 'OPTIONS') return next();
+  if (!AUTH_CONFIGURED) {
+    return res.status(503).json({
+      error: 'Proxy auth not configured (SUPABASE_URL / SUPABASE_ANON_KEY missing on the server)',
+    });
+  }
   const hdr = req.headers.authorization || '';
   const token = hdr.startsWith('Bearer ') ? hdr.slice(7).trim() : '';
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
@@ -93,7 +115,11 @@ async function requireAuth(req, res, next) {
     req.user = user;
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Auth check failed' });
+    // The token may be perfectly valid — we just couldn't reach Supabase to
+    // verify it. Surface that as 502 (upstream problem) so it's not confused
+    // with a genuinely bad token (401).
+    console.error('[auth] could not reach Supabase to verify token:', err && err.message);
+    return res.status(502).json({ error: 'Could not verify session (auth server unreachable)' });
   }
 }
 app.use('/api', requireAuth);   // registered before the /api routes below

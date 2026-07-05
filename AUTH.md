@@ -105,7 +105,22 @@ Everything is on `feature/auth` and unpushed. To revert the DB, re-open the anon
 policies from `0001` and drop the `owner` policies / `user_id` columns. Code-side,
 just don't merge the branch.
 
+## Troubleshooting — the schedule shows an error after login
+
+The calendar widget now names the exact failure instead of a blanket "proxy
+offline". Match the message to the fix:
+
+| In-app message | Proxy status | Cause | Fix |
+|---|---|---|---|
+| "Proxy is missing its Supabase keys…" | 503 | `SUPABASE_URL`/`SUPABASE_ANON_KEY` not set on the proxy | Add both to the proxy env (local `proxy/.env` **and** Render) and redeploy/restart |
+| "Your login wasn't accepted by the proxy…" | 401 | No/expired/invalid JWT reached the proxy | Sign out and back in; confirm the frontend is sending `Authorization: Bearer …` |
+| "Proxy can't reach the auth server…" | 502 | Proxy is up but can't reach Supabase to verify the token | Check the proxy's network / `SUPABASE_URL` value |
+| "Google session expired — re-authenticate" | 5xx (`invalid_grant`) | Google refresh token stale | Re-run the Google OAuth (`npm run auth`) and update `GOOGLE_REFRESH_TOKEN` |
+| "Proxy offline — run `npm start`…" | (no HTTP status) | Request never completed: proxy down, network, or timeout | Start/redeploy the proxy |
+
+The proxy also logs its auth state on boot: `[auth] enabled — validating JWTs
+against …/auth/v1/user`, or a multi-line `[auth] DISABLED — missing …` block.
+
 ## Follow-ups (not done here)
-- `CLAUDE.md` still says "No auth flow" — update it when this merges.
-- Consider gating `js/index.js`'s calendar fetch behind `APP_AUTH_READY` too, so it
-  doesn't fire (harmless 401) calls while the gate is up.
+- The `progress-photos` Storage bucket may need an `authenticated` policy if gym
+  photo uploads fail after login (Storage policies are separate from the table RLS).
