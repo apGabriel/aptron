@@ -127,9 +127,13 @@ window.QuickNotes = (function () {
   let currentEvents = [];
 
   // Every calendar call goes through the proxy, which now requires the login
-  // JWT (js/auth.js keeps window.__appAccessToken fresh). Attach it as a bearer
-  // token; without a session the proxy answers 401 and the UI shows "offline".
-  function authedFetch(url, opts) {
+  // JWT (js/auth.js keeps window.__appAccessToken fresh). This is the single
+  // choke point for /api traffic, so it awaits APP_AUTH_READY first: nothing
+  // hits the network until the session is confirmed (no pre-auth 401 "ghost
+  // fetch" on load). After login the promise is already resolved, so the await
+  // is a no-op microtask. Then attach the token as a bearer.
+  async function authedFetch(url, opts) {
+    await (window.APP_AUTH_READY || Promise.resolve());
     opts = opts || {};
     const headers = Object.assign({}, opts.headers);
     const token = window.__appAccessToken;
