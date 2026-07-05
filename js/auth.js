@@ -64,57 +64,176 @@
   function buildGate() {
     if (gateEl) return gateEl;
     const style = document.createElement('style');
+    // Styled to the Shenlong ecosystem (css/styles.css): deep-slate glass card,
+    // gold (#d2bc8a / #956534) accents + gradient, the shenlong.png emblem orb,
+    // and matching focus glow. Fades in on render, fades out on success.
     style.textContent = `
 .auth-gate {
   position: fixed; inset: 0; z-index: 100000;
   display: flex; align-items: center; justify-content: center;
   padding: max(20px, env(safe-area-inset-top)) 20px;
-  background: #0a0a0b;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 6%, rgba(149,101,52,0.30) 0%, transparent 62%),
+    radial-gradient(ellipse 55% 45% at 12% 100%, rgba(210,188,138,0.10) 0%, transparent 65%),
+    #0d0d0e;
+  opacity: 0;
+  animation: authGateIn 0.5s ease forwards;
 }
+.auth-gate.is-leaving { animation: authGateOut 0.45s ease forwards; }
+@keyframes authGateIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes authGateOut { from { opacity: 1; } to { opacity: 0; } }
+
 .auth-card {
-  width: 100%; max-width: 360px;
-  display: flex; flex-direction: column; gap: 14px;
-  padding: 28px 24px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 16px;
+  position: relative;
+  width: 100%; max-width: 372px;
+  display: flex; flex-direction: column; gap: 15px;
+  padding: 34px 26px 28px;
+  background: linear-gradient(180deg, rgba(58,56,52,0.90) 0%, rgba(37,36,34,0.93) 100%);
+  border: 1px solid rgba(210,188,138,0.16);
+  border-radius: 20px;
+  backdrop-filter: blur(26px) saturate(1.2);
+  -webkit-backdrop-filter: blur(26px) saturate(1.2);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.62), 0 0 40px rgba(210,188,138,0.06),
+              inset 0 1px 0 rgba(255,255,255,0.05);
+  transform: translateY(8px) scale(0.985);
+  animation: authCardIn 0.55s cubic-bezier(0.22,1,0.36,1) forwards;
 }
-.auth-title { color: #FAFAFA; font-size: 18px; font-weight: 700; margin: 0; }
-.auth-sub { color: rgba(255,255,255,0.5); font-size: 13px; margin: -6px 0 4px; }
+@keyframes authCardIn { to { transform: translateY(0) scale(1); } }
+.auth-gate.is-leaving .auth-card {
+  transition: transform 0.4s ease, opacity 0.4s ease;
+  transform: translateY(-6px) scale(0.97); opacity: 0;
+}
+
+.auth-orb {
+  width: 56px; height: 56px; border-radius: 50%;
+  align-self: center;
+  display: flex; align-items: center; justify-content: center;
+  color: #d2bc8a;
+  background: radial-gradient(circle at 35% 30%, rgba(210,188,138,0.38), rgba(149,101,52,0.16));
+  animation: authOrbPulse 3.6s ease-in-out infinite;
+}
+.auth-orb .auth-emblem {
+  width: 46px; height: 46px; background: currentColor;
+  -webkit-mask: url("img/shenlong.png") center / contain no-repeat;
+          mask: url("img/shenlong.png") center / contain no-repeat;
+}
+@keyframes authOrbPulse {
+  0%,100% { box-shadow: 0 0 14px rgba(210,188,138,0.18); }
+  50%     { box-shadow: 0 0 28px rgba(210,188,138,0.44); }
+}
+
+.auth-title {
+  align-self: center; margin: 0;
+  font-size: 24px; font-weight: 700; letter-spacing: -0.02em;
+  background: linear-gradient(180deg, #FFFFFF 0%, #d2bc8a 140%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.auth-sub {
+  align-self: center; margin: -9px 0 6px;
+  color: rgba(255,255,255,0.48); font-size: 12.5px; letter-spacing: 0.01em;
+}
+
 .auth-input {
   width: 100%; box-sizing: border-box;
-  padding: 12px 14px; font-size: 15px; font-family: inherit;
-  color: #FAFAFA; background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.10); border-radius: 12px;
+  padding: 13px 15px; font-size: 15px; font-family: inherit;
+  color: #FFFFFF; background: rgba(0,0,0,0.28);
+  border: 1px solid rgba(210,188,138,0.16); border-radius: 13px;
   -webkit-appearance: none; outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
-.auth-input:focus { border-color: rgba(125,211,252,0.5); }
+.auth-input::placeholder { color: rgba(255,255,255,0.34); }
+.auth-input:focus {
+  border-color: rgba(210,188,138,0.55);
+  background: rgba(0,0,0,0.34);
+  box-shadow: 0 0 0 3px rgba(210,188,138,0.12), 0 0 18px rgba(210,188,138,0.16);
+}
+.auth-input:-webkit-autofill {
+  -webkit-text-fill-color: #fff;
+  -webkit-box-shadow: 0 0 0 40px #2a2926 inset;
+  caret-color: #fff;
+}
+
 .auth-btn {
-  padding: 12px 14px; font-size: 15px; font-weight: 700; font-family: inherit;
-  color: #05121f; cursor: pointer; border: none; border-radius: 12px;
-  background: linear-gradient(180deg, #7DD3FC, #6EE7B7);
+  margin-top: 4px;
+  padding: 13px 14px; font-size: 15px; font-weight: 700; font-family: inherit;
+  color: #1a1408; cursor: pointer; border: none; border-radius: 13px;
+  background: linear-gradient(180deg, #e6cf9c 0%, #d2bc8a 48%, #b8a06e 100%);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 8px 22px rgba(149,101,52,0.32);
   -webkit-tap-highlight-color: transparent;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease, opacity 0.14s ease;
 }
-.auth-btn:disabled { opacity: 0.6; cursor: default; }
-.auth-err { color: #ff8a8a; font-size: 13px; min-height: 16px; margin: 0; }
+.auth-btn:hover:not(:disabled) {
+  transform: translateY(-1px); filter: brightness(1.05);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.45) inset, 0 10px 26px rgba(149,101,52,0.42);
+}
+.auth-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985); filter: brightness(0.97);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.30) inset, 0 5px 14px rgba(149,101,52,0.30);
+}
+.auth-btn:disabled { opacity: 0.62; cursor: default; }
+
+.auth-err {
+  color: #e98b7f; font-size: 12.5px; min-height: 16px; margin: 0;
+  text-align: center; line-height: 1.35;
+}
+
+@media (max-width: 400px) {
+  .auth-card { padding: 30px 20px 24px; border-radius: 18px; }
+  .auth-title { font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-gate, .auth-card, .auth-orb {
+    animation: none !important; opacity: 1 !important; transform: none !important;
+  }
+  .auth-gate.is-leaving { opacity: 0; transition: opacity 0.2s; }
+}
 `;
     document.head.appendChild(style);
 
     const wrap = document.createElement('div');
     wrap.className = 'auth-gate';
+    // Static markup only — no interpolation, so nothing user-supplied is ever
+    // parsed as HTML here.
     wrap.innerHTML = `
-<form class="auth-card" id="authForm" autocomplete="on">
+<form class="auth-card" id="authForm" autocomplete="on" novalidate>
+  <div class="auth-orb" aria-hidden="true"><span class="auth-emblem"></span></div>
   <h1 class="auth-title">Aptron</h1>
-  <p class="auth-sub">Sign in to continue.</p>
-  <input class="auth-input" id="authEmail" type="email" name="email"
-         placeholder="Email" autocomplete="username" required>
-  <input class="auth-input" id="authPass" type="password" name="password"
-         placeholder="Password" autocomplete="current-password" required>
-  <p class="auth-err" id="authErr" role="alert"></p>
+  <p class="auth-sub">Summon your dashboard — sign in to continue.</p>
+  <input class="auth-input" id="authEmail" type="email" name="email" placeholder="Email"
+         autocomplete="username" inputmode="email" spellcheck="false"
+         autocapitalize="off" autocorrect="off" maxlength="100" required>
+  <input class="auth-input" id="authPass" type="password" name="password" placeholder="Password"
+         autocomplete="current-password" maxlength="100" required>
+  <p class="auth-err" id="authErr" role="alert" aria-live="polite"></p>
   <button class="auth-btn" id="authBtn" type="submit">Sign in</button>
 </form>`;
     gateEl = wrap;
+
+    // ── Client-side hardening (defense-in-depth) ─────────────────────────────
+    const MAX_LEN  = 100;                          // cap both fields
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;  // strict shape check
+    // We render errors with textContent (never innerHTML), so markup can't
+    // execute. cleanText additionally strips control chars and caps length as a
+    // belt-and-suspenders guard on the fallback path that echoes a raw string.
+    function cleanText(s) {
+      return String(s == null ? '' : s).replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 160);
+    }
+    // Map known GoTrue messages to clean copy so raw backend text is not echoed;
+    // the fallback still passes through cleanText + textContent.
+    function friendlyAuthError(error) {
+      const raw = (error && (error.message || error.error_description)) || '';
+      const m = raw.toLowerCase();
+      if (m.indexOf('email not confirmed') !== -1)
+        return 'Your email isn’t confirmed yet. Confirm it in Supabase, then sign in.';
+      if (m.indexOf('invalid login') !== -1 || m.indexOf('invalid credentials') !== -1)
+        return 'Incorrect email or password.';
+      if (m.indexOf('rate limit') !== -1 || m.indexOf('too many') !== -1)
+        return 'Too many attempts. Wait a moment and try again.';
+      if (m.indexOf('failed to fetch') !== -1 || m.indexOf('network') !== -1)
+        return 'Network error. Check your connection.';
+      return raw ? cleanText(raw) : 'Sign-in failed. Please try again.';
+    }
 
     const form = wrap.querySelector('#authForm');
     const btn = wrap.querySelector('#authBtn');
@@ -122,16 +241,22 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       err.textContent = '';
+      // Trim + length-cap the email; validate its shape before any network call.
+      const email = (wrap.querySelector('#authEmail').value || '').trim().slice(0, MAX_LEN);
+      // Passwords are length-capped but NOT trimmed — leading/trailing chars can
+      // be significant, so trimming would silently alter a valid secret.
+      const password = (wrap.querySelector('#authPass').value || '').slice(0, MAX_LEN);
+      if (!EMAIL_RE.test(email)) { err.textContent = 'Enter a valid email address.'; return; }
+      if (!password) { err.textContent = 'Enter your password.'; return; }
+
       btn.disabled = true; btn.textContent = 'Signing in…';
-      const email = wrap.querySelector('#authEmail').value.trim();
-      const password = wrap.querySelector('#authPass').value;
       try {
         const { error } = await supa.auth.signInWithPassword({ email, password });
         if (error) {
-          err.textContent = error.message || 'Sign-in failed.';
+          err.textContent = friendlyAuthError(error);
           btn.disabled = false; btn.textContent = 'Sign in';
         }
-        // On success, onAuthStateChange(SIGNED_IN) hides the gate + resolves.
+        // On success, onAuthStateChange(SIGNED_IN) fades the gate out + resolves.
       } catch (e2) {
         err.textContent = 'Sign-in failed. Check your connection.';
         btn.disabled = false; btn.textContent = 'Sign in';
@@ -143,6 +268,7 @@
   function showGate() {
     if (embedded) return;              // parent frame owns the gate
     const el = buildGate();
+    el.classList.remove('is-leaving');
     if (!el.isConnected) (document.body || document.documentElement).appendChild(el);
     try { document.body && (document.body.style.overflow = 'hidden'); } catch (e) {}
     const email = el.querySelector('#authEmail');
@@ -150,12 +276,21 @@
   }
   function hideGate() {
     if (gateEl && gateEl.isConnected) gateEl.remove();
+    if (gateEl) gateEl.classList.remove('is-leaving');
     try { document.body && (document.body.style.overflow = ''); } catch (e) {}
+  }
+  // Fade the gate out (revealing the dashboard) before removing it. Safe to call
+  // when the gate was never shown (e.g. an already-authed load) — it just no-ops.
+  function dismissGate() {
+    if (!gateEl || !gateEl.isConnected) { hideGate(); return; }
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    gateEl.classList.add('is-leaving');
+    setTimeout(hideGate, reduce ? 200 : 460);
   }
 
   // ── Session lifecycle ────────────────────────────────────────────────────
   supa.auth.onAuthStateChange((event, session) => {
-    if (session) { hideGate(); markReady(session); return; }
+    if (session) { dismissGate(); markReady(session); return; }
     window.__appAccessToken = null;
     // Session ended AFTER we were logged in (expiry / manual sign-out): the
     // page is showing user data, so reload straight to the gate. On the very
