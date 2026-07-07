@@ -11,6 +11,7 @@
   "routes": [
     { "src": "/health",      "dest": "/proxy/server.js" },
     { "src": "/api/(.*)",    "dest": "/proxy/server.js" },
+    { "src": "/oauth/(.*)",  "dest": "/proxy/server.js" },
     { "handle": "filesystem" },
     { "src": "/(.*)",        "dest": "/index.html" }
   ]

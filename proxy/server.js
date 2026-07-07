@@ -90,7 +90,10 @@ const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 // single-owner /api/events routes keep working off GOOGLE_REFRESH_TOKEN.
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const TOKEN_ENC_KEY             = process.env.TOKEN_ENC_KEY             || '';
-const GOOGLE_REDIRECT_URI       = process.env.GOOGLE_REDIRECT_URI       || '';
+// .trim() + strip accidental wrapping quotes: a trailing space/newline or a
+// pasted-in quote is a classic redirect_uri_mismatch cause (Google compares the
+// redirect_uri byte-for-byte against the registered list).
+const GOOGLE_REDIRECT_URI       = (process.env.GOOGLE_REDIRECT_URI      || '').trim().replace(/^["']|["']$/g, '');
 // 32-byte AES key derived from the passphrase so TOKEN_ENC_KEY can be any string.
 const ENC_KEY = TOKEN_ENC_KEY ? crypto.createHash('sha256').update(TOKEN_ENC_KEY).digest() : null;
 const OAUTH_LINK_CONFIGURED = !!(CLIENT_ID && CLIENT_SECRET && GOOGLE_REDIRECT_URI &&
