@@ -599,17 +599,29 @@ const OAUTH_HOST_ALLOWLIST = [
     .map(h => new RegExp('^' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'))
 );
 function redirectUriFor(req) {
-  const host  = String(req.headers['x-forwarded-host'] || req.headers.host || '')
-                  .split(',')[0].trim();
-  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
-                (/^(localhost|127\.)/.test(host) ? 'http' : 'https');
+  // Prefer Vercel's STABLE alias env vars over the raw request host. The host
+  // Vercel injects into the function can be the immutable per-deploy URL
+  // (aptron-<hash>-<scope>.vercel.app) even when the browser used the branch
+  // alias — that per-deploy host PASSES the allowlist regex but is NOT the URL
+  // registered with Google, so it still yields redirect_uri_mismatch. The two
+  // env vars below are the stable aliases you actually whitelist; VERCEL_URL
+  // (the per-deploy hash) is intentionally NOT consulted. Falls back to the
+  // request host, then the static env, for non-Vercel (local) runs.
+  const stable = (process.env.VERCEL_ENV === 'production')
+    ? process.env.VERCEL_PROJECT_PRODUCTION_URL
+    : process.env.VERCEL_BRANCH_URL;
+  const hdrHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+                    .split(',')[0].trim();
+  const host  = String(stable || hdrHost || '')
+                  .replace(/^https?:\/\//, '').replace(/\/.*$/, '');   // bare host only
+  const proto = /^(localhost|127\.)/.test(host) ? 'http' : 'https';    // Vercel is https externally
   const allowed = !!host && OAUTH_HOST_ALLOWLIST.some(re => re.test(host));
   const uri = allowed ? `${proto}://${host}/oauth/google/callback` : GOOGLE_REDIRECT_URI;
-  // Low-volume (only fires during a link handshake) — surfaces the exact host
-  // headers + computed redirect in the Vercel function logs for mismatch triage.
-  console.log('[oauth] redirect_uri=%s (host=%j xfh=%j xfp=%j allowed=%s)',
-    uri, req.headers.host, req.headers['x-forwarded-host'], req.headers['x-forwarded-proto'], allowed);
-  return uri;   // allowed host → dynamic; unknown / spoofed → static fallback
+  // Low-volume (only fires during a link handshake) — surfaces which source won
+  // and the computed redirect in the Vercel function logs for mismatch triage.
+  console.log('[oauth] redirect_uri=%s (stable=%j hdr=%j allowed=%s env=%j)',
+    uri, stable || null, hdrHost || null, allowed, process.env.VERCEL_ENV || null);
+  return uri;   // stable alias → dynamic; unknown host → static fallback
 }
 
 // ── per-request Google client (replaces the single global oauth2Client) ────────
