@@ -774,6 +774,27 @@ app.get('/api/calendar/status', async (req, res) => {
   }
 });
 
+// ── 10b. GET /api/calendar/list ───────────────────────────────────────────────
+// Read-only: the linked account's calendars with their IDs, so you can confirm
+// which one holds the events (the mirror pulls GCAL_ID='primary'). Never returns
+// tokens; just id/summary/primary/accessRole from calendarList.list().
+app.get('/api/calendar/list', async (req, res) => {
+  if (!OAUTH_LINK_CONFIGURED) return res.status(503).json({ error: 'Calendar linking is not configured' });
+  try {
+    const { calendar: cal } = await calendarForUser(req.user.id);
+    const r = await cal.calendarList.list({ maxResults: 250, showHidden: true });
+    const calendars = (r.data.items || []).map((c) => ({
+      id: c.id, summary: c.summary, primary: !!c.primary,
+      accessRole: c.accessRole, selected: !!c.selected,
+    }));
+    res.json({ mirroring: GCAL_ID, calendars });
+  } catch (err) {
+    if (err && err.code === 'not_linked') return res.status(404).json({ error: 'No calendar linked' });
+    console.error('[calendar] list failed:', err && err.message);
+    res.status(502).json({ error: 'Could not list calendars' });
+  }
+});
+
 // ── 11. POST /api/calendar/sync  { enabled: bool } ────────────────────────────
 // Toggle mirroring on/off without unlinking.
 app.post('/api/calendar/sync', async (req, res) => {
