@@ -39,6 +39,13 @@ const PORT = process.env.PORT || 3001;
 const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN || '';
+// Per-user web linking (newOAuthClient) needs a "Web application" OAuth client,
+// while the legacy single-owner flow above uses the Desktop client that minted
+// GOOGLE_REFRESH_TOKEN (a refresh token is bound to its issuing client). Keep
+// them SEPARATE: set GOOGLE_WEB_CLIENT_ID/SECRET to the Web client. Falls back
+// to the Desktop CLIENT_ID/SECRET when unset, so this stays non-breaking.
+const WEB_CLIENT_ID     = process.env.GOOGLE_WEB_CLIENT_ID     || CLIENT_ID;
+const WEB_CLIENT_SECRET = process.env.GOOGLE_WEB_CLIENT_SECRET || CLIENT_SECRET;
 const CALENDAR_ID   = process.env.GOOGLE_CALENDAR_ID   || 'primary';
 const TIMEZONE      = process.env.TIMEZONE             || 'UTC';
 
@@ -96,7 +103,7 @@ const TOKEN_ENC_KEY             = process.env.TOKEN_ENC_KEY             || '';
 const GOOGLE_REDIRECT_URI       = (process.env.GOOGLE_REDIRECT_URI      || '').trim().replace(/^["']|["']$/g, '');
 // 32-byte AES key derived from the passphrase so TOKEN_ENC_KEY can be any string.
 const ENC_KEY = TOKEN_ENC_KEY ? crypto.createHash('sha256').update(TOKEN_ENC_KEY).digest() : null;
-const OAUTH_LINK_CONFIGURED = !!(CLIENT_ID && CLIENT_SECRET && GOOGLE_REDIRECT_URI &&
+const OAUTH_LINK_CONFIGURED = !!(WEB_CLIENT_ID && WEB_CLIENT_SECRET && GOOGLE_REDIRECT_URI &&
   SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY && ENC_KEY);
 if (!OAUTH_LINK_CONFIGURED) {
   console.warn(
@@ -647,7 +654,7 @@ function redirectUriFor(req) {
 // `redirectUri` only matters for the auth-code exchange (start + callback);
 // refresh-token calls ignore it, so it defaults to the static env value.
 function newOAuthClient(redirectUri) {
-  return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, redirectUri || GOOGLE_REDIRECT_URI);
+  return new google.auth.OAuth2(WEB_CLIENT_ID, WEB_CLIENT_SECRET, redirectUri || GOOGLE_REDIRECT_URI);
 }
 async function calendarForUser(uid) {
   const conn = await getConnection(uid);
