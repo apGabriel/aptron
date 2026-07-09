@@ -607,26 +607,36 @@ function redirectUriFor(req) {
   // env vars below are the stable aliases you actually whitelist; VERCEL_URL
   // (the per-deploy hash) is intentionally NOT consulted. Falls back to the
   // request host, then the static env, for non-Vercel (local) runs.
-  const env       = process.env.VERCEL_ENV || null;                     // 'production' | 'preview' | 'development' | null
-  const branchUrl = process.env.VERCEL_BRANCH_URL || '';                // aptron-git-<ref>-<scope>.vercel.app (stable)
-  const prodUrl   = process.env.VERCEL_PROJECT_PRODUCTION_URL || '';    // aptron-chi.vercel.app (stable)
-  // Preview/dev → branch alias; production → prod domain. On preview WITHOUT a
-  // branch alias, fall through to the request host (NOT prodUrl) so we never
-  // silently hand Google the production URL from a preview deploy.
-  const stable = (env === 'production') ? prodUrl : branchUrl;
-  const hdrHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
-                    .split(',')[0].trim();
-  const host  = String(stable || hdrHost || '')
-                  .replace(/^https?:\/\//, '').replace(/\/.*$/, '');   // bare host only
+  const strip     = (s) => String(s || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+  const env       = process.env.VERCEL_ENV || null;                    // 'production' | 'preview' | 'development' | null
+  const branchUrl = strip(process.env.VERCEL_BRANCH_URL);              // aptron-git-<ref>-<scope>.vercel.app (stable)
+  const prodUrl   = strip(process.env.VERCEL_PROJECT_PRODUCTION_URL);  // aptron-chi.vercel.app (stable)
+  const hdrHost   = strip(String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0]);
+
+  // The host the user is actually on is the source of truth for where Google
+  // redirects back — so prefer it, BUT only when it exactly equals a known-stable,
+  // whitelistable alias (branch alias / prod domain / OAUTH_EXTRA_HOSTS / local),
+  // never the rotating per-deploy hash URL. VERCEL_ENV is deliberately NOT used
+  // to choose: it reports 'production' even for a branch-alias deploy (e.g. the
+  // test branch deployed with --prod / as the Production Branch), which wrongly
+  // forced the prod domain. Falls back to the stable branch alias (then prod,
+  // then the static env) when the request host is a hash / unknown / empty.
+  const extras  = (process.env.OAUTH_EXTRA_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const trusted = new Set([branchUrl, prodUrl, ...extras].filter(Boolean));
+  const isLocal = /^(localhost|127\.)/.test(hdrHost);
+  const host = (hdrHost && (trusted.has(hdrHost) || isLocal))
+    ? hdrHost                          // user's real host, and it's stable + whitelistable
+    : (branchUrl || prodUrl || hdrHost);   // hash / unknown → stable branch alias
+
   const proto = /^(localhost|127\.)/.test(host) ? 'http' : 'https';    // Vercel is https externally
-  const allowed = !!host && OAUTH_HOST_ALLOWLIST.some(re => re.test(host));
+  const allowed = !!host && OAUTH_HOST_ALLOWLIST.some((re) => re.test(host));
   const uri = allowed ? `${proto}://${host}/oauth/google/callback` : GOOGLE_REDIRECT_URI;
   // Low-volume (only fires during a link handshake). Prints every input so a
-  // wrong redirect is unambiguous: env tells us which branch of the ternary ran,
-  // branchUrl/prodUrl show whether the stable aliases reached the function.
+  // wrong redirect is unambiguous: which stable aliases reached the function,
+  // the request host, and which one we chose. env is informational only now.
   console.log('[oauth] redirect_uri=%s | env=%j branchUrl=%j prodUrl=%j hdr=%j chosen=%j allowed=%s',
-    uri, env, branchUrl || null, prodUrl || null, hdrHost || null, stable || null, allowed);
-  return uri;   // stable alias → dynamic; unknown host → static fallback
+    uri, env, branchUrl || null, prodUrl || null, hdrHost || null, host || null, allowed);
+  return uri;   // trusted host → dynamic; hash/unknown → stable alias; empty → static
 }
 
 // ── per-request Google client (replaces the single global oauth2Client) ────────
