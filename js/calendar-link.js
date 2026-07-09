@@ -277,6 +277,9 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
       state = Object.assign({}, state, { connected: false, email: null, sync_enabled: false, verified: undefined });
       render();
+      // The server drops the mirrored rows on disconnect; reload so the calendar
+      // clears immediately instead of showing stale events until the next fetch.
+      try { if (window.AptCal && window.AptCal.reload) window.AptCal.reload(); } catch (e) {}
     } catch (e) { setSub('Couldn’t disconnect — try again', 'is-error'); }
   }
 

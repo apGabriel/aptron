@@ -580,6 +580,19 @@ async function deleteConnection(uid) {
   const r = await sbFetch('/calendar_connections?user_id=eq.' + encodeURIComponent(uid), { method: 'DELETE' });
   if (!r.ok) throw new Error('vault delete failed (HTTP ' + r.status + ')');
 }
+// Delete this user's Google-MIRRORED event rows (google_event_id IS NOT NULL) on
+// disconnect, so the dashboard clears. Local-only rows (google_event_id IS NULL)
+// are left untouched. Authored-but-synced blocks are removed here too, but they
+// survive in the user's Google Calendar (re-linking re-pulls them). Returns the
+// deleted count (PostgREST reports it in Content-Range with Prefer: count=exact).
+async function deleteMirroredEvents(uid) {
+  const r = await sbFetch(
+    '/events?user_id=eq.' + encodeURIComponent(uid) + '&google_event_id=not.is.null',
+    { method: 'DELETE', headers: { Prefer: 'count=exact' } });
+  if (!r.ok) throw new Error('events cleanup failed (HTTP ' + r.status + ')');
+  const n = parseInt(((r.headers.get('content-range') || '').split('/')[1] || '0'), 10);
+  return Number.isFinite(n) ? n : 0;
+}
 
 // ── dynamic OAuth redirect URI (branch previews vs prod) ──────────────────────
 // On Vercel the proxy runs SAME-ORIGIN with the dashboard, so a given deployment
@@ -819,9 +832,14 @@ app.post('/api/calendar/disconnect', async (req, res) => {
       try { await newOAuthClient().revokeToken(decToken(conn.refresh_token_enc)); }
       catch (e) { /* best-effort; we still drop our copy below */ }
     }
+    // Clear the mirrored events BEFORE dropping the connection so a mid-way
+    // failure leaves the user still "linked" (retryable) rather than linked-less
+    // with stale events. Local-only rows are preserved.
+    const eventsRemoved = await deleteMirroredEvents(req.user.id);
     await deleteConnection(req.user.id);
-    res.json({ ok: true });
+    res.json({ ok: true, events_removed: eventsRemoved });
   } catch (err) {
+    console.error('[calendar] disconnect failed:', err && err.message);
     res.status(502).json({ error: 'Could not disconnect' });
   }
 });
