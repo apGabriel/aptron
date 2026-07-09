@@ -574,12 +574,54 @@ async function deleteConnection(uid) {
   if (!r.ok) throw new Error('vault delete failed (HTTP ' + r.status + ')');
 }
 
+// ── dynamic OAuth redirect URI (branch previews vs prod) ──────────────────────
+// On Vercel the proxy runs SAME-ORIGIN with the dashboard, so a given deployment
+// (prod OR a branch preview) serves both /api/oauth/google/start and
+// /oauth/google/callback on the same host. That lets us derive the redirect from
+// the request host: Google redirects the callback back to that same host, so the
+// value at generateAuthUrl and at getToken stay byte-for-byte identical (Google
+// requires that match, on TOP of the Console allowlist).
+//
+// The Host / x-forwarded-host header is client-controllable, so we only trust
+// hosts matching a strict allowlist; anything else falls back to the static
+// GOOGLE_REDIRECT_URI. Google's own allowlist is the real security boundary (an
+// un-whitelisted host just yields redirect_uri_mismatch), but validating here
+// keeps behavior predictable and avoids minting auth URLs for junk hosts. Add
+// one-off hosts via OAUTH_EXTRA_HOSTS (comma-separated, no scheme/path).
+const OAUTH_HOST_ALLOWLIST = [
+  /^localhost(:\d+)?$/i,
+  /^127\.0\.0\.1(:\d+)?$/,
+  /^aptron-[a-z0-9-]+\.vercel\.app$/i,   // prod (aptron-chi) + every branch alias
+  /^aptron\.vercel\.app$/i,
+].concat(
+  (process.env.OAUTH_EXTRA_HOSTS || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
+    .map(h => new RegExp('^' + h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i'))
+);
+function redirectUriFor(req) {
+  const host  = String(req.headers['x-forwarded-host'] || req.headers.host || '')
+                  .split(',')[0].trim();
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
+                (/^(localhost|127\.)/.test(host) ? 'http' : 'https');
+  const allowed = !!host && OAUTH_HOST_ALLOWLIST.some(re => re.test(host));
+  const uri = allowed ? `${proto}://${host}/oauth/google/callback` : GOOGLE_REDIRECT_URI;
+  // Low-volume (only fires during a link handshake) — surfaces the exact host
+  // headers + computed redirect in the Vercel function logs for mismatch triage.
+  console.log('[oauth] redirect_uri=%s (host=%j xfh=%j xfp=%j allowed=%s)',
+    uri, req.headers.host, req.headers['x-forwarded-host'], req.headers['x-forwarded-proto'], allowed);
+  return uri;   // allowed host → dynamic; unknown / spoofed → static fallback
+}
+
 // ── per-request Google client (replaces the single global oauth2Client) ────────
 // Builds a fresh OAuth2 client from THIS user's stored refresh token, so every
 // calendar call acts on the caller's own Google account. The step-4 mirror
 // (push/pull) is the main consumer; ?verify=1 on /status also exercises it. The
 // legacy /api/events routes still use the global client until the mirror lands.
-function newOAuthClient() { return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, GOOGLE_REDIRECT_URI); }
+// `redirectUri` only matters for the auth-code exchange (start + callback);
+// refresh-token calls ignore it, so it defaults to the static env value.
+function newOAuthClient(redirectUri) {
+  return new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, redirectUri || GOOGLE_REDIRECT_URI);
+}
 async function calendarForUser(uid) {
   const conn = await getConnection(uid);
   if (!conn || !conn.refresh_token_enc) {
@@ -612,7 +654,7 @@ function callbackHtml(ok, message) {
 // (gated by requireAuth) → returns { url } for the dashboard to open as a popup.
 app.get('/api/oauth/google/start', (req, res) => {
   if (!OAUTH_LINK_CONFIGURED) return res.status(503).json({ error: 'Calendar linking is not configured on the server' });
-  const url = newOAuthClient().generateAuthUrl({
+  const url = newOAuthClient(redirectUriFor(req)).generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',                 // force a refresh_token on every link
     include_granted_scopes: true,
@@ -635,7 +677,9 @@ app.get('/oauth/google/callback', async (req, res) => {
   if (!uid)            return done(false, 'This link expired or was tampered with — please try again.');
   if (!req.query.code) return done(false, 'No authorization code received.');
   try {
-    const client = newOAuthClient();
+    // Must match the redirect_uri used at /start — derived identically from the
+    // host Google just redirected the callback to.
+    const client = newOAuthClient(redirectUriFor(req));
     const { tokens } = await client.getToken(req.query.code);
     if (!tokens.refresh_token) {
       // Google only returns a refresh_token on first consent; prompt=consent
