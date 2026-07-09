@@ -857,7 +857,8 @@ app.post('/api/calendar/disconnect', async (req, res) => {
 // genuine local edits stay 'local' — that's what stops a push⇄pull echo loop.
 // ═════════════════════════════════════════════════════════════════════════════
 const GCAL_ID               = 'primary';
-const FULL_SYNC_WINDOW_DAYS  = 30;      // baseline window for a clean (tokenless) sync
+const FULL_SYNC_WINDOW_DAYS   = 30;     // baseline look-BACK for a clean (tokenless) sync
+const FUTURE_SYNC_WINDOW_DAYS = 90;     // baseline look-AHEAD — bounds recurring expansion
 // Per-uid in-memory lock so two syncs for the same user never overlap. Maps
 // uid → start time and self-heals: on serverless a frozen/killed instance can
 // leave a lock set (its `finally` never runs), so a lock older than the TTL is
@@ -938,7 +939,13 @@ async function listGoogleDelta(cal, syncToken, full) {
     if (syncToken && !full) {
       params.syncToken = syncToken;       // incremental: Google includes cancellations
     } else {
-      params.timeMin = new Date(Date.now() - FULL_SYNC_WINDOW_DAYS * 864e5).toISOString();
+      // Bound BOTH ends of the baseline. With singleEvents:true an open-ended
+      // timeMax makes Google expand recurring series into unbounded future
+      // instances (this ballooned the table to 20k+ rows). timeMin/timeMax are
+      // mutually exclusive with syncToken, so this only applies to the tokenless
+      // baseline; the returned syncToken then carries this window into deltas.
+      params.timeMin = new Date(Date.now() - FULL_SYNC_WINDOW_DAYS   * 864e5).toISOString();
+      params.timeMax = new Date(Date.now() + FUTURE_SYNC_WINDOW_DAYS * 864e5).toISOString();
       params.showDeleted = false;         // clean baseline
     }
     const res = await cal.events.list(params);
