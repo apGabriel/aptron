@@ -304,10 +304,12 @@
     const d = e.data;
     if (!d || d.source !== 'aptron-oauth') return;
     if (d.ok) {
-      refresh({ verify: true }).then(() => celebrate(state && state.email));
-      // The post-link mirror runs server-side; reload the calendar a moment later
-      // so freshly pulled Google events appear without a manual refresh.
-      setTimeout(() => { try { window.AptCal && window.AptCal.reload && window.AptCal.reload(); } catch (e) {} }, 3000);
+      // Drive the first mirror from the client: the serverless OAuth callback
+      // can't run a reliable background sync (its instance is frozen once the
+      // popup response is sent). An AWAITED trigger pulls Google → events table
+      // in a real request, sets last_sync_at, then reloads the calendar (syncNow
+      // handles the reload + status refresh on success).
+      refresh({ verify: true }).then(() => { celebrate(state && state.email); syncNow(); });
     } else {
       setSub(d.message || 'Linking failed — try again', 'is-error');
     }

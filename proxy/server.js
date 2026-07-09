@@ -736,9 +736,12 @@ app.get('/oauth/google/callback', async (req, res) => {
       connected_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
-    // Kick off the first mirror in the background so the user's Google events
-    // show up shortly after linking — don't block the popup on it.
-    syncUser(uid, { reason: 'link' }).catch((e) => console.error('[sync] post-link failed:', e && e.message));
+    // NOTE: deliberately NO server-side background sync here. On Vercel the
+    // function instance is frozen the moment this popup response is sent, so a
+    // detached syncUser() would be suspended mid-pull — never finishing, and
+    // leaking the in-memory lock (last_sync_at stays null, every later trigger
+    // reports "already syncing"). The dashboard drives the first mirror instead,
+    // via an AWAITED POST /api/calendar/sync/trigger right after link success.
     return done(true, google_email ? ('Linked ' + google_email) : 'Your calendar is linked');
   } catch (err) {
     console.error('[oauth] callback failed:', err && err.message);
@@ -816,7 +819,13 @@ app.post('/api/calendar/disconnect', async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 const GCAL_ID               = 'primary';
 const FULL_SYNC_WINDOW_DAYS  = 30;      // baseline window for a clean (tokenless) sync
-const syncing = new Set();              // per-uid lock: never overlap two syncs
+// Per-uid in-memory lock so two syncs for the same user never overlap. Maps
+// uid → start time and self-heals: on serverless a frozen/killed instance can
+// leave a lock set (its `finally` never runs), so a lock older than the TTL is
+// treated as stale instead of wedging every future sync. Cross-instance
+// concurrency isn't guarded — push/pull are upsert-based and tolerate overlap.
+const syncing = new Map();
+const SYNC_LOCK_TTL_MS = 2 * 60 * 1000;
 
 function gStatus(e)   { return (e && (e.code || (e.response && e.response.status))) || 0; }
 function isGone(e)    { const s = gStatus(e); return s === 410 || s === '410'; }
@@ -976,8 +985,9 @@ async function pushLocalChanges(uid, cal) {
 
 // ── orchestrator — one push+pull for a user, guarded against overlap ──────────
 async function syncUser(uid, opts) {
-  if (syncing.has(uid)) return { skipped: 'in_progress' };
-  syncing.add(uid);
+  const startedAt = syncing.get(uid);
+  if (startedAt && (Date.now() - startedAt) < SYNC_LOCK_TTL_MS) return { skipped: 'in_progress' };
+  syncing.set(uid, Date.now());
   try {
     let ctx;
     try { ctx = await calendarForUser(uid); }
