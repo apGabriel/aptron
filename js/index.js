@@ -1,8 +1,8 @@
 // =============================================================================
 // Calendar-first AI dashboard.
-//   • The Google Calendar (via the proxy) is the single source of truth for the
-//     day's blocks. The engine below is refactored to expose a small window.AptCal
-//     API so the assistant can read + mutate the schedule.
+//   • Supabase (public.events, RLS-scoped to the logged-in user) is the source
+//     of truth for the day's blocks — no proxy in the hot path. The engine below
+//     exposes a small window.AptCal API so the assistant can read + mutate it.
 //   • The Assistant is HYBRID: a synchronous local intent parser handles the
 //     common tactical commands instantly/offline (and is fully previewable);
 //     anything it can't match is forwarded to the Gemini proxy route
@@ -119,33 +119,89 @@ window.QuickNotes = (function () {
 })();
 
 // =============================================================================
-// GOOGLE CALENDAR ENGINE — fetch/render/inline-edit, plus a window.AptCal API so
-// the assistant can read + mutate the schedule with the same code paths.
+// CALENDAR ENGINE — Supabase-backed fetch/render/inline-edit, plus a
+// window.AptCal API so the assistant can read + mutate the schedule.
 // =============================================================================
 (function () {
-  const PROXY = '';
   let currentEvents = [];
 
-  // Every calendar call goes through the proxy, which now requires the login
-  // JWT (js/auth.js keeps window.__appAccessToken fresh). This is the single
-  // choke point for /api traffic, so it awaits APP_AUTH_READY first: nothing
-  // hits the network until the session is confirmed (no pre-auth 401 "ghost
-  // fetch" on load). After login the promise is already resolved, so the await
-  // is a no-op microtask. Then attach the token as a bearer.
-  async function authedFetch(url, opts) {
+  // Calendar data lives in Supabase (public.events), scoped to the logged-in
+  // user by RLS — no proxy in the hot path. getClient() awaits APP_AUTH_READY so
+  // no query fires before the session is confirmed (RLS would reject it anyway),
+  // then hands back the ONE shared authed client. It's null only in local-only
+  // mode (no supabase lib / no config), which callers surface as "unavailable".
+  async function getClient() {
     await (window.APP_AUTH_READY || Promise.resolve());
-    opts = opts || {};
-    const headers = Object.assign({}, opts.headers);
-    const token = window.__appAccessToken;
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-    return fetch(url, Object.assign({}, opts, { headers }));
+    return window.APP_SUPABASE || null;
+  }
+
+  const EVENT_COLS = 'id,title,starts_at,ends_at,all_day,tz,notes,location,google_event_id,deleted_at';
+  function tzName() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) { return 'UTC'; }
+  }
+  // A Supabase row → the in-memory event shape the render/edit/assistant code
+  // already speaks (identical to the old proxy formatEvent output, so nothing
+  // downstream changes). Timed blocks pass the absolute instant straight through
+  // (new Date() renders it in local time); all-day blocks collapse to the UTC
+  // calendar date, exactly as Google's ev.start.date used to.
+  function rowToEvent(row) {
+    const allDay = !!row.all_day;
+    const dateOf = (ts) => (ts ? new Date(ts).toISOString().slice(0, 10) : null);
+    return {
+      id:       row.id,
+      title:    row.title || '(no title)',
+      start:    allDay ? dateOf(row.starts_at) : row.starts_at,
+      end:      allDay ? dateOf(row.ends_at)   : row.ends_at,
+      allDay,
+      notes:    row.notes || '',
+      location: row.location || '',
+      google_event_id: row.google_event_id || null,
+    };
+  }
+  // UTC day-boundary helpers for range queries. We over-fetch by ±1 day and then
+  // bucket by each event's LOCAL day (eventDateKey), so the schedule list and the
+  // grid dots always agree no matter the viewer's UTC offset.
+  function addDaysStr(dateStr, delta) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10);
+  }
+  function dayStartUTC(dateStr) { return dateStr + 'T00:00:00.000Z'; }
+  function dayEndUTC(dateStr)   { return dateStr + 'T23:59:59.999Z'; }
+  // Fetch live (non-tombstoned) events whose start falls in [gteIso, lteIso].
+  // Returns null in local-only mode so callers can show "not configured".
+  async function fetchWindow(gteIso, lteIso) {
+    const supa = await getClient();
+    if (!supa) return null;
+    const { data, error } = await supa
+      .from('events')
+      .select(EVENT_COLS)
+      .is('deleted_at', null)
+      .gte('starts_at', gteIso)
+      .lte('starts_at', lteIso)
+      .order('starts_at', { ascending: true });
+    if (error) throw Object.assign(new Error(error.message || 'query failed'), { supabase: error });
+    return (data || []).map(rowToEvent);
+  }
+
+  // Turn a calendar failure into a short, debuggable message. With Supabase as
+  // the store the failure modes collapse to two: no client (local-only / not
+  // configured) vs a query or network error. The old proxy/Google-auth branches
+  // no longer apply — the login gate (js/auth.js) already guarantees a session.
+  function calShowError(offlineEl, countEl, err) {
+    if (err && err.notConfigured) {
+      offlineEl.textContent = '⚠ Cloud sync isn’t configured — calendar unavailable.';
+      countEl.textContent = 'not configured';
+    } else {
+      offlineEl.textContent = '⚠ Couldn’t reach your calendar — check your connection.';
+      countEl.textContent = 'offline';
+    }
   }
 
   // ── multi-day state ──────────────────────────────────────────────────────
   //   selectedDate — the day the schedule list + completion state reflect.
   //   viewY/viewM   — the month the grid is showing (may differ from selected).
-  //   eventsByDate  — keyed cache "YYYY-MM-DD" → [events]; Google Calendar stays
-  //                   the source of truth, this just lets the grid show dots and
+  //   eventsByDate  — keyed cache "YYYY-MM-DD" → [events]; Supabase stays the
+  //                   source of truth, this just lets the grid show dots and
   //                   switch days instantly. One range fetch fills a whole month.
   let selectedDate = todayStr();
   const now0 = new Date();
@@ -215,7 +271,7 @@ window.QuickNotes = (function () {
       sign + p(Math.floor(abs / 60)) + ':' + p(abs % 60);
   }
 
-  // ── completion state (Google Calendar has no "done" flag) ─────────────────
+  // ── completion state (the events table has no "done" flag) ────────────────
   function doneKey() { return 'cal_done:' + selectedDate; }
   function manualKey() { return 'cal_manual:' + selectedDate; }
   function getDoneSet() {
@@ -268,18 +324,34 @@ window.QuickNotes = (function () {
     setTimeout(() => el.classList.remove('cal-saved-flash'), 600);
   }
 
-  // ── PATCH through the proxy, optimistic ──────────────────────────────────
+  // ── UPDATE in Supabase, optimistic ───────────────────────────────────────
+  // Accepts the same body keys the callers already speak (title / notes /
+  // startTime / endTime / date) and maps them onto the events columns.
   async function patchEvent(ev, body, el) {
     if (el) el.classList.add('cal-saving');
     try {
-      const res = await authedFetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      Object.assign(ev, await res.json());
+      const supa = await getClient();
+      if (!supa) throw Object.assign(new Error('not configured'), { notConfigured: true });
+      // sync_state:'local' flags the row so the Google mirror (proxy step 4)
+      // picks up this edit on the next sync. No-op when no calendar is linked.
+      const upd = { updated_at: new Date().toISOString(), sync_state: 'local' };
+      if (body.title !== undefined) upd.title = body.title;
+      if (body.notes !== undefined) upd.notes = body.notes;
+      if (body.startTime) upd.starts_at = new Date(body.startTime).toISOString();
+      if (body.endTime)   upd.ends_at   = new Date(body.endTime).toISOString();
+      // An all-day retarget: a date given with no explicit times.
+      if (body.date && !body.startTime && !body.endTime) {
+        upd.all_day = true;
+        upd.starts_at = dayStartUTC(body.date);
+        upd.ends_at   = dayStartUTC(body.date);
+      }
+      const { data, error } = await supa.from('events')
+        .update(upd).eq('id', ev.id).select(EVENT_COLS).single();
+      if (error) throw new Error(error.message || 'update failed');
+      Object.assign(ev, rowToEvent(data));
       flashSaved(el);
     } catch {
-      showCalStatus('Update failed — is the proxy running?', true);
+      showCalStatus('Update failed — check your connection.', true);
       loadEvents();
     } finally {
       if (el) el.classList.remove('cal-saving');
@@ -452,26 +524,19 @@ window.QuickNotes = (function () {
     refreshBtn.classList.add('spinning');
     setTimeout(() => refreshBtn.classList.remove('spinning'), 700);
     try {
-      const res = await authedFetch(PROXY + '/api/events?date=' + selectedDate, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) {
-        let authExpired = false;
-        try { const body = await res.json(); authExpired = /invalid_grant/i.test((body && body.error) || ''); } catch (e) {}
-        throw Object.assign(new Error('HTTP ' + res.status), { authExpired });
-      }
+      // Over-fetch ±1 day (UTC) then keep only blocks whose LOCAL day is the
+      // selected one, so a timezone offset can never drop or misplace an event.
+      const rows = await fetchWindow(
+        dayStartUTC(addDaysStr(selectedDate, -1)), dayEndUTC(addDaysStr(selectedDate, 1)));
+      if (rows === null) throw Object.assign(new Error('not configured'), { notConfigured: true });
+      const events = rows.filter(ev => eventDateKey(ev) === selectedDate);
       offlineEl.style.display = 'none';
-      const events = await res.json();
       eventsByDate[selectedDate] = events;
       renderEvents(events);
       markGridDot(selectedDate, events.length > 0);
     } catch (err) {
       offlineEl.style.display = 'block';
-      if (err && err.authExpired) {
-        offlineEl.innerHTML = '⚠ Google session expired — <strong>re-authenticate</strong>';
-        countEl.textContent = 'session expired';
-      } else {
-        offlineEl.innerHTML = '⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.';
-        countEl.textContent = 'proxy offline';
-      }
+      calShowError(offlineEl, countEl, err);
       document.getElementById('calEventList').innerHTML = '';
       currentEvents = [];
       window.dispatchEvent(new CustomEvent('apt:calendar-loaded'));
@@ -485,33 +550,39 @@ window.QuickNotes = (function () {
     const last = new Date(viewY, viewM + 1, 0).getDate();
     const end = ymd(viewY, viewM, last);
     try {
-      const res = await authedFetch(PROXY + '/api/events/range?start=' + start + '&end=' + end,
-        { signal: AbortSignal.timeout(6000) });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const all = await res.json();
-      // Clear this month's cache buckets, then refill from the range payload.
-      for (let d = 1; d <= last; d++) eventsByDate[ymd(viewY, viewM, d)] = [];
-      all.forEach(ev => {
-        const k = eventDateKey(ev);
-        (eventsByDate[k] = eventsByDate[k] || []).push(ev);
-      });
+      const all = await fetchWindow(
+        dayStartUTC(addDaysStr(start, -1)), dayEndUTC(addDaysStr(end, 1)));
+      if (all) {
+        // Clear this month's cache buckets, then refill from the range payload.
+        for (let d = 1; d <= last; d++) eventsByDate[ymd(viewY, viewM, d)] = [];
+        all.forEach(ev => {
+          const k = eventDateKey(ev);
+          (eventsByDate[k] = eventsByDate[k] || []).push(ev);
+        });
+      }
     } catch (e) {
-      // Offline/range failure: leave the grid dot-less, day fetch handles errors.
+      // Offline/query failure: leave the grid dot-less, day fetch handles errors.
     }
     renderGrid();
   }
 
   // ── create (used by the assistant) ────────────────────────────────────────
+  // Always a timed block (the assistant paths supply a start/end). user_id
+  // defaults to auth.uid() (migration 0004) so RLS attributes the row without
+  // the client sending it. starts_at/ends_at are stored as absolute UTC instants.
   async function createEvent({ title, notes, startDt, endDt }) {
-    const res = await authedFetch(PROXY + '/api/events', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title, notes: notes || undefined, date: selectedDate,
-        startTime: toLocalISO(startDt), endTime: toLocalISO(endDt),
-      }),
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.json();
+    const supa = await getClient();
+    if (!supa) throw Object.assign(new Error('not configured'), { notConfigured: true });
+    const { data, error } = await supa.from('events').insert({
+      title,
+      notes: notes || '',
+      all_day: false,
+      starts_at: startDt.toISOString(),
+      ends_at: endDt.toISOString(),
+      tz: tzName(),
+    }).select(EVENT_COLS).single();
+    if (error) throw new Error(error.message || 'insert failed');
+    return rowToEvent(data);
   }
 
   // ── month grid ────────────────────────────────────────────────────────────
@@ -665,12 +736,16 @@ window.QuickNotes = (function () {
   async function apiDeleteEvent(match) {
     const ev = findEvent(match);
     if (!ev) return { ok: false };
-    // Snapshot BEFORE the network call so a follow-up "recover/undo" can restore
-    // it even if the user immediately regrets the deletion.
-    const snapshot = { title: ev.title, start: ev.start, end: ev.end, notes: ev.notes || '', allDay: !!ev.allDay };
+    // Soft delete: set deleted_at (the row is filtered out of every live query)
+    // and keep the id so a follow-up "recover/undo" clears the tombstone and the
+    // exact same block — id, time, notes intact — comes back untouched.
+    const snapshot = { id: ev.id, title: ev.title, start: ev.start, end: ev.end, notes: ev.notes || '', allDay: !!ev.allDay };
     try {
-      const res = await authedFetch(PROXY + '/api/events/' + encodeURIComponent(ev.id), { method: 'DELETE' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const supa = await getClient();
+      if (!supa) throw new Error('not configured');
+      const { error } = await supa.from('events')
+        .update({ deleted_at: new Date().toISOString(), sync_state: 'local' }).eq('id', ev.id);
+      if (error) throw new Error(error.message || 'delete failed');
       lastDeletedEvent = snapshot;
       await loadEvents();
       return { ok: true, title: ev.title };
@@ -684,20 +759,33 @@ window.QuickNotes = (function () {
     const snap = lastDeletedEvent;
     if (!snap) return { ok: false, empty: true };
     try {
-      const startDt = snap.start ? new Date(snap.start) : dtOnSelected(9, 0);
-      const endDt = snap.end ? new Date(snap.end) : new Date(startDt.getTime() + 30 * 60000);
-      const made = await createEvent({ title: snap.title, notes: snap.notes, startDt, endDt });
+      const supa = await getClient();
+      if (!supa) throw new Error('not configured');
+      let ev;
+      if (snap.id) {
+        // Preferred path: clear the tombstone so the original row returns verbatim.
+        // sync_state:'local' re-mirrors it to Google (un-cancels) on the next sync.
+        const { data, error } = await supa.from('events')
+          .update({ deleted_at: null, sync_state: 'local' }).eq('id', snap.id).select(EVENT_COLS).single();
+        if (error) throw new Error(error.message || 'restore failed');
+        ev = rowToEvent(data);
+      } else {
+        // Fallback (snapshot with no id): re-create on the original slot.
+        const startDt = snap.start ? new Date(snap.start) : dtOnSelected(9, 0);
+        const endDt = snap.end ? new Date(snap.end) : new Date(startDt.getTime() + 30 * 60000);
+        ev = await createEvent({ title: snap.title, notes: snap.notes, startDt, endDt });
+      }
       lastDeletedEvent = null;             // consumed — don't double-restore
       await loadEvents();
-      loadMonth();                         // refresh dots in case it landed off the selected day
-      return { ok: true, title: snap.title, when: fmtTime(made.start || startDt.toISOString()) };
+      loadMonth();                         // refresh dots in case it's off the selected day
+      return { ok: true, title: ev.title, when: fmtTime(ev.start) };
     } catch { return { ok: false, error: true }; }
   }
   function summarize() {
     if (!currentEvents.length) {
       const offline = document.getElementById('calOfflineMsg');
       if (offline && offline.style.display !== 'none') {
-        return "I can't see your calendar right now — the proxy looks offline. Once it's up I'll read your blocks.";
+        return "I can't see your calendar right now — you look offline. Once you're back I'll read your blocks.";
       }
       const where = selectedDate === todayStr() ? 'today' : 'on ' + fmtDateLabel(dateObj(selectedDate));
       return 'Nothing on the calendar ' + where + ' — a clean slate. Want me to add something?';

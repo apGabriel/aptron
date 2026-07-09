@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aptron — Personal dashboard with Google Calendar sync</title>
+<meta name="description" content="Aptron is a personal productivity dashboard that plans your day as time-blocks and keeps them in two-way sync with your Google Calendar.">
+
+<!-- Google Search Console verification. Paste the content value from the
+     "HTML tag" method (Search Console → your aptron-chi.vercel.app property).
+     This page is served at the site root ("/"), which is the URL Google fetches. -->
+<meta name="google-site-verification" content="nAEzt1UPLB4iGefnyYW2MTxGzNPy5RUSLKY-nmS1zYU">
+
+<link rel="icon" href="/img/logo.ico" type="image/x-icon">
+<style>
+  :root { --bg:#0d0d0e; --panel:#161617; --line:#26262a; --gold:#e6cf9c; --gold-dim:#d2bc8a; --text:#ece9e3; --muted:#9a968c; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body {
+    background:var(--bg); color:var(--text);
+    font:16px/1.6 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--gold); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .wrap { max-width:820px; margin:0 auto; padding:0 22px; }
+  header { padding:56px 0 8px; text-align:center; }
+  header img { width:60px; height:auto; opacity:.95; }
+  h1 { font-size:2.1rem; margin:14px 0 6px; letter-spacing:.5px; }
+  .tag { color:var(--gold-dim); font-size:1.12rem; margin:0 auto; max-width:620px; }
+  .cta { display:inline-block; margin-top:26px; padding:12px 26px; border-radius:10px;
+    background:linear-gradient(180deg,#d2bc8a,#b8a06e); color:#1a1509; font-weight:700; }
+  .cta:hover { text-decoration:none; filter:brightness(1.06); }
+  section { margin:40px 0; }
+  h2 { font-size:1.15rem; color:var(--gold); border-bottom:1px solid var(--line); padding-bottom:8px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .card h3 { margin:0 0 6px; font-size:1rem; }
+  .card p { margin:0; color:var(--muted); font-size:.92rem; }
+  .note { background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--gold-dim);
+    border-radius:8px; padding:14px 18px; color:#cfcabf; }
+  footer { border-top:1px solid var(--line); margin-top:56px; padding:24px 0 60px;
+    text-align:center; color:var(--muted); font-size:.9rem; }
+  footer a { margin:0 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/img/logo-wings.png" alt="Aptron">
+    <h1>Aptron</h1>
+    <p class="tag">A personal productivity dashboard that plans your day as time-blocks
+      and keeps them in two-way sync with your Google Calendar.</p>
+    <a class="cta" href="/index.html">Open Aptron</a>
+  </header>
+
+  <section>
+    <h2>What Aptron does</h2>
+    <p>Aptron is a private, single-owner dashboard for organizing your day. You create
+      time-blocks and goals on a calendar, and Aptron mirrors them to and from your
+      Google Calendar so your planning stays consistent across both. It also includes
+      lightweight trackers for workouts, wardrobe, and daily health — all tied to one
+      account.</p>
+  </section>
+
+  <section>
+    <h2>How Aptron uses your Google Calendar</h2>
+    <div class="note">
+      <p style="margin:0 0 8px"><strong>Aptron only touches your calendar after you
+        explicitly connect it</strong> from the dashboard. When connected, Aptron:</p>
+      <p style="margin:0">• reads events from your Google Calendar to show them alongside your Aptron blocks, and<br>
+        • writes the blocks you create in Aptron back to your calendar, keeping the two in sync.</p>
+      <p style="margin:10px 0 0">Aptron never sells or shares your calendar data. You can
+        disconnect at any time from the dashboard — which stops syncing and revokes
+        Aptron's access — or remove it from your
+        <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google account permissions</a>.
+        See our <a href="/privacy">Privacy Policy</a> for details.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Inside the dashboard</h2>
+    <div class="grid">
+      <div class="card"><h3>Goals &amp; Calendar</h3><p>Plan the day as time-blocks with optional two-way Google Calendar sync.</p></div>
+      <div class="card"><h3>Overload Coach</h3><p>Track workouts and progressive-overload progress across routines.</p></div>
+      <div class="card"><h3>Smart Wardrobe</h3><p>Catalog outfits and plan what to wear.</p></div>
+      <div class="card"><h3>Daily Health</h3><p>Log daily health habits like water intake.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <div>
+      <a href="/privacy">Privacy Policy</a> ·
+      <a href="/terms">Terms of Service</a> ·
+      <a href="/index.html">Sign in</a>
+    </div>
+    <p>© 2026 Aptron · Contact: <a href="mailto:admin@aptron.com">admin@aptron.com</a></p>
+  </footer>
+</div>
+</body>
+</html>

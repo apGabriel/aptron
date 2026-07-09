@@ -64,8 +64,11 @@
           </button>
         </div>
       </div>
+      <!-- Google Calendar linking (per-user OAuth). Populated by js/calendar-link.js;
+           empty/hidden until the status check resolves. -->
+      <div id="calLinkMount"></div>
       <div id="calOfflineMsg" class="cal-offline" style="display:none">
-        ⚠ Proxy offline — run <code>npm start</code> in the proxy folder to show events.
+        ⚠ Couldn’t reach your calendar — check your connection.
       </div>
       <ul id="calEventList" class="cal-event-list"></ul>
 
@@ -177,6 +180,7 @@
 </main>
 
 <script src="js/index.js" defer></script>
+<script src="js/calendar-link.js" defer></script>
 <script src="js/topbar.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
