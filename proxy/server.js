@@ -607,9 +607,13 @@ function redirectUriFor(req) {
   // env vars below are the stable aliases you actually whitelist; VERCEL_URL
   // (the per-deploy hash) is intentionally NOT consulted. Falls back to the
   // request host, then the static env, for non-Vercel (local) runs.
-  const stable = (process.env.VERCEL_ENV === 'production')
-    ? process.env.VERCEL_PROJECT_PRODUCTION_URL
-    : process.env.VERCEL_BRANCH_URL;
+  const env       = process.env.VERCEL_ENV || null;                     // 'production' | 'preview' | 'development' | null
+  const branchUrl = process.env.VERCEL_BRANCH_URL || '';                // aptron-git-<ref>-<scope>.vercel.app (stable)
+  const prodUrl   = process.env.VERCEL_PROJECT_PRODUCTION_URL || '';    // aptron-chi.vercel.app (stable)
+  // Preview/dev → branch alias; production → prod domain. On preview WITHOUT a
+  // branch alias, fall through to the request host (NOT prodUrl) so we never
+  // silently hand Google the production URL from a preview deploy.
+  const stable = (env === 'production') ? prodUrl : branchUrl;
   const hdrHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
                     .split(',')[0].trim();
   const host  = String(stable || hdrHost || '')
@@ -617,10 +621,11 @@ function redirectUriFor(req) {
   const proto = /^(localhost|127\.)/.test(host) ? 'http' : 'https';    // Vercel is https externally
   const allowed = !!host && OAUTH_HOST_ALLOWLIST.some(re => re.test(host));
   const uri = allowed ? `${proto}://${host}/oauth/google/callback` : GOOGLE_REDIRECT_URI;
-  // Low-volume (only fires during a link handshake) — surfaces which source won
-  // and the computed redirect in the Vercel function logs for mismatch triage.
-  console.log('[oauth] redirect_uri=%s (stable=%j hdr=%j allowed=%s env=%j)',
-    uri, stable || null, hdrHost || null, allowed, process.env.VERCEL_ENV || null);
+  // Low-volume (only fires during a link handshake). Prints every input so a
+  // wrong redirect is unambiguous: env tells us which branch of the ternary ran,
+  // branchUrl/prodUrl show whether the stable aliases reached the function.
+  console.log('[oauth] redirect_uri=%s | env=%j branchUrl=%j prodUrl=%j hdr=%j chosen=%j allowed=%s',
+    uri, env, branchUrl || null, prodUrl || null, hdrHost || null, stable || null, allowed);
   return uri;   // stable alias → dynamic; unknown host → static fallback
 }
 
