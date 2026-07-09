@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Aptron</title>
+<meta name="description" content="How Aptron collects, uses, stores, and protects your data, including data received from Google APIs.">
+<link rel="icon" href="/img/logo.ico" type="image/x-icon">
+<style>
+  :root { --bg:#0d0d0e; --panel:#161617; --line:#26262a; --gold:#e6cf9c; --text:#ece9e3; --muted:#9a968c; }
+  html,body { margin:0; }
+  body { background:var(--bg); color:var(--text);
+    font:16px/1.7 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  a { color:var(--gold); }
+  .wrap { max-width:760px; margin:0 auto; padding:44px 22px 80px; }
+  h1 { font-size:1.9rem; margin:0 0 4px; }
+  .updated { color:var(--muted); font-size:.9rem; margin-bottom:28px; }
+  h2 { font-size:1.1rem; color:var(--gold); margin-top:34px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .limited { background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--gold); border-radius:8px; padding:14px 18px; }
+  ul { padding-left:20px; }
+  .back { display:inline-block; margin-bottom:22px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← Aptron home</a>
+  <h1>Privacy Policy</h1>
+  <div class="updated">Last updated: July 9, 2026</div>
+
+  <p>Aptron ("we", "the app") is a personal productivity dashboard. This policy explains
+    what data Aptron handles, why, and the choices you have. Aptron is operated as a
+    single-owner application; if you have questions, contact
+    <a href="mailto:admin@aptron.com">admin@aptron.com</a>.</p>
+
+  <h2>Information we collect</h2>
+  <ul>
+    <li><strong>Account information.</strong> The email address and password you use to
+      sign in, managed through our authentication provider (Supabase).</li>
+    <li><strong>Content you create.</strong> Calendar time-blocks, goals, and the notes
+      you enter into the dashboard's trackers.</li>
+    <li><strong>Google Calendar data (only if you connect it).</strong> When you
+      explicitly link your Google account, Aptron accesses your Google Calendar events
+      and stores a Google authorization (refresh) token so it can keep syncing.</li>
+  </ul>
+
+  <h2>How we use your information</h2>
+  <ul>
+    <li>To display your calendar and dashboard, and to authenticate you.</li>
+    <li>To synchronize events between Aptron and your Google Calendar — reading your
+      events to show them, and writing your Aptron blocks back to your calendar.</li>
+  </ul>
+  <p>Aptron does <strong>not</strong> use your Google Calendar data for advertising, does
+    not sell it, and does not share it with third parties except the infrastructure
+    providers named below that are required to run the service.</p>
+
+  <h2>Google API Services — Limited Use</h2>
+  <div class="limited">
+    <p style="margin:0">Aptron's use and transfer of information received from Google APIs
+      adheres to the
+      <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>,
+      including the Limited Use requirements. Google Calendar data is used solely to
+      provide and improve the calendar-sync feature you enabled, is not transferred to
+      others except as necessary to provide that feature, is not used for advertising,
+      and is not read by humans except with your consent or for security/legal reasons.</p>
+  </div>
+
+  <h2>Storage and security</h2>
+  <ul>
+    <li>Your dashboard content is stored in our database (Supabase) and isolated per user.</li>
+    <li>Google refresh tokens are <strong>encrypted at rest</strong> and are handled only
+      by our server, never exposed to the browser.</li>
+    <li>Access is scoped to your authenticated account; other users cannot read your data.</li>
+  </ul>
+
+  <h2>Data retention and deletion</h2>
+  <ul>
+    <li><strong>Disconnecting Google.</strong> Using "Disconnect" in the dashboard stops
+      syncing, revokes Aptron's access to your Google account, and removes the
+      Google-mirrored events Aptron stored for you.</li>
+    <li>You may also revoke access anytime at
+      <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
+    <li>To delete your account and associated data, contact
+      <a href="mailto:admin@aptron.com">admin@aptron.com</a>.</li>
+  </ul>
+
+  <h2>Third-party processors</h2>
+  <ul>
+    <li><strong>Supabase</strong> — authentication and database.</li>
+    <li><strong>Vercel</strong> — application hosting.</li>
+    <li><strong>Google</strong> — Calendar API (only when you connect it).</li>
+  </ul>
+
+  <h2>Changes to this policy</h2>
+  <p>We may update this policy; material changes will be reflected by the "Last updated"
+    date above.</p>
+
+  <p style="margin-top:36px"><a href="/terms">Terms of Service</a> · <a href="/">Home</a></p>
+</div>
+</body>
+</html>

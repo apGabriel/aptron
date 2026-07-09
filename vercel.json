@@ -12,6 +12,9 @@
     { "src": "/health",      "dest": "/proxy/server.js" },
     { "src": "/api/(.*)",    "dest": "/proxy/server.js" },
     { "src": "/oauth/(.*)",  "dest": "/proxy/server.js" },
+    { "src": "/",            "dest": "/landing.html" },
+    { "src": "/privacy",     "dest": "/privacy.html" },
+    { "src": "/terms",       "dest": "/terms.html" },
     { "handle": "filesystem" },
     { "src": "/(.*)",        "dest": "/index.html" }
   ]
