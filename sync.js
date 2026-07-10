@@ -21,6 +21,15 @@
 
     let supa = null, pushTimer = null, suppressSync = false, lastSyncedJson = null, lastUpdatedAt = null;
 
+    // Publish a small, truthful sync telemetry marker other UI can read (the
+    // account panel's Cloud & Data Sync pane). Purely additive; no behavior change.
+    function markSync(kind) {
+      try {
+        window.__aptSync = { at: Date.now(), kind: kind, cloud: true, app: appKey };
+        window.dispatchEvent(new CustomEvent('apt-sync', { detail: window.__aptSync }));
+      } catch (e) {}
+    }
+
     function matches(k) {
       if (!k) return false;
       if (syncedKeys.indexOf(k) !== -1) return true;
@@ -104,7 +113,7 @@
         );
         // Remember our own timestamp so the fallback poll doesn't treat our push
         // as a remote change and re-download it.
-        if (!error) { lastSyncedJson = json; lastUpdatedAt = stamp; }
+        if (!error) { lastSyncedJson = json; lastUpdatedAt = stamp; markSync('push'); }
       } catch (e) {}
     }
     // Pull the full row and apply it if the payload differs from what we have.
@@ -118,6 +127,7 @@
         if (incoming === lastSyncedJson) return;
         lastSyncedJson = incoming;
         applyRemote(data.data);
+        markSync('pull');
       } catch (e) {}
     }
     // Cheap fallback poll: fetch only `updated_at`; download the heavy `data`
@@ -177,6 +187,7 @@
           lastSyncedJson = JSON.stringify(data.data);
           if (data.updated_at) lastUpdatedAt = data.updated_at;
           applyRemote(data.data);
+          markSync('pull');
         } else if (Object.keys(collect()).length > 0) {
           schedulePush();
         }
