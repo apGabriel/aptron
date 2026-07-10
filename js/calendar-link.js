@@ -77,20 +77,21 @@
   box-shadow: 0 0 0 1px rgba(210,188,138,0.55) inset, 0 0 18px rgba(149,101,52,0.30);
   transition: box-shadow .18s ease;
 }
-.callink-medallion .dragon {
-  width: 30px; height: 30px;
-  background: linear-gradient(180deg, #e6cf9c, #d2bc8a 55%, #956534);
-  -webkit-mask: url("img/shenlong.png") center / contain no-repeat;
-          mask: url("img/shenlong.png") center / contain no-repeat;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4));
+/* A gold calendar glyph — NOT the Shenlong mark. Signals an external calendar
+   integration and keeps it visually distinct from the native assistant orb,
+   which carries the dragon. Inline SVG so it stays crisp at any viewport. */
+.callink-medallion svg {
+  width: 25px; height: 25px; display: block; color: #e6cf9c;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
 }
+.callink-medallion svg .fillday { fill: currentColor; stroke: none; }
 /* amber-tinted medallion when the connection needs attention */
 .callink.is-warn .callink-medallion {
   box-shadow: 0 0 0 1px rgba(230,178,90,0.55) inset, 0 0 18px rgba(230,178,90,0.28);
 }
-.callink.is-warn .callink-medallion .dragon {
-  background: linear-gradient(180deg, #f0cf8f, #e6b25a 55%, #b5842f);
-}
+.callink.is-warn .callink-medallion svg { color: #f0cf8f; }
 
 .callink-body { flex: 1 1 auto; min-width: 0; }
 .callink-titlerow { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -230,6 +231,17 @@
   const esc = (v) => String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+  // The medallion glyph — a clean gold calendar (rounded body, binder tabs,
+  // header rule, one filled "event" day). Replaces the Shenlong mask so this
+  // integration reads distinctly from the assistant's dragon orb.
+  const ICON_GCAL =
+    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<rect x="3" y="5" width="18" height="16" rx="2.5"/>' +
+      '<path d="M3 9.5h18"/>' +
+      '<path d="M8 2.5v4"/><path d="M16 2.5v4"/>' +
+      '<rect class="fillday" x="6.8" y="12.4" width="3.4" height="3.4" rx="0.9"/>' +
+    '</svg>';
+
   // Inline stroke icons (match the calendar refresh / external-link marks).
   const ICON_REFRESH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
   const ICON_OPEN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4"/></svg>';
@@ -244,7 +256,7 @@
       mount.innerHTML =
         '<div class="callink">' +
           '<div class="callink-top">' +
-            '<span class="callink-medallion" aria-hidden="true"><span class="dragon"></span></span>' +
+            '<span class="callink-medallion" aria-hidden="true">' + ICON_GCAL + '</span>' +
             '<div class="callink-body">' +
               '<div class="callink-title">Google Calendar</div>' +
               '<div class="callink-sub">Not linked — sync your Google Calendar</div>' +
@@ -272,7 +284,7 @@
     mount.innerHTML =
       '<div class="callink ' + healthCls + '">' +
         '<div class="callink-top">' +
-          '<span class="callink-medallion" aria-hidden="true"><span class="dragon"></span></span>' +
+          '<span class="callink-medallion" aria-hidden="true">' + ICON_GCAL + '</span>' +
           '<div class="callink-body">' +
             '<div class="callink-titlerow">' +
               '<span class="callink-title">Google Calendar</span>' +
