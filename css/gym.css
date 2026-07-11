@@ -1651,3 +1651,22 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab:hover { color:
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab[aria-current="page"] {
   background: rgba(29,33,41,0.06); border-color: rgba(29,33,41,0.12);
 }
+
+/* Muscle map: the anatomy is drawn with white-alpha strokes/fills that vanish
+   on a white canvas — anchor the base silhouette with soft ink so the full
+   figure stays visible; active fill already flips via --good. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg line,
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg path:not([data-muscle]) {
+  stroke: rgba(29,33,41,0.25);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg [data-muscle] {
+  fill: rgba(29,33,41,0.10);
+  stroke: rgba(29,33,41,0.30);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg [data-muscle]:hover {
+  fill: rgba(21,114,57,0.30);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg [data-muscle].active {
+  filter: drop-shadow(0 0 6px rgba(21,114,57,0.40));
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-toggle { background: rgba(29,33,41,0.06); }
