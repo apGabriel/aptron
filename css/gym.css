@@ -14,6 +14,13 @@
   --good: #6ee7b7;
   --warn: #fbbf24;
   --bad: #ff8a8a;
+  /* Dashboard-theme accent + muscle-map surface tokens. Overridden per
+     <html data-apt-theme> below; default = Aptron Dark's signature gold.
+     Tokens (not scoped selectors) so hover/.active always outrank the base. */
+  --apt-accent: #d2bc8a;
+  --mm-outline: rgba(255,255,255,0.16);
+  --mm-base-fill: rgba(255,255,255,0.07);
+  --mm-base-stroke: rgba(255,255,255,0.20);
   --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, SF Mono, Menlo, Consolas, monospace;
 }
@@ -1114,23 +1121,24 @@ img, video, canvas, svg { max-width: 100%; }
   width: 100%; max-width: 360px; height: auto; max-height: 440px;
   display: block; margin: 0 auto; touch-action: manipulation;
 }
-/* Anatomical outline (non-selectable strokes) — subtle on the dark theme.
-   CSS wins over the inline stroke="#101010" presentation attribute. */
+/* Anatomical outline (non-selectable strokes) — token-driven so every theme
+   can retint it. CSS wins over the inline stroke="#101010" presentation attr. */
 .mm-svg line,
 .mm-svg path:not([data-muscle]) {
-  stroke: rgba(255,255,255,0.16); fill: none;
+  stroke: var(--mm-outline); fill: none;
 }
-/* Selectable muscle groups: subtle by default, smooth hover, accent glow when active. */
+/* Selectable muscle groups: subtle base via tokens; hover/active bind to the
+   live dashboard-theme accent so the map is native to every flavor. */
 .mm-svg [data-muscle] {
-  fill: rgba(255,255,255,0.07);
-  stroke: rgba(255,255,255,0.20); stroke-width: 1.1;
+  fill: var(--mm-base-fill);
+  stroke: var(--mm-base-stroke); stroke-width: 1.1;
   cursor: pointer;
   transition: fill 0.18s ease, filter 0.18s ease;
 }
-.mm-svg [data-muscle]:hover { fill: rgba(110,231,183,0.38); }
+.mm-svg [data-muscle]:hover { fill: color-mix(in srgb, var(--apt-accent) 30%, transparent); }
 .mm-svg [data-muscle].active {
-  fill: var(--good);
-  filter: drop-shadow(0 0 6px rgba(110,231,183,0.65));
+  fill: var(--apt-accent);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--apt-accent) 60%, transparent));
 }
 .mm-hint {
   text-align: center; font-size: 11px; color: var(--text-4);
@@ -1582,19 +1590,19 @@ img, video, canvas, svg { max-width: 100%; }
    dashboard, synced via aptron_profile_v1). Dark variants retint the canvas
    and keep gym's monochrome identity; light themes flip the surface + ink
    scale. These outrank :root on specificity, so placement is order-safe. */
-html[data-apt-theme="obsidian"] { --bg: #050506; --bg-card: #0c0c0e; }
+html[data-apt-theme="obsidian"] { --bg: #050506; --bg-card: #0c0c0e; --apt-accent: #c3ad7e; }
 html[data-apt-theme="obsidian"], html[data-apt-theme="obsidian"] body {
   background: radial-gradient(ellipse 80% 60% at 50% 0%, #0d0d12 0%, #050506 60%);
 }
-html[data-apt-theme="gold"] { --bg: #121011; --bg-card: #171412; }
+html[data-apt-theme="gold"] { --bg: #121011; --bg-card: #171412; --apt-accent: #e8d3a2; }
 html[data-apt-theme="gold"], html[data-apt-theme="gold"] body {
   background: radial-gradient(ellipse 80% 60% at 50% 0%, #1c1712 0%, #121011 60%);
 }
-html[data-apt-theme="neon"] { --bg: #08080A; --bg-card: #101016; }
+html[data-apt-theme="neon"] { --bg: #08080A; --bg-card: #101016; --apt-accent: #00F0FF; }
 html[data-apt-theme="neon"], html[data-apt-theme="neon"] body {
   background: radial-gradient(ellipse 80% 60% at 50% 0%, #12121c 0%, #08080A 60%);
 }
-html[data-apt-theme="emerald"] { --bg: #0A120E; --bg-card: #101b15; }
+html[data-apt-theme="emerald"] { --bg: #0A120E; --bg-card: #101b15; --apt-accent: #52D1A2; }
 html[data-apt-theme="emerald"], html[data-apt-theme="emerald"] body {
   background: radial-gradient(ellipse 80% 60% at 50% 0%, #102017 0%, #0A120E 60%);
 }
@@ -1609,11 +1617,15 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
   --border-strong: rgba(29,33,41,0.22);
   --accent: #1D2129;            /* gym's monochrome accent: white ⇄ ink */
   --good: #157239; --warn: #9A6B00; --bad: #C2372A;
+  /* Muscle map on white: soft ink anchors the base silhouette. */
+  --mm-outline: rgba(29,33,41,0.20);
+  --mm-base-fill: rgba(29,33,41,0.10);
+  --mm-base-stroke: rgba(29,33,41,0.15);
   color-scheme: light;
 }
-html[data-apt-theme="light"] { --bg: #FAFAFA; }
+html[data-apt-theme="light"] { --bg: #FAFAFA; --apt-accent: #956534; }
 html[data-apt-theme="light"], html[data-apt-theme="light"] body { background: #FAFAFA; }
-html[data-apt-theme="nordic"] { --bg: #F1F3F5; }
+html[data-apt-theme="nordic"] { --bg: #F1F3F5; --apt-accent: #3B5BDB; }
 html[data-apt-theme="nordic"], html[data-apt-theme="nordic"] body { background: #F1F3F5; }
 
 /* Light: invert the monochrome CTA language (ink chips, white text), lighten
@@ -1652,21 +1664,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab[aria-current="
   background: rgba(29,33,41,0.06); border-color: rgba(29,33,41,0.12);
 }
 
-/* Muscle map: the anatomy is drawn with white-alpha strokes/fills that vanish
-   on a white canvas — anchor the base silhouette with soft ink so the full
-   figure stays visible; active fill already flips via --good. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg line,
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg path:not([data-muscle]) {
-  stroke: rgba(29,33,41,0.25);
-}
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg [data-muscle] {
-  fill: rgba(29,33,41,0.10);
-  stroke: rgba(29,33,41,0.30);
-}
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg [data-muscle]:hover {
-  fill: rgba(21,114,57,0.30);
-}
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-svg [data-muscle].active {
-  filter: drop-shadow(0 0 6px rgba(21,114,57,0.40));
-}
+/* Muscle map light-mode surfaces live as token re-declarations in the shared
+   light block above (--mm-*), and hover/active bind to --apt-accent globally —
+   no scoped selector overrides, so states can never be out-specificity'd. */
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-toggle { background: rgba(29,33,41,0.06); }
