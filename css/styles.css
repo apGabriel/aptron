@@ -577,6 +577,108 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .dcw-nav {
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .dcw-day:not(.is-pad):hover { background: rgba(29,33,41,0.06); }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .dcw-day.is-selected { color: var(--accent-dark); }
 
+/* ── Light chrome ── the shared topbar/bottombar (js/topbar.js) and the Google
+   Calendar linking card (js/calendar-link.js) inject their own <style> tags at
+   runtime with dark-glass values. Those tags land AFTER this sheet in the
+   head, so these overrides win on specificity alone — which is also why every
+   state variant they declare at lower specificity (.warn/.miss dots,
+   .bottombar-tab.active, :hover, .is-reconnect) is re-declared here: a bare
+   base override would outrank and silently kill it. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar {
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-bottom-color: rgba(29,33,41,0.10);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill {
+  color: var(--text-primary);
+  background: rgba(14,126,168,0.07); border-color: rgba(14,126,168,0.24);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-pill-count { color: var(--text-primary); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill .topbar-pill-dot { background: #0E7EA8; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill.warn .topbar-pill-dot { background: #D97706; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill.miss .topbar-pill-dot { background: #DC2626; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-add {
+  color: #0E7EA8; border-color: rgba(14,126,168,0.24);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-wardrobe-btn {
+  background: rgba(29,33,41,0.05); border-color: rgba(29,33,41,0.12);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-wardrobe-btn:hover { background: rgba(29,33,41,0.09); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-wardrobe-icon { color: rgba(29,33,41,0.75); }
+
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .bottombar {
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-top-color: rgba(29,33,41,0.10);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .bottombar-tab { color: rgba(29,33,41,0.64); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .bottombar-tab.active { color: var(--accent); }
+
+/* Google Calendar linking card — dark glass → soft ink tint on frosted white. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink {
+  background:
+    radial-gradient(90% 130% at 6% -20%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 46%),
+    rgba(29,33,41,0.05);
+  border-color: rgba(29,33,41,0.12);
+  box-shadow: 0 8px 26px rgba(23,28,38,0.08);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 10px 30px rgba(23,28,38,0.12), 0 0 24px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink::before {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-medallion {
+  background: radial-gradient(circle at 50% 34%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent) inset,
+              0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-medallion svg { color: var(--accent); filter: none; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-title { color: var(--text-primary); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-pill {
+  color: var(--accent-dark);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub { color: rgba(29,33,41,0.70); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub .dot { background: rgba(29,33,41,0.32); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub .sep { color: rgba(29,33,41,0.35); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub.is-ok .dot { background: #1d8a4e; box-shadow: 0 0 7px rgba(29,138,78,0.5); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub.is-ok .state { color: #157239; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub.is-warn .dot { background: #D97706; box-shadow: 0 0 7px rgba(217,119,6,0.5); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub.is-warn .state { color: #9A6B00; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-sub.is-error .dot { background: #C2372A; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-rule {
+  background: linear-gradient(90deg, transparent, rgba(29,33,41,0.12) 20%, rgba(29,33,41,0.12) 80%, transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-caption { color: rgba(29,33,41,0.66); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-caption b { color: rgba(29,33,41,0.85); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink.is-warn .callink-caption b { color: #9A6B00; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link:hover {
+  color: var(--accent-dark);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.ghost {
+  color: rgba(29,33,41,0.58); border-color: rgba(29,33,41,0.13); background: transparent;
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.ghost:hover {
+  color: #C2372A; border-color: rgba(194,55,42,0.42); background: rgba(194,55,42,0.06);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.is-reconnect,
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.is-reconnect:hover {
+  color: #1a1408; border-color: transparent;
+  background: linear-gradient(180deg, #f0cf8f 0%, #e6b25a 55%, #cf9838 100%);
+}
+
 /* Two-column core: calendar + assistant. Stacks on narrow screens. */
 .aios-grid {
   display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px; align-items: start;
