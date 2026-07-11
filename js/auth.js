@@ -177,16 +177,45 @@
   color: #e98b7f; font-size: 12.5px; min-height: 16px; margin: 0;
   text-align: center; line-height: 1.35;
 }
+.auth-err.is-shake { animation: authErrShake 0.4s ease; }
+@keyframes authErrShake {
+  0%,100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); } 40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); } 80% { transform: translateX(3px); }
+}
+.auth-err.is-ok { color: #d2bc8a; }
+
+.auth-btn .auth-btn-label {
+  display: inline-block;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.auth-btn .auth-btn-label.is-swapping { opacity: 0; transform: translateY(3px); }
+
+.auth-toggle {
+  margin: 2px 0 0; text-align: center;
+  font-size: 12.5px; color: rgba(255,255,255,0.42);
+}
+.auth-toggle button {
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.auth-toggle button b {
+  color: #d2bc8a; font-weight: 600;
+  transition: color 0.15s ease;
+}
+.auth-toggle button:hover b { color: #e6cf9c; text-decoration: underline; text-underline-offset: 3px; }
 
 @media (max-width: 400px) {
   .auth-card { padding: 30px 20px 24px; border-radius: 18px; }
   .auth-title { font-size: 22px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .auth-gate, .auth-card, .auth-orb {
+  .auth-gate, .auth-card, .auth-orb, .auth-err {
     animation: none !important; opacity: 1 !important; transform: none !important;
   }
   .auth-gate.is-leaving { opacity: 0; transition: opacity 0.2s; }
+  .auth-btn .auth-btn-label { transition: none; }
 }
 `;
     document.head.appendChild(style);
@@ -206,61 +235,148 @@
   <input class="auth-input" id="authPass" type="password" name="password" placeholder="Password"
          autocomplete="current-password" maxlength="100" required>
   <p class="auth-err" id="authErr" role="alert" aria-live="polite"></p>
-  <button class="auth-btn" id="authBtn" type="submit">Sign in</button>
+  <button class="auth-btn" id="authBtn" type="submit"><span class="auth-btn-label" id="authBtnLabel">Sign in</span></button>
+  <p class="auth-toggle"><button type="button" id="authToggle"></button></p>
 </form>`;
     gateEl = wrap;
 
     // ── Client-side hardening (defense-in-depth) ─────────────────────────────
     const MAX_LEN  = 100;                          // cap both fields
-    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;  // strict shape check
-    // We render errors with textContent (never innerHTML), so markup can't
-    // execute. cleanText additionally strips control chars and caps length as a
-    // belt-and-suspenders guard on the fallback path that echoes a raw string.
-    function cleanText(s) {
-      return String(s == null ? '' : s).replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 160);
-    }
-    // Map known GoTrue messages to clean copy so raw backend text is not echoed;
-    // the fallback still passes through cleanText + textContent.
-    function friendlyAuthError(error) {
+    // Strict shape check that also rejects <>"'\` and backslash, so nothing
+    // that could ever read as markup or a quote-breaker survives — even though
+    // every DOM write below goes through textContent (never innerHTML), which
+    // is the actual escaping boundary.
+    const EMAIL_RE = /^[^\s@<>"'`\\]+@[^\s@<>"'`\\]+\.[^\s@<>"'`\\]+$/;
+    // Sign-up password policy — each rule checked separately so the inline
+    // error names exactly what's missing. "Special" = any non-alphanumeric,
+    // deliberately broader than a fixed symbol list so -, _, ~ etc. count.
+    const PW_RULES = [
+      { re: /.{8,}/,        label: '8+ characters' },
+      { re: /[a-z]/,        label: 'a lowercase letter' },
+      { re: /[A-Z]/,        label: 'an uppercase letter' },
+      { re: /[0-9]/,        label: 'a number' },
+      { re: /[^A-Za-z0-9]/, label: 'a special character' },
+    ];
+    // Anti-enumeration: every non-network auth failure collapses to ONE generic
+    // string per mode. Raw GoTrue text is never echoed — "Email not confirmed"
+    // or "User already registered" would confirm the account exists.
+    function friendlyAuthError(error, signup) {
       const raw = (error && (error.message || error.error_description)) || '';
       const m = raw.toLowerCase();
-      if (m.indexOf('email not confirmed') !== -1)
-        return 'Your email isn’t confirmed yet. Confirm it in Supabase, then sign in.';
-      if (m.indexOf('invalid login') !== -1 || m.indexOf('invalid credentials') !== -1)
-        return 'Incorrect email or password.';
       if (m.indexOf('rate limit') !== -1 || m.indexOf('too many') !== -1)
         return 'Too many attempts. Wait a moment and try again.';
       if (m.indexOf('failed to fetch') !== -1 || m.indexOf('network') !== -1)
         return 'Network error. Check your connection.';
-      return raw ? cleanText(raw) : 'Sign-in failed. Please try again.';
+      return signup ? 'Could not create the account. Please try again.'
+                    : 'Invalid login credentials.';
     }
 
     const form = wrap.querySelector('#authForm');
     const btn = wrap.querySelector('#authBtn');
+    const btnLabel = wrap.querySelector('#authBtnLabel');
     const err = wrap.querySelector('#authErr');
+    const sub = wrap.querySelector('.auth-sub');
+    const passEl = wrap.querySelector('#authPass');
+    const toggle = wrap.querySelector('#authToggle');
+    const reduceMotion = () =>
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function setNote(text, ok) {
+      err.classList.remove('is-shake', 'is-ok');
+      err.textContent = text;
+      if (!text) return;
+      if (ok) { err.classList.add('is-ok'); return; }
+      void err.offsetWidth;  // restart the shake even when the message repeats
+      err.classList.add('is-shake');
+    }
+    function swapBtnLabel(text) {
+      if (btnLabel.textContent === text) return;
+      if (reduceMotion()) { btnLabel.textContent = text; return; }
+      btnLabel.classList.add('is-swapping');
+      setTimeout(() => {
+        btnLabel.textContent = text;
+        btnLabel.classList.remove('is-swapping');
+      }, 160);
+    }
+
+    // ── Dual mode: sign in ⇄ sign up ─────────────────────────────────────────
+    let mode = 'signin';
+    function idleLabel() { return mode === 'signup' ? 'Create Account' : 'Sign in'; }
+    function setMode(next) {
+      mode = next;
+      const signup = mode === 'signup';
+      sub.textContent = signup ? 'Create your account to get started.'
+                               : 'Summon your dashboard — sign in to continue.';
+      passEl.setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+      // Static strings only — nothing user-supplied ever lands in this innerHTML.
+      toggle.innerHTML = signup ? 'Already have an account? <b>Sign in</b>'
+                                : 'Don&rsquo;t have an account? <b>Sign up</b>';
+      if (!btn.disabled) swapBtnLabel(idleLabel());
+      setNote('');
+    }
+    toggle.addEventListener('click', () => setMode(mode === 'signup' ? 'signin' : 'signup'));
+    setMode('signin');
+
+    // ── Submission throttle ──────────────────────────────────────────────────
+    // Every attempt that reaches the network arms a 3s cooldown; the button
+    // stays disabled until BOTH the request has settled and the cooldown has
+    // elapsed, so hammering the button (or Enter) can't fan requests out.
+    // Local validation failures skip the cooldown — they fire no request.
+    let busy = false;
+    let cooldownUntil = 0;
+    function endAttempt() {
+      setTimeout(() => {
+        busy = false;
+        btn.disabled = false;
+        swapBtnLabel(idleLabel());
+      }, Math.max(0, cooldownUntil - Date.now()));
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      err.textContent = '';
+      if (busy || Date.now() < cooldownUntil) return;
+      setNote('');
       // Trim + length-cap the email; validate its shape before any network call.
       const email = (wrap.querySelector('#authEmail').value || '').trim().slice(0, MAX_LEN);
       // Passwords are length-capped but NOT trimmed — leading/trailing chars can
       // be significant, so trimming would silently alter a valid secret.
-      const password = (wrap.querySelector('#authPass').value || '').slice(0, MAX_LEN);
-      if (!EMAIL_RE.test(email)) { err.textContent = 'Enter a valid email address.'; return; }
-      if (!password) { err.textContent = 'Enter your password.'; return; }
-
-      btn.disabled = true; btn.textContent = 'Signing in…';
-      try {
-        const { error } = await supa.auth.signInWithPassword({ email, password });
-        if (error) {
-          err.textContent = friendlyAuthError(error);
-          btn.disabled = false; btn.textContent = 'Sign in';
-        }
-        // On success, onAuthStateChange(SIGNED_IN) fades the gate out + resolves.
-      } catch (e2) {
-        err.textContent = 'Sign-in failed. Check your connection.';
-        btn.disabled = false; btn.textContent = 'Sign in';
+      const password = (passEl.value || '').slice(0, MAX_LEN);
+      if (!EMAIL_RE.test(email)) { setNote('Enter a valid email address.'); return; }
+      if (!password) { setNote('Enter your password.'); return; }
+      const signup = mode === 'signup';
+      if (signup) {
+        const missing = PW_RULES.filter((r) => !r.re.test(password)).map((r) => r.label);
+        if (missing.length) { setNote('Password needs ' + missing.join(', ') + '.'); return; }
       }
+
+      busy = true;
+      cooldownUntil = Date.now() + 3000;
+      btn.disabled = true;
+      swapBtnLabel(signup ? 'Creating account…' : 'Signing in…');
+      try {
+        if (signup) {
+          const { data, error } = await supa.auth.signUp({ email, password });
+          if (error) {
+            setNote(friendlyAuthError(error, true));
+          } else if (!data || !data.session) {
+            // Email confirmation is on → no session yet. Supabase obfuscates
+            // already-registered emails on signUp, so this notice is safe to
+            // show unconditionally (no enumeration signal).
+            passEl.value = '';
+            setMode('signin');
+            swapBtnLabel(idleLabel()); // setMode skips this while disabled
+            setNote('Check your email to confirm registration.', true);
+          }
+          // With auto-confirm a session arrives → onAuthStateChange dismisses.
+        } else {
+          const { error } = await supa.auth.signInWithPassword({ email, password });
+          if (error) setNote(friendlyAuthError(error, false));
+          // On success, onAuthStateChange(SIGNED_IN) fades the gate out + resolves.
+        }
+      } catch (e2) {
+        setNote((signup ? 'Sign-up' : 'Sign-in') + ' failed. Check your connection.');
+      }
+      endAttempt();
     });
     return wrap;
   }
