@@ -1094,3 +1094,51 @@ main {
 .food-date-input:focus { outline: none; border-color: var(--accent); background: var(--bg-input-focus); }
 .food-date-input::-webkit-calendar-picker-indicator { filter: invert(0.65); cursor: pointer; }
 /* Meal visual — thumbnail with emoji badge, or emoji-only tile */
+
+/* ── Account → Preferences themes ───────────────────────────────────────────
+   <html data-apt-theme> stamped pre-paint by js/theme.js. Dark variants remap
+   the page canvas only (health keeps its green identity); light themes flip
+   surfaces + ink, with health's green darkened for white backgrounds. The
+   inlined water tracker (.wt-scope/.wt-app) is token-scoped, so it follows. */
+html[data-apt-theme="gold"]    { --bg: #121011; }
+html[data-apt-theme="neon"]    { --bg: #08080A; }
+html[data-apt-theme="emerald"] { --bg: #0A120E; }
+
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+  --bg-card: #FFFFFF;
+  --bg-secondary: rgba(29,33,41,0.04);
+  --bg-input: rgba(29,33,41,0.05);
+  --bg-input-focus: rgba(29,33,41,0.08);
+  --bg-dropdown: rgba(255,255,255,0.98);
+  --border: rgba(29,33,41,0.10);
+  --border-soft: rgba(29,33,41,0.07);
+  --border-strong: rgba(29,33,41,0.22);
+  --text-primary: #1D2129;
+  --text-secondary: rgba(29,33,41,0.70);
+  --text-tertiary: rgba(29,33,41,0.55);
+  --text-quaternary: rgba(29,33,41,0.40);
+  --accent: #157A5B;            /* health green, deepened for white */
+  --accent-glow: rgba(21,122,91,0.22);
+  --warning: #B54708;
+  --warning-bg: rgba(181,71,8,0.10);
+  --tag-stack: #8A6A0F;
+  --tag-stack-bg: rgba(154,117,16,0.14);
+  color-scheme: light;
+}
+html[data-apt-theme="light"]  { --bg: #FAFAFA; }
+html[data-apt-theme="nordic"] { --bg: #F1F3F5; }
+
+/* Water tracker panel — scoped tokens follow the same flip. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .wt-scope {
+  --bg: #FAFAFA; --bg-card: #FFFFFF;
+  --text-1: #1D2129;
+  --text-2: rgba(29,33,41,0.70);
+  --text-3: rgba(29,33,41,0.55);
+  --text-4: rgba(29,33,41,0.40);
+  --border: rgba(29,33,41,0.10);
+  --border-strong: rgba(29,33,41,0.22);
+  --good: #157239; --warn: #9A6B00; --bad: #C2372A; --info: #0E7EA8;
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .wt-app {
+  background: #FFFFFF; color-scheme: light;
+}

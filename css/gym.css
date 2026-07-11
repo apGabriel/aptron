@@ -8,9 +8,19 @@
   --border: rgba(255,255,255,0.06);
   --border-strong: rgba(255,255,255,0.14);
   --accent: #ffffff;
+  /* Monochrome CTA language: light themes invert it (ink chip, white text). */
+  --cta-grad: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  --cta-ink: #0a0a0b;
   --good: #6ee7b7;
   --warn: #fbbf24;
   --bad: #ff8a8a;
+  /* Dashboard-theme accent + muscle-map surface tokens. Overridden per
+     <html data-apt-theme> below; default = Aptron Dark's signature gold.
+     Tokens (not scoped selectors) so hover/.active always outrank the base. */
+  --apt-accent: #d2bc8a;
+  --mm-outline: rgba(255,255,255,0.16);
+  --mm-base-fill: rgba(255,255,255,0.07);
+  --mm-base-stroke: rgba(255,255,255,0.20);
   --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, SF Mono, Menlo, Consolas, monospace;
 }
@@ -158,8 +168,8 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-seg-btn:hover { color: var(--text-2); background: rgba(255,255,255,0.04); }
 .po-seg-btn.active {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b;
+  background: var(--cta-grad);
+  color: var(--cta-ink);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 4px 12px rgba(0,0,0,0.35);
 }
 
@@ -293,7 +303,7 @@ img, video, canvas, svg { max-width: 100%; }
   cursor: pointer; -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s;
 }
-.po-metric-seg button.active { background: var(--text-1); color: #0a0a0b; }
+.po-metric-seg button.active { background: var(--text-1); color: var(--cta-ink); }
 .po-field input[type="number"], .po-field input[type="text"] {
   padding: 14px 12px;
   border: 1px solid var(--border);
@@ -332,8 +342,8 @@ img, video, canvas, svg { max-width: 100%; }
 .po-btn-primary {
   width: 100%; padding: 14px;
   border: 1px solid rgba(255,255,255,0.85);
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b; border-radius: 12px;
+  background: var(--cta-grad);
+  color: var(--cta-ink); border-radius: 12px;
   font-family: inherit; font-size: 14px; font-weight: 700;
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 4px 14px rgba(0,0,0,0.40);
@@ -356,7 +366,7 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-ds-toggle:hover { color: var(--text-1); border-color: var(--border-strong); }
 .po-ds-toggle.active {
-  color: #0a0a0b; background: var(--warn); border-color: var(--warn);
+  color: var(--cta-ink); background: var(--warn); border-color: var(--warn);
   box-shadow: 0 0 0 1px var(--warn) inset;
 }
 
@@ -543,8 +553,8 @@ img, video, canvas, svg { max-width: 100%; }
   -webkit-tap-highlight-color: transparent;
 }
 .po-modal-seg button.active {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b;
+  background: var(--cta-grad);
+  color: var(--cta-ink);
 }
 .po-bw-toggle {
   display: flex; align-items: center; gap: 8px;
@@ -686,8 +696,8 @@ img, video, canvas, svg { max-width: 100%; }
   font-size: 12px; color: var(--text-3); font-weight: 500;
 }
 .po-tw-done-btn {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b; border: none; border-radius: 999px;
+  background: var(--cta-grad);
+  color: var(--cta-ink); border: none; border-radius: 999px;
   padding: 9px 16px;
   font-family: inherit; font-size: 12px; font-weight: 700;
   cursor: pointer;
@@ -1066,8 +1076,8 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .rb-chip:hover { color: var(--text-1); background: rgba(255,255,255,0.08); }
 .rb-chip.active {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b; border-color: transparent;
+  background: var(--cta-grad);
+  color: var(--cta-ink); border-color: transparent;
 }
 /* Drill-down "back to all groups" chip — subtle, set apart from the muscles. */
 .rb-chip-back {
@@ -1103,7 +1113,7 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .mm-toggle-btn:hover { color: var(--text-1); }
 .mm-toggle-btn.active {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%); color: #0a0a0b;
+  background: var(--cta-grad); color: var(--cta-ink);
 }
 .mm-stage { display: flex; justify-content: center; }
 .mm-view[hidden] { display: none; }
@@ -1111,23 +1121,24 @@ img, video, canvas, svg { max-width: 100%; }
   width: 100%; max-width: 360px; height: auto; max-height: 440px;
   display: block; margin: 0 auto; touch-action: manipulation;
 }
-/* Anatomical outline (non-selectable strokes) — subtle on the dark theme.
-   CSS wins over the inline stroke="#101010" presentation attribute. */
+/* Anatomical outline (non-selectable strokes) — token-driven so every theme
+   can retint it. CSS wins over the inline stroke="#101010" presentation attr. */
 .mm-svg line,
 .mm-svg path:not([data-muscle]) {
-  stroke: rgba(255,255,255,0.16); fill: none;
+  stroke: var(--mm-outline); fill: none;
 }
-/* Selectable muscle groups: subtle by default, smooth hover, accent glow when active. */
+/* Selectable muscle groups: subtle base via tokens; hover/active bind to the
+   live dashboard-theme accent so the map is native to every flavor. */
 .mm-svg [data-muscle] {
-  fill: rgba(255,255,255,0.07);
-  stroke: rgba(255,255,255,0.20); stroke-width: 1.1;
+  fill: var(--mm-base-fill);
+  stroke: var(--mm-base-stroke); stroke-width: 1.1;
   cursor: pointer;
   transition: fill 0.18s ease, filter 0.18s ease;
 }
-.mm-svg [data-muscle]:hover { fill: rgba(110,231,183,0.38); }
+.mm-svg [data-muscle]:hover { fill: color-mix(in srgb, var(--apt-accent) 30%, transparent); }
 .mm-svg [data-muscle].active {
-  fill: var(--good);
-  filter: drop-shadow(0 0 6px rgba(110,231,183,0.65));
+  fill: var(--apt-accent);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--apt-accent) 60%, transparent));
 }
 .mm-hint {
   text-align: center; font-size: 11px; color: var(--text-4);
@@ -1234,7 +1245,7 @@ img, video, canvas, svg { max-width: 100%; }
   transition: transform 0.18s, background 0.18s;
 }
 .rb-rest-switch input:checked + .rb-rest-switch-track {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  background: var(--cta-grad);
 }
 .rb-rest-switch input:checked + .rb-rest-switch-track .rb-rest-switch-thumb {
   transform: translateX(18px); background: #0a0a0b;
@@ -1410,9 +1421,9 @@ img, video, canvas, svg { max-width: 100%; }
 .po-rest-actions { display: flex; align-items: center; gap: 12px; }
 .po-rest-skip {
   padding: 13px 30px; border-radius: 12px; cursor: pointer; font-family: inherit;
-  font-size: 14px; font-weight: 700; color: #0a0a0b;
+  font-size: 14px; font-weight: 700; color: var(--cta-ink);
   border: 1px solid rgba(255,255,255,0.85);
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  background: var(--cta-grad);
   -webkit-tap-highlight-color: transparent;
 }
 .po-rest-skip:active { transform: scale(0.96); }
@@ -1486,11 +1497,11 @@ img, video, canvas, svg { max-width: 100%; }
 .po-combo-opt-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .po-combo-opt-meta { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .po-combo-opt.is-active {
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
-  color: #0a0a0b;
+  background: var(--cta-grad);
+  color: var(--cta-ink);
 }
 .po-combo-opt.is-active .po-combo-opt-meta { color: rgba(10,10,11,0.55); }
-.po-combo-check { flex: none; font-size: 13px; font-weight: 800; color: #0a0a0b; }
+.po-combo-check { flex: none; font-size: 13px; font-weight: 800; color: var(--cta-ink); }
 .po-combo-empty { padding: 12px; text-align: center; font-size: 12px; color: var(--text-3); font-style: italic; }
 
 /* ============================================================
@@ -1551,8 +1562,8 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-cal-day[disabled] { opacity: 0.45; }
 .po-cal-day.has-workout {
-  cursor: pointer; color: #0a0a0b;
-  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  cursor: pointer; color: var(--cta-ink);
+  background: var(--cta-grad);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 10px rgba(0,0,0,0.3);
 }
 .po-cal-day.has-workout:hover { filter: brightness(1.05); }
@@ -1573,3 +1584,87 @@ img, video, canvas, svg { max-width: 100%; }
 .po-cal-sess-name { font-size: 14px; font-weight: 700; color: var(--text-1); }
 .po-cal-sess-right { display: flex; align-items: center; gap: 8px; }
 .po-cal-sess-sum { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* ── Account → Preferences themes ───────────────────────────────────────────
+   <html data-apt-theme> is stamped pre-paint by js/theme.js (picked on the
+   dashboard, synced via aptron_profile_v1). Dark variants retint the canvas
+   and keep gym's monochrome identity; light themes flip the surface + ink
+   scale. These outrank :root on specificity, so placement is order-safe. */
+html[data-apt-theme="obsidian"] { --bg: #050506; --bg-card: #0c0c0e; --apt-accent: #c3ad7e; }
+html[data-apt-theme="obsidian"], html[data-apt-theme="obsidian"] body {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, #0d0d12 0%, #050506 60%);
+}
+html[data-apt-theme="gold"] { --bg: #121011; --bg-card: #171412; --apt-accent: #e8d3a2; }
+html[data-apt-theme="gold"], html[data-apt-theme="gold"] body {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, #1c1712 0%, #121011 60%);
+}
+html[data-apt-theme="neon"] { --bg: #08080A; --bg-card: #101016; --apt-accent: #00F0FF; }
+html[data-apt-theme="neon"], html[data-apt-theme="neon"] body {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, #12121c 0%, #08080A 60%);
+}
+html[data-apt-theme="emerald"] { --bg: #0A120E; --bg-card: #101b15; --apt-accent: #52D1A2; }
+html[data-apt-theme="emerald"], html[data-apt-theme="emerald"] body {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, #102017 0%, #0A120E 60%);
+}
+
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+  --bg-card: #FFFFFF;
+  --text-1: #1D2129;
+  --text-2: rgba(29,33,41,0.70);
+  --text-3: rgba(29,33,41,0.55);
+  --text-4: rgba(29,33,41,0.40);
+  --border: rgba(29,33,41,0.10);
+  --border-strong: rgba(29,33,41,0.22);
+  --accent: #1D2129;            /* gym's monochrome accent: white ⇄ ink */
+  --good: #157239; --warn: #9A6B00; --bad: #C2372A;
+  /* Muscle map on white: soft ink anchors the base silhouette. */
+  --mm-outline: rgba(29,33,41,0.20);
+  --mm-base-fill: rgba(29,33,41,0.10);
+  --mm-base-stroke: rgba(29,33,41,0.15);
+  color-scheme: light;
+}
+html[data-apt-theme="light"] { --bg: #FAFAFA; --apt-accent: #956534; }
+html[data-apt-theme="light"], html[data-apt-theme="light"] body { background: #FAFAFA; }
+html[data-apt-theme="nordic"] { --bg: #F1F3F5; --apt-accent: #3B5BDB; }
+html[data-apt-theme="nordic"], html[data-apt-theme="nordic"] body { background: #F1F3F5; }
+
+/* Light: invert the monochrome CTA language (ink chips, white text), lighten
+   the input fills, and frost gym's own bottom tabbar. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+  --cta-grad: linear-gradient(180deg, #2A303A 0%, #1D2129 100%);
+  --cta-ink: #FFFFFF;
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-seg-btn:hover { background: rgba(29,33,41,0.05); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-seg-btn.active {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 12px rgba(23,28,38,0.22);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-metric-seg { background: rgba(29,33,41,0.04); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-btn-primary {
+  border-color: #1D2129;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 14px rgba(23,28,38,0.24);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input[type="number"],
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input[type="text"] {
+  background: rgba(29,33,41,0.05);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input:focus {
+  border-color: rgba(29,33,41,0.45); box-shadow: 0 0 0 3px rgba(29,33,41,0.08);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-w-btn { background: rgba(29,33,41,0.05); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-w-btn:hover { background: rgba(29,33,41,0.10); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tabbar {
+  background: linear-gradient(180deg, rgba(250,250,250,0) 0%, rgba(250,250,250,0.80) 38%, rgba(250,250,250,0.95) 100%);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tabbar-inner {
+  background: rgba(255,255,255,0.88);
+  box-shadow: 0 12px 36px rgba(23,28,38,0.16);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab:hover { color: var(--text-1); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab[aria-current="page"] {
+  background: rgba(29,33,41,0.06); border-color: rgba(29,33,41,0.12);
+}
+
+/* Muscle map light-mode surfaces live as token re-declarations in the shared
+   light block above (--mm-*), and hover/active bind to --apt-accent globally —
+   no scoped selector overrides, so states can never be out-specificity'd. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-toggle { background: rgba(29,33,41,0.06); }

@@ -141,6 +141,39 @@ html, body { -webkit-text-size-adjust: 100%; }
   ::-webkit-scrollbar { width: 0; height: 0; display: none; }
   html, body { scrollbar-width: none; -ms-overflow-style: none; }
 }
+/* ── Light themes (html[data-apt-theme] set by js/theme.js / js/account.js) ──
+   Frosted-white chrome + dark ink. State variants (.warn/.miss dots, .active
+   tab, :hover) are re-declared because the scoped base overrides outrank them. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar {
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-bottom-color: rgba(29,33,41,0.10);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill {
+  color: #1D2129;
+  background: rgba(14,126,168,0.07); border-color: rgba(14,126,168,0.24);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-pill-count { color: #1D2129; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill .topbar-pill-dot { background: #0E7EA8; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill.warn .topbar-pill-dot { background: #D97706; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-pill.miss .topbar-pill-dot { background: #DC2626; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-water-add {
+  color: #0E7EA8; border-color: rgba(14,126,168,0.24);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-wardrobe-btn {
+  background: rgba(29,33,41,0.05); border-color: rgba(29,33,41,0.12);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-wardrobe-btn:hover { background: rgba(29,33,41,0.09); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .topbar-wardrobe-icon { color: rgba(29,33,41,0.75); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .bottombar {
+  background: rgba(255,255,255,0.88);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-top-color: rgba(29,33,41,0.10);
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .bottombar-tab { color: rgba(29,33,41,0.64); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .bottombar-tab.active { color: var(--accent, #1D2129); }
 .modal-bg, .modal, .po-modal-bg, .po-modal, .wt-overlay, .wt-viewer {
   overscroll-behavior: contain;
 }
