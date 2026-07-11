@@ -176,10 +176,17 @@
 .acct-bg.is-open { opacity: 1; pointer-events: auto; }
 
 .acct-modal {
-  position: relative; width: 100%; max-width: 760px; height: min(88vh, 600px);
+  /* Gold accent, sourced from the page's --accent token so it tracks the theme
+     the user picks in the Preferences pane. #d2bc8a fallback = the historic gold,
+     so appearance is unchanged if --accent is ever absent. */
+  --acct-accent: var(--accent, #d2bc8a);
+  --acct-line: color-mix(in srgb, var(--acct-accent) 18%, transparent);
+  --acct-line-soft: color-mix(in srgb, var(--acct-accent) 14%, transparent);
+  --acct-bar: color-mix(in srgb, var(--acct-accent) 48%, transparent);
+  position: relative; width: 100%; max-width: 860px; height: min(88vh, 600px);
   display: flex; overflow: hidden;
   background: linear-gradient(180deg, rgba(62,62,62,0.88) 0%, rgba(33,32,30,0.94) 100%);
-  border: 1px solid rgba(210,188,138,0.18); border-radius: 20px;
+  border: 1px solid var(--acct-line); border-radius: 20px;
   backdrop-filter: blur(26px) saturate(1.2); -webkit-backdrop-filter: blur(26px) saturate(1.2);
   box-shadow: 0 24px 70px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.05);
   transform: translateY(10px) scale(0.985); transition: transform .28s cubic-bezier(0.22,1,0.36,1);
@@ -190,7 +197,7 @@
 .acct-nav {
   flex: none; width: 212px; display: flex; flex-direction: column; gap: 4px;
   padding: 20px 14px; background: rgba(0,0,0,0.16);
-  border-right: 1px solid rgba(210,188,138,0.14);
+  border-right: 1px solid var(--acct-line-soft);
 }
 .acct-brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 14px; }
 .acct-brand-av {
@@ -257,11 +264,11 @@
   scrollbar-width: thin; scrollbar-color: transparent transparent;
   transition: scrollbar-color .2s;
 }
-.acct-scroll:hover, .acct-scroll:focus-within { scrollbar-color: rgba(210,188,138,0.5) transparent; }
+.acct-scroll:hover, .acct-scroll:focus-within { scrollbar-color: var(--acct-bar) transparent; }
 .acct-scroll::-webkit-scrollbar { width: 9px; }
 .acct-scroll::-webkit-scrollbar-track { background: transparent; }
 .acct-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 9px; border: 3px solid transparent; background-clip: padding-box; }
-.acct-scroll:hover::-webkit-scrollbar-thumb, .acct-scroll:focus-within::-webkit-scrollbar-thumb { background: rgba(210,188,138,0.4); background-clip: padding-box; }
+.acct-scroll:hover::-webkit-scrollbar-thumb, .acct-scroll:focus-within::-webkit-scrollbar-thumb { background: var(--acct-bar); background-clip: padding-box; }
 
 .acct-pane { display: none; flex-direction: column; gap: 18px; }
 .acct-pane.is-active { display: flex; }
@@ -394,7 +401,7 @@
   .acct-bg.is-open .acct-modal { transform: translateY(0); }
   .acct-nav {
     width: auto; flex-direction: row; gap: 8px; overflow-x: auto; padding: 12px 14px;
-    border-right: none; border-bottom: 1px solid rgba(210,188,138,0.14);
+    border-right: none; border-bottom: 1px solid var(--acct-line-soft);
     scrollbar-width: none;
   }
   .acct-nav::-webkit-scrollbar { display: none; }
