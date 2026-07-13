@@ -7,9 +7,13 @@ valid session JWT.
 
 ## What changed (code)
 
-- `js/auth.js` — one shared authenticated Supabase client (`window.APP_SUPABASE`),
-  a blocking email+password login gate, `APP_AUTH_READY` (resolves only once a
-  session exists), `window.__appAccessToken`, and `window.appSignOut()`.
+- `js/auth/` (ES modules; `main.js` is the `type="module"` entry) — one shared
+  authenticated Supabase client (`window.APP_SUPABASE`), a blocking
+  email+password login gate, `APP_AUTH_READY` (resolves only once a session
+  exists), `window.__appAccessToken`, and `window.appSignOut()`. Split:
+  `main.js` (client + session lifecycle + submit routing), `auth_ui.js`
+  (gate DOM/animations only), `login_service.js` / `register_service.js`
+  (sign-in / sign-up logic, validations, `aptron_pending_profile_v1` engine).
 - All sync paths (`sync.js`, `js/topbar.js`, `js/gym/gym-sync.js`,
   `js/gym/gym-cloud.js`) now reuse that one client and wait for the gate. The two
   keepalive unload `fetch`es send the user JWT instead of the anon key.

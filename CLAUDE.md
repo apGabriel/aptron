@@ -32,7 +32,8 @@ sync and a small Express proxy (`proxy/`) that fronts the Google Calendar API.
   2. `gym.js` uses normalized `routines` + `exercise_logs` tables
      (migration in `supabase/migrations/`). `gym.html` runs BOTH the app_state
      blob and the normalized tables on purpose.
-- **Single-owner auth (Supabase Auth + RLS).** `js/auth.js` gates every page
+- **Single-owner auth (Supabase Auth + RLS).** `js/auth/` (ES modules, entry
+  `js/auth/main.js` via `<script type="module">`) gates every page
   with an email+password login and creates the ONE shared authenticated client,
   `window.APP_SUPABASE`. Tables are scoped to `auth.uid()` (RLS, migration
   `0003`); the anon key alone reads nothing. The publishable/anon key in
