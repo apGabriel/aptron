@@ -37,7 +37,7 @@
     return fetch(url, Object.assign({}, opts, { headers }));
   }
 
-  // ── styles (Shenlong gold-on-slate, matching js/auth.js) ────────────────────
+  // ── styles (Shenlong gold-on-slate, matching js/auth/main.js) ───────────────
   function injectStyles() {
     if (document.getElementById('callink-styles')) return;
     const s = document.createElement('style');

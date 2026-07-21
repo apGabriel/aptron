@@ -175,7 +175,7 @@
       } catch (e) {}
     }
     (async function init() {
-      // Wait for the login gate, then reuse the one authed client (js/auth.js).
+      // Wait for the login gate, then reuse the one authed client (js/auth/main.js).
       // Its JWT is what RLS checks; a fresh createClient() here would only carry
       // the anon key and get denied.
       await (window.APP_AUTH_READY || Promise.resolve());

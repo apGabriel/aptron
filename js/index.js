@@ -186,7 +186,7 @@ window.QuickNotes = (function () {
   // Turn a calendar failure into a short, debuggable message. With Supabase as
   // the store the failure modes collapse to two: no client (local-only / not
   // configured) vs a query or network error. The old proxy/Google-auth branches
-  // no longer apply — the login gate (js/auth.js) already guarantees a session.
+  // no longer apply — the login gate (js/auth/main.js) already guarantees a session.
   function calShowError(offlineEl, countEl, err) {
     if (err && err.notConfigured) {
       offlineEl.textContent = '⚠ Cloud sync isn’t configured — calendar unavailable.';

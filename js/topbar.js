@@ -11,7 +11,7 @@
   'use strict';
 
   // Supabase access goes through the shared authed client (window.APP_SUPABASE,
-  // created by js/auth.js) — see pushWaterMergedToSupabase below.
+  // created by js/auth/main.js) — see pushWaterMergedToSupabase below.
 
   // -------- CSS --------
   const css = `
@@ -400,7 +400,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   async function pushWaterMergedToSupabase(localWater) {
     if (window.location.pathname.endsWith('/health.html') ||
         window.location.pathname.endsWith('health.html')) return;
-    // Reuse the one authed client (js/auth.js). Null when signed out / local-only.
+    // Reuse the one authed client (js/auth/main.js). Null when signed out / local-only.
     const supa = window.APP_SUPABASE;
     if (!supa) return;
     try {

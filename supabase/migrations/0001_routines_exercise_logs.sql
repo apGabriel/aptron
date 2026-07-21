@@ -15,6 +15,18 @@
 -- "<exId>|<iso-timestamp>" for a logged set) so writes are idempotent: the same
 -- routine/set upserts in place instead of duplicating on retries or backfill.
 -- Run this whole script once in: Supabase → SQL Editor.
+--
+-- ⚠ REBUILD-FROM-SCRATCH WARNING (added 2026-07-21, Known Issues #14 / TD-2)
+--   This file GRANTs anon full access and installs USING(true) "anon full
+--   access" policies below. That was correct for the pre-auth era; it is WRONG
+--   once auth exists. Migration 0003 (auth user scoping) revokes anon and
+--   replaces these policies — but if you are ever rebuilding this database from
+--   the migration files, running 0001 alone (or stopping before 0003) leaves
+--   routines/exercise_logs open to anyone with the anon key. There is still no
+--   migration ledger (Known Issues #7), so nothing enforces the order.
+--   ALWAYS run 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 in full,
+--   never 0001 in isolation. The live database already has 0003+ applied; this
+--   warning only matters for a from-scratch rebuild.
 -- ============================================================================
 
 -- ---------- routines --------------------------------------------------------

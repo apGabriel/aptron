@@ -1,67 +1,503 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working on the Aptron project.
 
-## What this is
+---
 
-Aptron is a personal dashboard suite: several self-contained single-page apps —
-`index.html` (Goals + calendar), `gym.html` (Progressive Overload Coach),
-`wardrobe.html` (Smart Wardrobe), `health.html` (daily health). Vanilla
-JavaScript, **no framework and no build step**. Backed by Supabase for cloud
-sync and a small Express proxy (`proxy/`) that fronts the Google Calendar API.
+# Project Overview
 
-## Running locally
+Aptron is a long-term Personal Operating System.
 
-- Frontend: serve the repo root with a local static server (e.g. `npx serve .`
-  or VS Code Live Server), then open the relevant `*.html`. Don't rely on
-  `file://` — Supabase/CORS behave differently than a real origin.
-- Proxy (only needed for the Goals calendar): `cd proxy && npm run dev`
-  (auto-restart) or `npm start`. One-time Google OAuth setup: `npm run auth`,
-  then paste the refresh token into `proxy/.env`.
+The goal is not simply to build several utilities, but to build an integrated
+ecosystem where every module can eventually communicate through a shared AI layer.
 
-## Architecture you need to know
+Current modules include:
 
-- **No build, no bundler, no transpile.** Edit `.js`/`.html`/`.css` and reload.
-  There is no CI or linter, so a syntax error ships silently — a `node --check`
-  hook guards edited JS, but still load the page to confirm behavior.
-- **Offline-first.** All data lives in `localStorage` first and syncs async to
-  Supabase. UI must work before the network resolves.
-- **Two intentional Supabase sync systems — do not collapse them:**
-  1. `sync.js` mirrors `localStorage` ⇄ a per-app `app_state` JSONB blob
-     (Goals, Wardrobe). Last-write-wins by `updated_at`; polls ~8s + realtime.
-  2. `gym.js` uses normalized `routines` + `exercise_logs` tables
-     (migration in `supabase/migrations/`). `gym.html` runs BOTH the app_state
-     blob and the normalized tables on purpose.
-- **Single-owner auth (Supabase Auth + RLS).** `js/auth/` (ES modules, entry
-  `js/auth/main.js` via `<script type="module">`) gates every page
-  with an email+password login and creates the ONE shared authenticated client,
-  `window.APP_SUPABASE`. Tables are scoped to `auth.uid()` (RLS, migration
-  `0003`); the anon key alone reads nothing. The publishable/anon key in
-  `js/config.js` is still public, but it's only an entry point — the JWT is what
-  grants access. The proxy holds the Google secrets server-side. See `AUTH.md`.
-  - **Any new Supabase code MUST reuse `window.APP_SUPABASE`** (await
-    `window.APP_AUTH_READY` first) — a second `createClient()` carries only the
-    anon key and is denied by RLS.
-  - **Any new calendar/proxy call MUST go through `authedFetch`** (js/index.js)
-    or otherwise attach `Authorization: Bearer ${window.__appAccessToken}` — the
-    proxy's `/api/*` middleware rejects requests without a valid session JWT.
+- Goals & Calendar
+- Gym
+- Wardrobe
+- Health
 
-## Big files
+Future modules may include:
 
-`gym.js` (~2500 lines), `js/wardrobe.js` (~1400), `js/index.js` (~1000).
-Each feature is a self-contained IIFE communicating only via `window`/`CONFIG`.
-`js/exercises-data.json` (~197 KB) is generated — edit the generator, not the JSON.
+- Tasks
+- Notes
+- Finance
+- Projects
+- Knowledge
+- Reading
+- Learning
+- AI Assistant
+- Habits
 
-## Env vars
+The project is designed to evolve for years.
 
-- Root `.env`: `SUPABASE_URL`, `SUPABASE_KEY`.
-- `proxy/.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`,
-  `GOOGLE_CALENDAR_ID`, `TIMEZONE`, `PORT`, plus `SUPABASE_URL` +
-  `SUPABASE_ANON_KEY` (used to validate the login JWT on `/api`; without them
-  `/api` fails closed). Both `.env` files are gitignored.
+Always optimize for long-term maintainability.
 
-## Git workflow
+---
 
-All development goes to the `test` branch. Never touch `main` without an explicit
-merge request. Frontend deploys to Vercel (auto from GitHub); proxy runs on
-Render.com.
+# Workspace
+
+This project is part of a multi-folder workspace.
+
+```
+Workspace
+│
+├── Aptron
+│     Source code
+│
+└── Aptron Brain
+      Knowledge base
+```
+
+The repository contains the implementation.
+
+The Brain contains the project's memory.
+
+Whenever both folders are available, consider the Brain the primary source of
+architectural truth.
+
+---
+
+# Development Principles
+
+Always prioritize:
+
+1. Simplicity
+2. Maintainability
+3. Readability
+4. Offline-first behavior
+5. Documentation
+6. Future extensibility
+
+Never optimize prematurely.
+
+Prefer boring, understandable solutions over clever ones.
+
+Every feature should make the project easier to evolve.
+
+---
+
+# Current Stack
+
+Frontend
+
+- Vanilla JavaScript
+- HTML
+- CSS
+
+No:
+
+- Framework
+- Build step
+- Bundler
+- Transpiler
+
+Backend
+
+- Supabase
+- Express proxy
+- Google Calendar API
+
+Deployment
+
+- Vercel
+- Render
+
+---
+
+# Running Locally
+
+Frontend
+
+Serve the repository using a local static server.
+
+Examples:
+
+```
+npx serve .
+```
+
+or
+
+VSCode Live Server
+
+Do NOT use file:// URLs.
+
+---
+
+Proxy
+
+```
+cd proxy
+
+npm run dev
+```
+
+or
+
+```
+npm start
+```
+
+Google OAuth setup
+
+```
+npm run auth
+```
+
+Paste the refresh token inside
+
+```
+proxy/.env
+```
+
+---
+
+# Architecture
+
+## Offline First
+
+The UI must always work without waiting for the network.
+
+localStorage is always the first source.
+
+Supabase synchronizes asynchronously.
+
+---
+
+## Sync Systems
+
+There are intentionally THREE synchronization systems.
+
+Never merge them.
+
+### 1. app_state blob (sync.js)
+
+Stores complete application state as JSONB, one row per app.
+
+Used by
+
+- Goals
+- Wardrobe
+- Health
+
+Synchronization:
+
+localStorage ⇄ Supabase app_state
+
+Conflict strategy: last write wins (with per-key mergeRemote exceptions).
+
+Poll-based today (realtime is subscribed but currently inactive — the tables
+are not in the realtime publication, so the 5s poll carries it).
+
+Per-user isolation is enforced by RLS (auth.uid() = user_id), restored by
+migration 0006 / ADR-013.
+
+A second blob implementation (js/gym/gym-sync.js) follows the same pattern for
+the 'po-coach' key — deliberately separate, not to be merged.
+
+---
+
+### 2. Normalized Gym Storage (js/gym/gym-cloud.js)
+
+Uses
+
+- routines
+- exercise_logs
+
+These tables intentionally coexist with app_state.
+
+Do not replace them.
+
+Future migrations will continue normalizing gym data.
+
+---
+
+### 3. Calendar events (js/index.js ⇄ events; proxy ↔ Google)
+
+Supabase `events` is the source of truth; Google Calendar is an optional
+per-user mirror driven by the proxy (push-then-pull, local-wins).
+
+---
+
+# Authentication
+
+Authentication uses
+
+Supabase Auth + RLS.
+
+The authenticated client is
+
+```
+window.APP_SUPABASE
+```
+
+Never create another client.
+
+Always wait for
+
+```
+window.APP_AUTH_READY
+```
+
+before accessing Supabase.
+
+Anonymous keys never bypass RLS.
+
+---
+
+## Proxy
+
+Every request must use
+
+```
+authedFetch()
+```
+
+or send
+
+Authorization Bearer JWT
+
+The proxy rejects unauthenticated requests.
+
+---
+
+# Large Files
+
+Current large modules
+
+- js/gym/ (gym-cloud.js, gym-sync.js, and the Coach UI)
+- wardrobe.js
+- health.js
+- index.js
+- account.js
+
+When modifying them:
+
+- avoid increasing complexity
+- extract reusable logic when appropriate
+- prefer composition over giant functions
+
+---
+
+# Generated Files
+
+```
+js/exercises-data.json
+```
+
+is generated.
+
+Never edit it manually.
+
+Edit the generator instead.
+
+---
+
+# Environment
+
+Frontend
+
+The browser's public Supabase config (URL + publishable/anon key) lives in
+`js/config.js`, committed. There is **no build step and no consumed root `.env`**
+— access is gated by RLS, not by hiding these public values. (A leftover
+`.env.example` at the repo root is not consumed by anything; see Known Issues.)
+
+Proxy
+
+```
+proxy/.env
+```
+
+contains
+
+- Google OAuth credentials
+- Calendar configuration
+- Supabase validation settings (SUPABASE_URL, SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY, TOKEN_ENC_KEY)
+
+Remains gitignored.
+
+---
+
+# Git Workflow
+
+Development branch
+
+```
+test
+```
+
+Production
+
+```
+main
+```
+
+Never push directly to main unless explicitly instructed.
+
+---
+
+# Aptron Brain
+
+Whenever Aptron Brain is available:
+
+Read it before implementing medium or large features.
+
+The Brain contains
+
+- Vision
+- Roadmap
+- Architecture
+- Database
+- ADRs
+- Research
+- AI Design
+- Development Journal
+- Known Problems
+- Ideas
+
+Treat these documents as the project's long-term memory.
+
+---
+
+# Documentation Rules
+
+Documentation is part of every implementation — not a follow-up task.
+
+**Every code change ends with a documentation pass, automatically, without
+being asked.** A change is not done until the Brain reflects it.
+
+The operational spec — exactly which Brain documents each kind of change must
+update — is the Brain's own protocol file:
+
+```
+aptron Brain/00 Home/Maintenance Protocol.md
+```
+
+Follow it. In short:
+
+- update the affected Feature, Architecture, Database, Sync and AI notes
+- update the Roadmap (move items; never invent them)
+- update Known Issues when bugs are found, fixed, or follow-ups created
+- refresh each touched note's "Last verified" stamp (date · branch @ commit)
+- add a Development Journal entry per significant session
+
+If an architectural decision changes — structure, database, synchronization,
+authentication, AI, storage, module communication, deployment —
+
+**automatically create a new ADR** (professional format; supersede, never
+delete, the old one).
+
+---
+
+# ADR Policy
+
+Architectural Decision Records are required whenever a decision changes:
+
+- project structure
+- database
+- synchronization
+- authentication
+- AI
+- storage
+- module communication
+
+Small bug fixes do not require ADRs.
+
+---
+
+# Decision Process
+
+Before implementing:
+
+1. Understand the problem.
+2. Read relevant Brain documentation.
+3. Search existing implementation.
+4. Reuse existing patterns.
+5. For medium/large features: present the Architecture Review (below), BEFORE writing code.
+6. Implement.
+7. Update documentation.
+8. Suggest an ADR if needed.
+9. Run the post-task architectural review (below).
+
+# Pre-Implementation Architecture Review
+
+Mandatory before any medium or large feature (spans modules, or adds/alters a
+table, localStorage key, window global, proxy route, prompt, sync behavior, or
+dependency). Present answers to the owner BEFORE implementing:
+
+- Is this consistent with the current architecture?
+- Can an existing system be extended instead of creating a new one?
+- Will this increase technical debt?
+- Does the database need to evolve?
+- Should an ADR be created?
+- Which Brain documents will require updating?
+
+After implementation, verify every document named in the last answer was
+actually updated. Full spec:
+
+```
+aptron Brain/00 Home/Maintenance Protocol.md  →  "Pre-implementation architecture review"
+```
+
+# Post-Task Architectural Review
+
+At the end of every completed task, before calling it done, answer:
+
+- Did this change improve the project?
+- Is the documentation still accurate?
+- Did I introduce technical debt?
+- Can this implementation be simplified?
+- Should any Brain document be updated?
+
+Any "yes" that implies documentation work is resolved **before** the task is
+considered complete. New technical debt is recorded (Known Issues / Roadmap),
+never silently carried. Cheap simplifications happen now; costly ones are
+recorded as candidates. Full spec:
+
+```
+aptron Brain/00 Home/Maintenance Protocol.md  →  "Post-task architectural review"
+```
+
+---
+
+# Coding Style
+
+Prefer
+
+- readable code
+- small functions
+- explicit naming
+- predictable behavior
+
+Avoid
+
+- unnecessary abstractions
+- duplicated logic
+- magic values
+- undocumented architectural changes
+
+---
+
+# Long-Term Vision
+
+Aptron is evolving into a Personal Operating System.
+
+Every new module should be designed assuming it may eventually communicate with:
+
+- AI
+- Calendar
+- Notes
+- Tasks
+- Health
+- Gym
+- Wardrobe
+- Future modules
+
+Design APIs and data structures with interoperability in mind.
+
+Never optimize only for the current feature.
+
+Optimize for the project that Aptron will become.
