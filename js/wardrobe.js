@@ -1369,8 +1369,8 @@
         '<div class="wr-of-slot"><img src="' + p.image + '" alt="' + p.category + '"></div>').join('');
       const pal = o.pieces.map((p) => '<span style="background:' + p.color + '"></span>').join('');
       const action = mode === 'saved'
-        ? '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-remove" data-remove="' + o.id + '" type="button">🗑 Quitar</button>'
-        : '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-save" data-save="' + o.id + '" type="button">＋ Guardar Outfit</button>';
+        ? '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-remove" data-remove="' + o.id + '" type="button">🗑 Remove</button>'
+        : '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-save" data-save="' + o.id + '" type="button">＋ Save Outfit</button>';
       return (
         '<div class="wr-outfit-card">' +
           '<div class="wr-outfit-strip">' + slots + '</div>' +
@@ -1414,7 +1414,7 @@
       if (!wrap) return;
       const saved = Store.savedOutfits();
       if (!saved.length) {
-        wrap.innerHTML = '<div class="wr-empty">No saved outfits yet — tap “Guardar Outfit” on a look.</div>';
+        wrap.innerHTML = '<div class="wr-empty">No saved outfits yet — tap “Save Outfit” on a look.</div>';
         return;
       }
       wrap.innerHTML = saved.map((o) => outfitCard(o, 'saved')).join('');

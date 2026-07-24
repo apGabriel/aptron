@@ -183,7 +183,7 @@
     if (!window.supabase || !SUPABASE_URL || !SUPABASE_KEY) return;
     // Skip if the placeholder values are still in place (local-only mode)
     if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) return;
-    // Wait for the login gate, then reuse the one authed client (js/auth.js) so
+    // Wait for the login gate, then reuse the one authed client (js/auth/main.js) so
     // the JWT rides along for RLS. A fresh createClient() would carry only the
     // anon key and be denied.
     await (window.APP_AUTH_READY || Promise.resolve());

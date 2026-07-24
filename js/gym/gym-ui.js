@@ -779,6 +779,10 @@
       img.src = dataUrl;
     });
   }
+  // Uploads the photo and returns its storage PATH (filename) — not a URL. The
+  // bucket is private (owner-only RLS), so display goes through short-lived
+  // signed URLs (photoSrc), never a public URL. Returning the path keeps the
+  // synced blob durable + device-portable (each device signs its own URL).
   async function uploadPhotoToStorage(dataUrl) {
     if (!G.pcSupa) return null;
     try {
@@ -790,9 +794,39 @@
         .from('progress-photos')
         .upload(filename, blob, { contentType: 'image/jpeg', upsert: false });
       if (error) return null;
-      const { data } = G.pcSupa.storage.from('progress-photos').getPublicUrl(filename);
-      return data ? data.publicUrl : null;
+      return filename;
     } catch (e) { return null; }
+  }
+
+  // ── Private-bucket display: resolve a signed URL per photo, cached in memory ──
+  // The progress-photos bucket is private (migration 0008), so we can't render a
+  // stored public URL. Each entry carries `path` (the storage filename); we mint
+  // a signed URL on demand and cache it under its 1-hour expiry. Legacy entries
+  // stored a public URL in `url` — we recover the path from its tail so old
+  // photos keep working without a data migration.
+  const _photoUrlCache = new Map();          // path → { url, exp(ms) }
+  const SIGNED_TTL_MS = 55 * 60 * 1000;      // refresh before Supabase's 1h expiry
+  function photoPath(p) {
+    if (p.path) return p.path;
+    if (p.url) { const m = p.url.match(/progress-photos\/([^?]+)/); if (m) return decodeURIComponent(m[1]); }
+    return null;
+  }
+  async function photoSrc(p) {
+    if (p.dataUrl) return p.dataUrl;         // not yet uploaded → local data URL
+    const path = photoPath(p);
+    if (!path || !G.pcSupa) return p.url || '';
+    const hit = _photoUrlCache.get(path);
+    if (hit && hit.exp > Date.now()) return hit.url;
+    try {
+      const { data, error } = await G.pcSupa.storage.from('progress-photos').createSignedUrl(path, 3600);
+      if (error || !data) return p.url || '';
+      _photoUrlCache.set(path, { url: data.signedUrl, exp: Date.now() + SIGNED_TTL_MS });
+      return data.signedUrl;
+    } catch (e) { return p.url || ''; }
+  }
+  function setPhotoImg(img, p) {
+    if (!img || !p) return;
+    photoSrc(p).then((src) => { if (src) img.src = src; });
   }
   function photoFmtDate(key) {
     const d = wtParseKey(key);
@@ -806,7 +840,7 @@
     } else {
       grid.innerHTML = photos.map(p =>
         '<button class="wt-photo-card" data-id="' + p.id + '" type="button">' +
-          '<img src="' + (p.url || p.dataUrl) + '" alt="">' +
+          '<img alt="">' +
           '<div class="wt-photo-overlay"></div>' +
           '<div class="wt-photo-meta">' +
             '<span class="wt-photo-date">' + photoFmtDate(p.dateKey) + '</span>' +
@@ -816,6 +850,7 @@
       ).join('');
       grid.querySelectorAll('.wt-photo-card').forEach(card => {
         card.addEventListener('click', () => openPhoto(card.dataset.id));
+        setPhotoImg(card.querySelector('img'), photos.find(p => p.id === card.dataset.id));
       });
     }
     // Update count on the link
@@ -846,12 +881,13 @@
       }
     }
     photosRender();
-    uploadPhotoToStorage(entry.dataUrl).then((url) => {
-      if (!url) return;
+    uploadPhotoToStorage(entry.dataUrl).then((pathOrNull) => {
+      if (!pathOrNull) return;               // stays local (dataUrl) and retries next open
       const e = photos.find(p => p.id === id);
       if (!e) return;
-      e.url = url;
+      e.path = pathOrNull;
       delete e.dataUrl;
+      delete e.url;                          // drop any legacy public URL
       photosSave();
       photosRender();
     });
@@ -939,7 +975,7 @@
     const p = photos.find(x => x.id === id);
     if (!p) return;
     activePhotoId = id;
-    $('wtViewerImg').src = p.url || p.dataUrl;
+    setPhotoImg($('wtViewerImg'), p);
     $('wtViewerDate').textContent = photoFmtDate(p.dateKey).toUpperCase();
     $('wtViewerWeight').textContent = p.weight || '—';
     $('wtViewer').dataset.mode = 'single';
@@ -989,8 +1025,8 @@
     if (!A || !B) return;
     activePhotoId = activeId;
     comparePhotoId = otherId;
-    $('wtCmpImgA').src = A.url || A.dataUrl;
-    $('wtCmpImgB').src = B.url || B.dataUrl;
+    setPhotoImg($('wtCmpImgA'), A);
+    setPhotoImg($('wtCmpImgB'), B);
     $('wtCmpMetaA').textContent = photoFmtDate(A.dateKey) + ' · ' + (A.weight || '—');
     $('wtCmpMetaB').textContent = photoFmtDate(B.dateKey) + ' · ' + (B.weight || '—');
     // Headline — date arrow + weight delta
@@ -1036,10 +1072,15 @@
       }, 3000);
       return;
     }
+    const gone = photos.find(p => p.id === activePhotoId);
     photos = photos.filter(p => p.id !== activePhotoId);
     photosSave();
     photosRender();
     closePhoto();
+    // Best-effort: drop the storage object too (owner-only RLS lets us). Leaves
+    // no private orphan behind. Ignores failure — the local entry is already gone.
+    const path = gone && photoPath(gone);
+    if (path && G.pcSupa) { try { G.pcSupa.storage.from('progress-photos').remove([path]); } catch (e) {} }
   }
 
   $('wtViewerClose').addEventListener('click', closePhoto);

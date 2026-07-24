@@ -17,7 +17,7 @@
 
   const ready = !!(window.supabase && SUPABASE_URL && SUPABASE_KEY &&
                    SUPABASE_URL.indexOf('PASTE-') !== 0 && SUPABASE_KEY.indexOf('PASTE-') !== 0);
-  // The one authed client is created by js/auth.js; we attach to it in init()
+  // The one authed client is created by js/auth/main.js; we attach to it in init()
   // once APP_AUTH_READY resolves. A second createClient() would carry only the
   // anon key and be denied by RLS. Until then, ops queue in localStorage.
   let supa = null;

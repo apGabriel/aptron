@@ -1668,3 +1668,32 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab[aria-current="
    light block above (--mm-*), and hover/active bind to --apt-accent globally —
    no scoped selector overrides, so states can never be out-specificity'd. */
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-toggle { background: rgba(29,33,41,0.06); }
+
+/* RC-1 polish: a handful of controls hardcoded a dark rgba(0,0,0,…) fill
+   instead of following --bg-card/--border like their siblings, so they
+   stayed dark inside a light card. Same treatment as .po-field input above. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .rb-search,
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .rb-name-input {
+  background: rgba(29,33,41,0.05);
+}
+/* background-color only (not the `background` shorthand) — .po-ex-select also
+   sets background-image (the chevron) and background-repeat/-position; the
+   shorthand would reset those to their initial values and tile the icon. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-ex-select {
+  background-color: rgba(29,33,41,0.05);
+}
+/* Native <option> lists ignore --text-1 unless given their own explicit
+   pairing — without this they stayed dark-on-dark (unreadable) in light
+   themes even though the closed control itself now reads correctly. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-ex-select option,
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-hist-filter option {
+  background-color: #FFFFFF; color: #1D2129;
+}
+/* The custom dropdown chevrons are inlined SVGs with a hardcoded stroke
+   color — swap to a dark stroke so they stay visible on a light control. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-ex-select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%231D2129' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-hist-filter {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%231D2129' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
+}

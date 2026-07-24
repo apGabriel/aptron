@@ -37,7 +37,7 @@
     return fetch(url, Object.assign({}, opts, { headers }));
   }
 
-  // ── styles (Shenlong gold-on-slate, matching js/auth.js) ────────────────────
+  // ── styles (Shenlong gold-on-slate, matching js/auth/main.js) ───────────────
   function injectStyles() {
     if (document.getElementById('callink-styles')) return;
     const s = document.createElement('style');
@@ -331,6 +331,7 @@
       render();
     } catch (e) {
       // Network/proxy hiccup: keep the last good UI, just note it if we have one.
+      console.error('[calendar-link] status refresh failed:', e);
       if (state && state.connected) setSub('Status unavailable — retrying…', 'is-warn');
     }
   }
@@ -354,7 +355,8 @@
         if (popup && !popup.closed) popup.location.href = url;
         else setSub('Popup blocked — allow popups and retry', 'is-warn');
       })
-      .catch(() => {
+      .catch((e) => {
+        console.error('[calendar-link] start failed:', e);
         if (popup && !popup.closed) popup.close();
         setSub('Couldn’t start linking — try again', 'is-error');
       });
@@ -369,7 +371,7 @@
       // Show freshly pulled Google events, then re-read status/health.
       try { if (window.AptCal && window.AptCal.reload) window.AptCal.reload(); } catch (e) {}
       await refresh({ verify: true });
-    } catch (e) { setSub('Sync failed — try again', 'is-error'); }
+    } catch (e) { console.error('[calendar-link] sync failed:', e); setSub('Sync failed — try again', 'is-error'); }
   }
 
   async function disconnect() {
@@ -383,7 +385,7 @@
       // The server drops the mirrored rows on disconnect; reload so the calendar
       // clears immediately instead of showing stale events until the next fetch.
       try { if (window.AptCal && window.AptCal.reload) window.AptCal.reload(); } catch (e) {}
-    } catch (e) { setSub('Couldn’t disconnect — try again', 'is-error'); }
+    } catch (e) { console.error('[calendar-link] disconnect failed:', e); setSub('Couldn’t disconnect — try again', 'is-error'); }
   }
 
   // ── events ──────────────────────────────────────────────────────────────────

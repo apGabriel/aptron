@@ -729,7 +729,7 @@
   if (outdoorBtn) outdoorBtn.addEventListener('click', async () => {
     const label = '📍 Find Outdoor Spots Near Me';
     outdoorBtn.disabled = true;
-    outdoorBtn.textContent = '📍 Searching spots...';
+    outdoorBtn.textContent = '📍 Searching spots…';
     try {
       const coords = await outdoorCoords();
       if (!coords) {
