@@ -4,7 +4,7 @@
 //     <script src="js/topbar.js" defer></script>
 // It self-injects HTML + CSS, reads progress from localStorage,
 // and renders the water +1 button plus a Smart Wardrobe shortcut
-// in the top bar, and the Main/Health/Fitness bottom tabs. Skips
+// in the top bar, and the Health/Main/Gym bottom tabs. Skips
 // chrome inside iframes (so the water tracker can embed cleanly).
 // =============================================================
 (function () {
@@ -128,9 +128,9 @@ body.has-bottombar {
   .topbar { padding-left: 10px; padding-right: 10px; gap: 6px; }
   .topbar-water-pill { padding: 8px 11px; gap: 6px; }
   .topbar-pill-count { font-size: 12px; }
-  .topbar-water-add { width: 40px; }
+  .topbar-water-add { width: 44px; }
   .topbar-water-add svg { width: 18px; height: 18px; }
-  .topbar-wardrobe-btn { width: 40px; height: 38px; }
+  .topbar-wardrobe-btn { width: 44px; height: 44px; }
   .topbar-wardrobe-icon, .topbar-wardrobe-icon svg { width: 18px; height: 18px; }
   .bottombar-tab-icon, .bottombar-tab-icon svg { width: 22px; height: 22px; }
   .bottombar-tab { font-size: 10px; }
@@ -216,7 +216,8 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   </a>
 </header>`;
 
-  // Tab order, left → right: Health, Main, Fitness.
+  // Tab order, left → right: Health, Main, Gym. (data-page="fitness" is an
+  // internal routing key only, unrelated to the visible label — left as-is.)
   const bottombarHtml = `
 <nav class="bottombar" id="bottombar" role="navigation" aria-label="Main tabs">
   <a href="health.html" class="bottombar-tab" data-page="health">
@@ -226,7 +227,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     <span class="bottombar-tab-icon">${ICON_HOME}</span><span>Main</span>
   </a>
   <a href="gym.html" class="bottombar-tab" data-page="fitness">
-    <span class="bottombar-tab-icon">${ICON_DUMBBELL}</span><span>Fitness</span>
+    <span class="bottombar-tab-icon">${ICON_DUMBBELL}</span><span>Gym</span>
   </a>
 </nav>`;
 
@@ -287,7 +288,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
   function unitVolMlFor(state) {
     return state.unit === 'glass' ? (state.glassMl || 250) : (state.bottleMl || 500);
   }
-  // Shared serving icons — the EXACT minimalist line SVGs from po-water.html's
+  // Shared serving icons — the EXACT minimalist line SVGs from js/health.js's
   // WATER_ICONS, so the + button, the bubble and the main panel all read as one
   // design. They draw with stroke:currentColor / stroke-width 1.75, so the add
   // button's white color themes them automatically (see .topbar-water-add svg).

@@ -1349,19 +1349,39 @@ const CONFIG = {
   // POST the downscaled image to the proxy; it calls Gemini with the
   // server-side key and returns normalized { meal_name, calories, ... }.
   async function analyzeMealImage(base64Image, mime) {
-    const r = await fetch(PROXY + '/api/gemini/meal-scan', {
-      method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' },
-        window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
-      body: JSON.stringify({ image: base64Image, mime: mime || 'image/jpeg' }),
-      signal: AbortSignal.timeout(30000),
-    });
+    let r;
+    try {
+      r = await fetch(PROXY + '/api/gemini/meal-scan', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' },
+          window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
+        body: JSON.stringify({ image: base64Image, mime: mime || 'image/jpeg' }),
+        signal: AbortSignal.timeout(30000),
+      });
+    } catch (e) {
+      const err = new Error('network'); err.code = 'network'; err.detail = e && e.message;
+      throw err;
+    }
     if (!r.ok) {
       let detail = '';
-      try { const j = await r.json(); if (j && j.error) detail = ' — ' + j.error; } catch (e) {}
-      throw new Error('HTTP ' + r.status + detail);
+      try { const j = await r.json(); if (j && j.error) detail = j.error; } catch (e) {}
+      const err = new Error('http_' + r.status); err.code = 'http_' + r.status; err.detail = detail;
+      throw err;
     }
     return await r.json();
+  }
+
+  // RC-1 polish: never show the user a raw HTTP status / server error
+  // string — only a plain-language sentence. The technical detail (status +
+  // server message, if any) is logged to the console instead. Mirrors the
+  // same policy applied to Shelron (js/shelron/ui.js).
+  function friendlyMealScanError(err) {
+    const code = err && err.code;
+    if (code === 'http_429') return "You're scanning too fast — please wait a moment and try again.";
+    if (code === 'http_503') return 'Meal scanning is temporarily unavailable.';
+    if (typeof code === 'string' && code.indexOf('http_') === 0) return "Couldn't reach the AI service. Please try again in a moment.";
+    if (code === 'network') return "Couldn't reach the AI service. Please try again in a moment.";
+    return 'Could not analyze that image. Please try again.';
   }
 
   // ── Persistence ops ──────────────────────────────────────────────────────
@@ -1434,7 +1454,7 @@ const CONFIG = {
     if (!file || !/^image\//.test(file.type)) { setStatus('Please choose an image file.', 'err'); return; }
     // Refresh the time-based guess at scan time — but never override a manual pick.
     if (!mealTypeUserSet) { selectedMealType = defaultMealType(); renderMealType(); }
-    setStatus('🔮 Analyzing ingredients...', 'loading');
+    setStatus('🔮 Analyzing ingredients…', 'loading');
     try {
       const enc = await fileToScaledBase64(file, 1024);
       const meal = await analyzeMealImage(enc.data, enc.mime);
@@ -1447,7 +1467,8 @@ const CONFIG = {
       setStatus('✓ Logged ' + meal.meal_name + ' · ' + meal.calories + ' kcal', 'ok');
       setTimeout(() => setStatus(''), 2600);
     } catch (e) {
-      setStatus('Could not analyze that image' + (e && e.message ? ' — ' + e.message : '') + '.', 'err');
+      console.error('[Health] meal scan failed:', e && e.code, e && e.detail, e);
+      setStatus(friendlyMealScanError(e), 'err');
     }
   }
 

@@ -1367,6 +1367,7 @@ window.QuickNotes = (function () {
       } else if (intent && intent.reply && (!intent.action || intent.action === 'chat')) addMsg('ai', intent.reply);
       else await applyIntent(intent);
     } catch (e) {
+      console.error('[Shenlong] Gemini assistant request failed:', e);
       thinking.remove();
       addMsg('ai', "I couldn't parse that locally, and the Gemini service isn't reachable here "
         + '(it runs on the deployed proxy). Try a direct command — e.g. “add gym at 5pm”, '

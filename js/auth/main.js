@@ -38,9 +38,9 @@ import {
 const CFG_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
 const CFG_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
 
-// po-water.html runs inside an iframe on health.html. It shares this origin's
-// localStorage, so it sees the same persisted session — but the PARENT owns
-// the visible login gate. Embedded frames never draw their own overlay.
+// A page embedded in an iframe on this origin shares localStorage, so it
+// sees the same persisted session — but the PARENT owns the visible login
+// gate. Embedded frames never draw their own overlay.
 const embedded = (function () {
   try { return window.self !== window.top; } catch (e) { return true; }
 })();

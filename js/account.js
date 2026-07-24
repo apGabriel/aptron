@@ -739,20 +739,29 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover 
     // cloud pane (real signals)
     q('#acctSyncNow').addEventListener('click', async (e) => {
       const b = e.currentTarget; b.disabled = true;
+      // cloudSyncFlush/cloudSyncPull now report whether the sync actually
+      // succeeded (sync.js) — only stamp __aptSync as fresh when it really did,
+      // instead of assuming success just because nothing threw.
+      let ok = true;
       try {
-        if (typeof window.cloudSyncFlush === 'function') await window.cloudSyncFlush();
-        if (typeof window.cloudSyncPull === 'function') await window.cloudSyncPull();
-        window.__aptSync = { at: Date.now(), kind: 'manual', cloud: !!supa };
-      } catch (e2) {}
-      updateCloud(); b.disabled = false;
+        if (typeof window.cloudSyncFlush === 'function') ok = (await window.cloudSyncFlush()) && ok;
+        if (typeof window.cloudSyncPull === 'function') ok = (await window.cloudSyncPull()) && ok;
+        if (ok) window.__aptSync = { at: Date.now(), kind: 'manual', cloud: !!supa };
+      } catch (e2) { ok = false; }
+      updateCloud(!ok); b.disabled = false;
     });
-    function updateCloud() {
+    function updateCloud(failed) {
       const online = navigator.onLine;
       const su = syncedBytes();
       const pct = Math.min(100, Math.round((su.bytes / STORAGE_BUDGET) * 100));
-      q('#acctCloudTitle').textContent = supa ? (online ? 'All data safe in the cloud' : 'Saved locally — will sync when online')
-                                              : 'Local-only mode';
-      q('#acctCloudSub').textContent = supa ? 'Supabase · end-to-end account sync' : 'No cloud configured on this build';
+      if (failed) {
+        q('#acctCloudTitle').textContent = 'Sync failed — check your connection';
+        q('#acctCloudSub').textContent = 'Your data is still safe locally; it will retry automatically.';
+      } else {
+        q('#acctCloudTitle').textContent = supa ? (online ? 'All data safe in the cloud' : 'Saved locally — will sync when online')
+                                                : 'Local-only mode';
+        q('#acctCloudSub').textContent = supa ? 'Supabase · end-to-end account sync' : 'No cloud configured on this build';
+      }
       q('#acctUsageTxt').textContent = su.items + ' items · ' + fmtKB(su.bytes) + ' / ' + fmtKB(STORAGE_BUDGET);
       q('#acctUsageFill').style.width = Math.max(3, pct) + '%';
       const net = q('#acctNet'), dotNet = q('#acctDotNet');
@@ -761,6 +770,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover 
       const last = q('#acctLastSync'), dotSync = q('#acctDotSync');
       const sync = window.__aptSync;
       if (!supa) { last.textContent = 'Local only'; dotSync.className = 'dot warn'; }
+      else if (failed) { last.textContent = ago(sync && sync.at); dotSync.className = 'dot warn'; }
       else { last.textContent = ago(sync && sync.at); dotSync.className = 'dot ' + (sync && (Date.now() - sync.at) < 120000 ? 'ok' : 'warn'); }
     }
     bg._updateCloud = updateCloud;

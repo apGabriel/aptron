@@ -221,6 +221,44 @@ per-user mirror driven by the proxy (push-then-pull, local-wins).
 
 ---
 
+# AI Architecture — Shelron
+
+Aptron's AI platform is **Shelron** — designed 2026-07-21, architecture only,
+no implementation yet. Full design:
+
+```
+aptron Brain/02 Architecture/Shelron.md
+aptron Brain/04 ADR/ADR-015.md
+```
+
+This is binding on all future AI work in this repo, starting now, even before
+any Shelron code exists:
+
+- **The central law: AI proposes, deterministic code disposes.** No LLM
+  output may ever change state directly. Every AI-originated change must be a
+  proposal/intent that passes through deterministic validation before
+  anything is written — the existing Calendar Assistant pattern (model
+  returns structured intents, the frontend validates and applies them),
+  generalized to every future AI feature, not just Calendar.
+- **Never let a model call replace deterministic logic.** The gym
+  prescription engine, RLS/auth decisions, sync/mirror mechanics, calendar
+  math (conflicts, free/busy), and any code enforcing the rule above must
+  stay 100% non-AI, permanently. Do not "simplify" these with a prompt.
+- **New AI-touching features register capabilities instead of hardcoding a
+  new prompt+endpoint pair.** If Shelron's Intent Engine / Context Builder /
+  Action Dispatcher exist by the time you're reading this, use them. If they
+  don't exist yet, do not build a parallel ad hoc AI path — extend today's
+  hybrid assistant pattern in `js/index.js` + `proxy/server.js` and note in
+  the Brain that it's a pre-Shelron stopgap.
+- **Secrets stay proxy-side only, with no exception for Shelron.** No engine,
+  present or future, may call an LLM from the browser.
+- Any change to an engine's behavior, a module's registered capabilities, or
+  an agent definition updates `Shelron.md` and the owning module's
+  `03 Modules/` doc in the same change — see the Brain's Maintenance
+  Protocol change-type table.
+
+---
+
 # Authentication
 
 Authentication uses

@@ -188,12 +188,36 @@
     </form>
   </section>
 
+  <!-- SHELRON v0.1 — architecture-validation surface only. Deliberately plain:
+       one input, one output line, no chat history, no avatars, no animation.
+       NOT a replacement for the Shenlong assistant above — a separate,
+       minimal harness proving Parser -> Intent Engine -> Action Dispatcher ->
+       Calendar Adapter. See aptron Brain/02 Architecture/Shelron.md. -->
+  <section class="card shelron-panel" aria-label="Shelron preview">
+    <div class="shelron-head">
+      <span class="aios-eyebrow">Shelron · v0.1</span>
+    </div>
+    <div class="shelron-output" id="shelronOutput" aria-live="polite">Tell me what to schedule.</div>
+    <form class="shelron-form" id="shelronForm" autocomplete="off">
+      <input id="shelronInput" type="text" placeholder="e.g. Tomorrow I have the dentist at 18:00" autocomplete="off"/>
+      <button type="submit" aria-label="Send">→</button>
+    </form>
+  </section>
+
 </main>
 
 <script src="js/index.js" defer></script>
 <script src="js/calendar-link.js" defer></script>
 <script src="js/account.js" defer></script>
 <script src="js/topbar.js" defer></script>
+<!-- Shelron v0.1 — order matters: action-dispatcher before calendar-adapter
+     (which registers handlers with it at load time). -->
+<script src="js/shelron/action-dispatcher.js" defer></script>
+<script src="js/shelron/calendar-adapter.js" defer></script>
+<script src="js/shelron/intent-engine.js" defer></script>
+<script src="js/shelron/parser.js" defer></script>
+<script src="js/shelron/placeholders.js" defer></script>
+<script src="js/shelron/ui.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;

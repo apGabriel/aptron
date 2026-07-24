@@ -20,6 +20,10 @@
     if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) return;
 
     let supa = null, pushTimer = null, suppressSync = false, lastSyncedJson = null, lastUpdatedAt = null;
+    // Keys written locally since their last CONFIRMED successful push. A pull
+    // that lands before a brand-new key's first push completes must not treat
+    // "missing from remote" as "deleted elsewhere" for these — see applyRemote.
+    const pendingKeys = new Set();
 
     // Publish a small, truthful sync telemetry marker other UI can read (the
     // account panel's Cloud & Data Sync pane). Purely additive; no behavior change.
@@ -59,7 +63,7 @@
     const origRemove = localStorage.removeItem.bind(localStorage);
     localStorage.setItem = function (k, v) {
       origSet(k, v);
-      try { if (!suppressSync && matches(k)) schedulePush(); } catch (e) {}
+      try { if (!suppressSync && matches(k)) { pendingKeys.add(k); schedulePush(); } } catch (e) {}
     };
     localStorage.removeItem = function (k) {
       origRemove(k);
@@ -91,7 +95,10 @@
           if (local !== incoming) { try { origSet(k, incoming); changed = true; } catch (e) {} }
         }
         for (const k of listAllKeys()) {
-          if (!(k in remote)) { try { origRemove(k); changed = true; } catch (e) {} }
+          // Never delete a key purely because it's missing from this remote
+          // snapshot if it hasn't completed its first successful push yet —
+          // the snapshot may simply predate it (see pendingKeys above).
+          if (!(k in remote) && !pendingKeys.has(k)) { try { origRemove(k); changed = true; } catch (e) {} }
         }
       } finally { suppressSync = false; }
       if (changed && typeof onApplied === 'function') { try { onApplied(); } catch (e) {} }
@@ -100,35 +107,50 @@
       if (mergedDiverged) schedulePush();
       return changed;
     }
+    // Returns true if the push either succeeded or had nothing to do, false if
+    // a genuine Supabase error/exception occurred — callers that need to know
+    // whether the sync actually worked (e.g. the manual "Sync Now" button)
+    // check this instead of assuming success. Background/automatic callers
+    // (init(), the poll loop, focus/online listeners) intentionally ignore it,
+    // same as before this return value existed.
     async function pushNow() {
-      if (!supa) return;
+      if (!supa) return false;
       const state = collect();
       const json = JSON.stringify(state);
-      if (json === lastSyncedJson) return;
+      // Every key collect() just captured is, by definition, about to be (or
+      // already is) part of the uploaded snapshot — safe to un-pend all of them.
+      const keysInThisPush = Object.keys(state);
+      if (json === lastSyncedJson) { keysInThisPush.forEach((k) => pendingKeys.delete(k)); return true; }
       const stamp = new Date().toISOString();
       try {
         const { error } = await supa.from('app_state').upsert(
           { key: appKey, data: state, updated_at: stamp },
           { onConflict: 'key' }
         );
+        if (error) return false;
         // Remember our own timestamp so the fallback poll doesn't treat our push
         // as a remote change and re-download it.
-        if (!error) { lastSyncedJson = json; lastUpdatedAt = stamp; markSync('push'); }
-      } catch (e) {}
+        lastSyncedJson = json; lastUpdatedAt = stamp; markSync('push');
+        keysInThisPush.forEach((k) => pendingKeys.delete(k));
+        return true;
+      } catch (e) { return false; }
     }
     // Pull the full row and apply it if the payload differs from what we have.
+    // Same true/false success contract as pushNow() above.
     async function pullRemote() {
-      if (!supa) return;
+      if (!supa) return false;
       try {
         const { data, error } = await supa.from('app_state').select('data,updated_at').eq('key', appKey).maybeSingle();
-        if (error || !data || !data.data) return;
+        if (error) return false;
+        if (!data || !data.data) return true;   // nothing to pull yet — not a failure
         if (data.updated_at) lastUpdatedAt = data.updated_at;
         const incoming = JSON.stringify(data.data);
-        if (incoming === lastSyncedJson) return;
+        if (incoming === lastSyncedJson) return true;
         lastSyncedJson = incoming;
         applyRemote(data.data);
         markSync('pull');
-      } catch (e) {}
+        return true;
+      } catch (e) { return false; }
     }
     // Cheap fallback poll: fetch only `updated_at`; download the heavy `data`
     // (which on the wardrobe page holds base64 images) only when it changed.

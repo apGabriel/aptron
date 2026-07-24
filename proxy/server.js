@@ -19,9 +19,11 @@
 //   This proxy  →  Browser
 //
 // HOW TO RUN
-//   1. Copy .env.example to .env and fill in GOOGLE_CLIENT_ID,
-//      GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
-//      (run `node auth.js` once to get the refresh token)
+//   1. Copy .env.example to .env and fill in SUPABASE_URL / SUPABASE_ANON_KEY
+//      (gates /api behind login) plus GOOGLE_CLIENT_ID/SECRET and the per-user
+//      linking secrets (GOOGLE_REDIRECT_URI, SUPABASE_SERVICE_ROLE_KEY,
+//      TOKEN_ENC_KEY) — each user links their OWN Google Calendar from the
+//      dashboard's Account panel (Multi-tenant calendar linking, below).
 //   2. npm install
 //   3. npm start   (or "npm run dev" to auto-restart on changes)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,6 +33,7 @@ const express      = require('express');
 const cors         = require('cors');
 const crypto       = require('crypto');
 const { google }   = require('googleapis');
+const rateLimit    = require('express-rate-limit');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -38,20 +41,13 @@ const PORT = process.env.PORT || 3001;
 // ── Google OAuth2 config ──────────────────────────────────────────────────────
 const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN || '';
-// Per-user web linking (newOAuthClient) needs a "Web application" OAuth client,
-// while the legacy single-owner flow above uses the Desktop client that minted
-// GOOGLE_REFRESH_TOKEN (a refresh token is bound to its issuing client). Keep
-// them SEPARATE: set GOOGLE_WEB_CLIENT_ID/SECRET to the Web client. Falls back
-// to the Desktop CLIENT_ID/SECRET when unset, so this stays non-breaking.
+// Per-user web linking (newOAuthClient, below) needs a "Web application" OAuth
+// client. Set GOOGLE_WEB_CLIENT_ID/SECRET to it; falls back to CLIENT_ID/SECRET
+// when unset so a single OAuth client can serve both roles if desired.
 const WEB_CLIENT_ID     = process.env.GOOGLE_WEB_CLIENT_ID     || CLIENT_ID;
 const WEB_CLIENT_SECRET = process.env.GOOGLE_WEB_CLIENT_SECRET || CLIENT_SECRET;
 const CALENDAR_ID   = process.env.GOOGLE_CALENDAR_ID   || 'primary';
 const TIMEZONE      = process.env.TIMEZONE             || 'UTC';
-
-if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
-  console.error('ERROR: Missing Google OAuth credentials in environment variables.');
-}
 
 // ── Supabase auth (gate /api behind the dashboard login) ──────────────────────
 // The frontend attaches the logged-in user's JWT as `Authorization: Bearer …`.
@@ -75,26 +71,19 @@ if (!AUTH_CONFIGURED) {
 const tokenCache = new Map();   // jwt → { user, exp(ms) }
 const TOKEN_TTL_MS = 60 * 1000;
 
-// Build an OAuth2 client that auto-refreshes the access token using the
-// stored refresh token — no manual re-auth needed after the first setup.
-const oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, 'http://localhost:3002/callback');
-oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
-const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-
 // ── Multi-tenant calendar linking (Step 2) ────────────────────────────────────
 // Per-user Google linking stores each user's refresh token in the Supabase vault
-// (public.calendar_connections, migration 0005) instead of the single global
-// GOOGLE_REFRESH_TOKEN above. Three new secrets gate it:
+// (public.calendar_connections, migration 0005) — every calendar call is built
+// fresh per-request from THIS user's own stored token (calendarForUser, below).
+// Three new secrets gate it:
 //   • SUPABASE_SERVICE_ROLE_KEY — reads/writes the vault, BYPASSING RLS (the
 //     browser can never read tokens; only this server can). Keep it server-side.
 //   • TOKEN_ENC_KEY             — encrypts refresh tokens at rest (AES-256-GCM).
 //   • GOOGLE_REDIRECT_URI       — the OAuth redirect, e.g.
 //     https://<proxy-host>/oauth/google/callback. Must be an Authorized redirect
-//     URI on a "Web application" Google OAuth client (not the Desktop client the
-//     CLI auth.js uses). The same CLIENT_ID/SECRET can be a Web client, or set a
-//     dedicated web client's id/secret here.
-// If any secret is missing the linking routes fail closed (503); the legacy
-// single-owner /api/events routes keep working off GOOGLE_REFRESH_TOKEN.
+//     URI on a "Web application" Google OAuth client. The same CLIENT_ID/SECRET
+//     can be a Web client, or set a dedicated web client's id/secret here.
+// If any secret is missing, the linking routes fail closed (503).
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const TOKEN_ENC_KEY             = process.env.TOKEN_ENC_KEY             || '';
 // .trim() + strip accidental wrapping quotes: a trailing space/newline or a
@@ -167,42 +156,23 @@ async function requireAuth(req, res, next) {
 }
 app.use('/api', requireAuth);   // registered before the /api routes below
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function dayBounds(dateStr) {
-  return {
-    timeMin: `${dateStr}T00:00:00Z`,
-    timeMax: `${dateStr}T23:59:59Z`,
-  };
-}
-
-function formatEvent(ev) {
-  const allDay = !ev.start?.dateTime;
-  return {
-    id:       ev.id,
-    title:    ev.summary    || '(no title)',
-    start:    ev.start?.dateTime || ev.start?.date || null,
-    end:      ev.end?.dateTime   || ev.end?.date   || null,
-    allDay,
-    notes:    ev.description || '',
-    location: ev.location   || '',
-    status:   ev.status,
-    url:      ev.htmlLink   || '',
-    color:    ev.colorId    || null,
-  };
-}
-
-async function listEvents({ timeMin, timeMax }) {
-  const res = await calendar.events.list({
-    calendarId:  CALENDAR_ID,
-    timeMin,
-    timeMax,
-    timeZone:    TIMEZONE,
-    singleEvents: true,
-    orderBy:     'startTime',
-    maxResults:  250,
-  });
-  return (res.data.items || []).map(formatEvent);
-}
+// Per-USER (not per-IP) rate limit for routes that cost real money (Gemini) or
+// consume external quota (Google Calendar API). Keyed by req.user.id, which
+// requireAuth above guarantees is set before this ever runs. Deliberately not
+// applied globally — cheap/read-only routes (e.g. /api/calendar/status) don't
+// need it, and a shared egress IP (Vercel/Render) would make IP-keying wrong
+// for a multi-user deployment. In-memory only, like the existing tokenCache/
+// syncing maps — resets per instance/restart; acceptable at this project's
+// current single/few-instance scale (see Known Issues for the cross-instance
+// caveat shared with the `syncing` lock).
+const expensiveLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,   // 5 minutes
+  limit: 20,                 // generous for real interactive use, not for abuse/loops
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user && req.user.id) || 'anonymous',
+  message: { error: 'Too many requests — please wait a few minutes and try again.' },
+});
 
 // ── ROUTES ────────────────────────────────────────────────────────────────────
 
@@ -219,104 +189,13 @@ app.get('/health', (_req, res) => {
   });
 });
 
-
-// ── 1. GET /api/events?date=YYYY-MM-DD ────────────────────────────────────────
-// Returns all events for a single day (defaults to today).
-app.get('/api/events', async (req, res) => {
-  const date = req.query.date || new Date().toISOString().slice(0, 10);
-  try {
-    res.json(await listEvents(dayBounds(date)));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ── 2. GET /api/events/range?start=YYYY-MM-DD&end=YYYY-MM-DD ─────────────────
-// Returns all events between two dates (inclusive).
-app.get('/api/events/range', async (req, res) => {
-  const { start, end } = req.query;
-  if (!start || !end) return res.status(400).json({ error: 'start and end are required' });
-  try {
-    res.json(await listEvents({
-      timeMin: `${start}T00:00:00Z`,
-      timeMax: `${end}T23:59:59Z`,
-    }));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ── 3. POST /api/events ───────────────────────────────────────────────────────
-// Create a new event.
-// Body: { title, date, notes?, startTime?, endTime?, allDay? }
-//   allDay=true  (or no startTime/endTime) → all-day event
-//   startTime/endTime → timed event, must be full ISO strings
-app.post('/api/events', async (req, res) => {
-  const { title, date, notes, startTime, endTime, allDay } = req.body;
-  if (!title || !date) return res.status(400).json({ error: 'title and date are required' });
-
-  const requestBody = {
-    summary:     title,
-    description: notes || '',
-  };
-
-  if (allDay || (!startTime && !endTime)) {
-    requestBody.start = { date };
-    requestBody.end   = { date };
-  } else {
-    requestBody.start = { dateTime: startTime || `${date}T09:00:00`, timeZone: TIMEZONE };
-    requestBody.end   = { dateTime: endTime   || `${date}T10:00:00`, timeZone: TIMEZONE };
-  }
-
-  try {
-    const res2 = await calendar.events.insert({ calendarId: CALENDAR_ID, requestBody });
-    res.status(201).json(formatEvent(res2.data));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ── 4. PATCH /api/events/:id ──────────────────────────────────────────────────
-// Update an existing event. Send only the fields you want to change.
-// Body can include: { title?, notes?, date?, startTime?, endTime? }
-app.patch('/api/events/:id', async (req, res) => {
-  const { title, notes, date, startTime, endTime } = req.body;
-  const requestBody = {};
-  if (title !== undefined) requestBody.summary     = title;
-  if (notes !== undefined) requestBody.description = notes;
-  if (date && !startTime && !endTime) {
-    requestBody.start = { date };
-    requestBody.end   = { date };
-  }
-  if (startTime) requestBody.start = { dateTime: startTime, timeZone: TIMEZONE };
-  if (endTime)   requestBody.end   = { dateTime: endTime,   timeZone: TIMEZONE };
-
-  try {
-    const res2 = await calendar.events.patch({
-      calendarId: CALENDAR_ID,
-      eventId:    req.params.id,
-      requestBody,
-    });
-    res.json(formatEvent(res2.data));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ── 5. DELETE /api/events/:id ─────────────────────────────────────────────────
-// Permanently deletes the event from Google Calendar.
-app.delete('/api/events/:id', async (req, res) => {
-  try {
-    await calendar.events.delete({ calendarId: CALENDAR_ID, eventId: req.params.id });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// NOTE: routes 1-5 (GET/POST/PATCH/DELETE /api/events*) were removed here —
+// they operated on one global, single-owner calendar client with no per-user
+// authorization check, so any authenticated account (any self-registered user)
+// could read/write/delete the app owner's real Google Calendar. Nothing in the
+// frontend called them (js/index.js uses the Supabase `events` table directly;
+// real per-user Google sync goes through /api/calendar/* below, which correctly
+// scopes every call to calendarForUser(req.user.id)). See Known Issues.md.
 
 
 // ── 6. POST /api/gemini/meal-scan ─────────────────────────────────────────────
@@ -339,7 +218,7 @@ const MEAL_PROMPT =
   'Respond ONLY with minified JSON matching: {"meal_name":string,"calories":number,"protein":number,"carbs":number,"fats":number}. ' +
   'Calories in kcal; protein, carbs and fats in grams, as integers. No prose, no markdown.';
 
-app.post('/api/gemini/meal-scan', async (req, res) => {
+app.post('/api/gemini/meal-scan', expensiveLimiter, async (req, res) => {
   if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
   const { image, mime } = req.body || {};
   if (!image) return res.status(400).json({ error: 'image (base64) is required' });
@@ -402,7 +281,7 @@ app.post('/api/gemini/meal-scan', async (req, res) => {
 // modules. Same server-side key as meal-scan — never reaches the browser.
 // Body: { message: string, context?: { date, events:[{title,start,end,done}] } }
 // Returns the intent object (see responseSchema below).
-app.post('/api/gemini/assistant', async (req, res) => {
+app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
   if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
   const { message, context } = req.body || {};
   if (!message) return res.status(400).json({ error: 'message is required' });
@@ -491,6 +370,74 @@ app.post('/api/gemini/assistant', async (req, res) => {
     const text = (((j.candidates || [])[0] || {}).content?.parts || [])[0]?.text || '';
     let parsed;
     try { parsed = JSON.parse(text); } catch (e) { return res.status(502).json({ error: 'Could not read the AI response' }); }
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Shelron v0.1 — POST /api/shelron/parse ────────────────────────────────────
+// Shelron's Natural Language Parser (aptron Brain/02 Architecture/Shelron.md
+// §1). ENTITY EXTRACTION ONLY — this route does not decide an intent and
+// does not touch the calendar; it returns structured entities that the
+// frontend's deterministic Intent Engine (js/shelron/intent-engine.js) then
+// classifies. Same server-side Gemini key as the routes above; never
+// reaches the browser.
+// Body: { text: string, today: 'YYYY-MM-DD' }
+// Returns: { intent, title, description, date, startTime, endTime, location,
+//            people: [], confidence } — `intent` is a raw, UNVALIDATED hint;
+// the frontend Intent Engine makes the real deterministic decision and does
+// not have to trust it.
+app.post('/api/shelron/parse', expensiveLimiter, async (req, res) => {
+  if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
+  const { text, today } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'text is required' });
+
+  const sys =
+    'You extract structured entities from a short natural-language sentence about a personal calendar. ' +
+    'Today is ' + (today || new Date().toISOString().slice(0, 10)) + '. ' +
+    'You do NOT decide what action to take — only extract what is present. Rules: ' +
+    'dates are ALWAYS absolute "YYYY-MM-DD" (resolve "tomorrow", "next Friday", etc. against today); ' +
+    'times are ALWAYS 24-hour "HH:MM"; leave a field absent (do not guess) if the sentence does not state it; ' +
+    '"intent" is your best-guess label for what the sentence wants, one of ' +
+    '"create_event", "update_event", "delete_event", "query" — it is a hint only, not authoritative; ' +
+    '"confidence" is your own 0-1 confidence in this extraction as a whole.';
+
+  const body = {
+    contents: [{ parts: [{ text: sys + '\n\nSentence: ' + text }] }],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          intent:      { type: 'STRING', enum: ['create_event', 'update_event', 'delete_event', 'query'] },
+          title:       { type: 'STRING' },
+          description: { type: 'STRING' },
+          date:        { type: 'STRING' },
+          startTime:   { type: 'STRING' },
+          endTime:     { type: 'STRING' },
+          location:    { type: 'STRING' },
+          people:      { type: 'ARRAY', items: { type: 'STRING' } },
+          confidence:  { type: 'NUMBER' },
+        },
+        required: ['intent', 'confidence'],
+      },
+    },
+  };
+
+  try {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL +
+      ':generateContent?key=' + GEMINI_API_KEY;
+    const gr = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
+    });
+    if (!gr.ok) return res.status(502).json({ error: 'Gemini request failed (HTTP ' + gr.status + ')' });
+    const j = await gr.json();
+    const raw = (((j.candidates || [])[0] || {}).content?.parts || [])[0]?.text || '';
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return res.status(502).json({ error: 'Could not read the AI response' }); }
     res.json(parsed);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -659,11 +606,10 @@ function redirectUriFor(req) {
   return uri;   // trusted host → dynamic; hash/unknown → stable alias; empty → static
 }
 
-// ── per-request Google client (replaces the single global oauth2Client) ────────
+// ── per-request Google client ──────────────────────────────────────────────────
 // Builds a fresh OAuth2 client from THIS user's stored refresh token, so every
 // calendar call acts on the caller's own Google account. The step-4 mirror
-// (push/pull) is the main consumer; ?verify=1 on /status also exercises it. The
-// legacy /api/events routes still use the global client until the mirror lands.
+// (push/pull) is the main consumer; ?verify=1 on /status also exercises it.
 // `redirectUri` only matters for the auth-code exchange (start + callback);
 // refresh-token calls ignore it, so it defaults to the static env value.
 function newOAuthClient(redirectUri) {
@@ -1050,7 +996,7 @@ async function syncUser(uid, opts) {
 
 // ── 13. POST /api/calendar/sync/trigger ───────────────────────────────────────
 // Manual mirror from the dashboard (also fired server-side right after linking).
-app.post('/api/calendar/sync/trigger', async (req, res) => {
+app.post('/api/calendar/sync/trigger', expensiveLimiter, async (req, res) => {
   if (!OAUTH_LINK_CONFIGURED) return res.status(503).json({ error: 'Calendar linking is not configured' });
   try {
     const result = await syncUser(req.user.id, { reason: 'manual' });
