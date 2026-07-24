@@ -65,7 +65,14 @@
   background: linear-gradient(90deg, transparent, rgba(230,207,156,0.55), transparent);
 }
 
-.callink-top { display: flex; align-items: center; gap: 14px; }
+/* flex-wrap:wrap: the not-linked state puts a long CTA ("Start Calendar
+   Synchronization") inline with the title/subtitle in this same row. With no
+   wrap, a card narrower than ~550px (true for the dashboard's card at most
+   real widths, mobile especially) squeezed .callink-body to almost nothing —
+   verified: title/subtitle wrapped across 6+ lines. Letting the button drop
+   to its own line below fixes it; the connected state's top row (medallion +
+   body only, nothing else to wrap) is unaffected. */
+.callink-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 /* Gold-ringed Shenlong medallion */
 .callink-medallion {
@@ -122,18 +129,30 @@
 .callink-sub.is-ok   .state { color: #6fcf97; }
 .callink-sub.is-warn .state { color: #e6b25a; }
 
-/* gold hairline divider */
+/* gold hairline divider — margin tightened from 14/12 (26px total for a 1px
+   line) to 10/10; still a clear section break without the dead space. */
 .callink-rule {
-  height: 1px; margin: 14px 0 12px;
+  height: 1px; margin: 10px 0;
   background: linear-gradient(90deg, transparent, rgba(210,188,138,0.22) 20%, rgba(210,188,138,0.22) 80%, transparent);
 }
 
 .callink-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-.callink-caption { font-size: 12px; line-height: 1.45; color: rgba(255,255,255,0.38); max-width: 300px; margin: 0; }
+/* max-width was a flat 300px regardless of the card's real width (~380-450px
+   on the dashboard), forcing the caption to wrap to 3 lines when 2 would fit.
+   .callink-foot already has flex-wrap:wrap, so once the caption and the
+   actions row don't fit side by side, the caption naturally takes the full
+   row width on its own line — no fixed cap needed. */
+.callink-caption { font-size: 12px; line-height: 1.45; color: rgba(255,255,255,0.38); margin: 0; }
 .callink-caption b { color: rgba(255,255,255,0.6); font-weight: 600; }
 .callink.is-warn .callink-caption b { color: #e6b25a; }
 
-.callink-actions { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; }
+/* flex:none (shrink:0) was blocking this row from ever being width-
+   constrained by its own wrapped line, so its own flex-wrap never actually
+   triggered — the three buttons just overflowed the card on narrow widths
+   instead of wrapping. flex-shrink:1 (default) lets it size to the
+   available width so its internal wrap can do its job; flex-grow stays 0
+   so it doesn't stretch to fill .callink-foot on wide cards. */
+.callink-actions { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; flex-wrap: wrap; }
 .callink-link {
   display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
   font-family: inherit; font-size: 12px; font-weight: 550; color: #d2bc8a; cursor: pointer;
