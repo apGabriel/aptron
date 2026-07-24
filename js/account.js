@@ -202,7 +202,14 @@
   --acct-input-bg: rgba(0,0,0,0.26);
   --acct-input-bg-focus: rgba(0,0,0,0.32);
   --acct-autofill: #2a2926;
-  position: relative; width: 100%; max-width: 860px; height: min(88vh, 600px);
+  /* Auto-height (was a fixed height: min(88vh,600px)) — every pane's real
+     content is 247-437px tall, so a flat 600px shell left 165-350px of dead
+     air below the shortest panes (Profile, Cloud & Data Sync), which is what
+     made the whole modal read as oversized next to every other card in the
+     app, none of which use a fixed height. max-height keeps the same safety
+     cap for small viewports / unexpectedly tall content; .acct-scroll's
+     existing overflow-y:auto still handles that case exactly as before. */
+  position: relative; width: 100%; max-width: 860px; height: auto; max-height: min(88vh, 600px);
   display: flex; overflow: hidden;
   background: linear-gradient(180deg, var(--acct-glass-a) 0%, var(--acct-glass-b) 100%);
   border: 1px solid var(--acct-line); border-radius: 20px;
