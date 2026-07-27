@@ -292,7 +292,10 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
     'Convert the user message into EXACTLY ONE structured action. ' +
     'Today is ' + ((context && context.date) || new Date().toISOString().slice(0, 10)) + '. ' +
     "The user's current calendar events (JSON): " + JSON.stringify(events).slice(0, 4000) + '. ' +
-    'Rules: all times are 24-hour "HH:MM". For move_event / complete_event / delete_event / rename_event, ' +
+    'Rules: all times are 24-hour "HH:MM". Dates are ALWAYS absolute "YYYY-MM-DD" — if the user names a day ' +
+    '("tomorrow", "next Friday", a specific date), resolve it against today\'s date above and set "date"; ' +
+    'leave "date" absent when the user does not mention a day (it then applies to whatever day is already ' +
+    'selected). For move_event / complete_event / delete_event / rename_event, ' +
     '"match" MUST be a distinctive keyword taken from the target event\'s title. ' +
     'For rename_event (the user wants to change/correct an event\'s NAME or TITLE, e.g. ' +
     '"rename X to Y", "change the name of X to Y", "call X Y") set "match" to the existing block and ' +
@@ -328,6 +331,7 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
               'delete_event', 'restore_event', 'summarize', 'log_water', 'log_food', 'note', 'chat'],
           },
           title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
+          date: { type: 'STRING' },
           endTime: { type: 'STRING' }, deltaMin: { type: 'NUMBER' },
           durationMin: { type: 'NUMBER' }, notes: { type: 'STRING' },
           servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
@@ -345,6 +349,7 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
                     'delete_event', 'restore_event', 'log_water', 'log_food', 'note'],
                 },
                 title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
+                date: { type: 'STRING' },
                 endTime: { type: 'STRING' }, deltaMin: { type: 'NUMBER' }, durationMin: { type: 'NUMBER' },
                 notes: { type: 'STRING' }, servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
                 name: { type: 'STRING' }, calories: { type: 'NUMBER' }, text: { type: 'STRING' },
@@ -375,75 +380,6 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ── Shelron v0.1 — POST /api/shelron/parse ────────────────────────────────────
-// Shelron's Natural Language Parser (aptron Brain/02 Architecture/Shelron.md
-// §1). ENTITY EXTRACTION ONLY — this route does not decide an intent and
-// does not touch the calendar; it returns structured entities that the
-// frontend's deterministic Intent Engine (js/shelron/intent-engine.js) then
-// classifies. Same server-side Gemini key as the routes above; never
-// reaches the browser.
-// Body: { text: string, today: 'YYYY-MM-DD' }
-// Returns: { intent, title, description, date, startTime, endTime, location,
-//            people: [], confidence } — `intent` is a raw, UNVALIDATED hint;
-// the frontend Intent Engine makes the real deterministic decision and does
-// not have to trust it.
-app.post('/api/shelron/parse', expensiveLimiter, async (req, res) => {
-  if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
-  const { text, today } = req.body || {};
-  if (!text) return res.status(400).json({ error: 'text is required' });
-
-  const sys =
-    'You extract structured entities from a short natural-language sentence about a personal calendar. ' +
-    'Today is ' + (today || new Date().toISOString().slice(0, 10)) + '. ' +
-    'You do NOT decide what action to take — only extract what is present. Rules: ' +
-    'dates are ALWAYS absolute "YYYY-MM-DD" (resolve "tomorrow", "next Friday", etc. against today); ' +
-    'times are ALWAYS 24-hour "HH:MM"; leave a field absent (do not guess) if the sentence does not state it; ' +
-    '"intent" is your best-guess label for what the sentence wants, one of ' +
-    '"create_event", "update_event", "delete_event", "query" — it is a hint only, not authoritative; ' +
-    '"confidence" is your own 0-1 confidence in this extraction as a whole.';
-
-  const body = {
-    contents: [{ parts: [{ text: sys + '\n\nSentence: ' + text }] }],
-    generationConfig: {
-      temperature: 0.2,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: 'OBJECT',
-        properties: {
-          intent:      { type: 'STRING', enum: ['create_event', 'update_event', 'delete_event', 'query'] },
-          title:       { type: 'STRING' },
-          description: { type: 'STRING' },
-          date:        { type: 'STRING' },
-          startTime:   { type: 'STRING' },
-          endTime:     { type: 'STRING' },
-          location:    { type: 'STRING' },
-          people:      { type: 'ARRAY', items: { type: 'STRING' } },
-          confidence:  { type: 'NUMBER' },
-        },
-        required: ['intent', 'confidence'],
-      },
-    },
-  };
-
-  try {
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL +
-      ':generateContent?key=' + GEMINI_API_KEY;
-    const gr = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
-    });
-    if (!gr.ok) return res.status(502).json({ error: 'Gemini request failed (HTTP ' + gr.status + ')' });
-    const j = await gr.json();
-    const raw = (((j.candidates || [])[0] || {}).content?.parts || [])[0]?.text || '';
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch (e) { return res.status(502).json({ error: 'Could not read the AI response' }); }
-    res.json(parsed);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MULTI-TENANT CALENDAR LINKING — OAuth handshake, token vault, per-user client

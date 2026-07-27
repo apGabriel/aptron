@@ -1,10 +1,10 @@
 // =============================================================================
-// SHELRON — Future engine placeholders (v0.1)
-// These engines are architecturally reserved (aptron Brain/02 Architecture/
-// Shelron.md) but explicitly NOT implemented in v0.1 — v0.1 proves only the
-// Parser → Intent Engine → Action Dispatcher → Calendar Adapter path. Every
-// export below throws if called, so a future accidental call surfaces
-// immediately instead of silently no-op'ing.
+// SHELRON — Future engine placeholders
+// Shelron is the internal engine layer behind the single user-facing
+// assistant, Shenlong (js/index.js) — see aptron Brain/02 Architecture/
+// Shelron.md. These seven engines are architecturally reserved there but
+// explicitly NOT implemented yet. Every export below throws if called, so a
+// future accidental call surfaces immediately instead of silently no-op'ing.
 //
 // PLACEHOLDER SEAM (matching the existing js/wardrobe.js convention — see
 // Known Issues / Ideas.md): do not implement a body here without first

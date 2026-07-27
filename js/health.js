@@ -1373,8 +1373,7 @@ const CONFIG = {
 
   // RC-1 polish: never show the user a raw HTTP status / server error
   // string — only a plain-language sentence. The technical detail (status +
-  // server message, if any) is logged to the console instead. Mirrors the
-  // same policy applied to Shelron (js/shelron/ui.js).
+  // server message, if any) is logged to the console instead.
   function friendlyMealScanError(err) {
     const code = err && err.code;
     if (code === 'http_429') return "You're scanning too fast — please wait a moment and try again.";
