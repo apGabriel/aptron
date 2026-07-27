@@ -36,6 +36,22 @@ const CONFIG = {
   defaultSubstances: []
 };
 
+// ===================== Shared date helpers =====================
+// YYYY-MM-DD, local time (no UTC drift) — the one formatter every section
+// below reuses instead of reimplementing.
+function fmtYMD(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// 6 AM-anchored "active day" — a day doesn't roll over until 6am local, so a
+// midnight snack still logs against "today". Shared by Daily Stack and the
+// Food Diary. The Water Tracker deliberately uses true midnight instead
+// (see its own todayKey()) — not the same rule, not a bug.
+function activeDayKey() {
+  const now = new Date();
+  if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+  return fmtYMD(now);
+}
+
 // ===================== Daily Stack =====================
 (() => {
   'use strict';
@@ -43,14 +59,7 @@ const CONFIG = {
   const storeGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
   const storeSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-  function getActiveDate() {
-    const now = new Date();
-    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
+  function getActiveDate() { return activeDayKey(); }
 
   const TEMPLATE_VERSION = 5;
 
@@ -681,9 +690,7 @@ const CONFIG = {
   $('appTitle').textContent = CONFIG.appTitle || 'Water Coach';
 
   // Helpers
-  function dateKey(d) {
-    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-  }
+  function dateKey(d) { return fmtYMD(d); }
   function todayKey() { return dateKey(new Date()); }
   // Source of truth for "today" is absolute ml. Servings are only ever a
   // display/input convenience derived from this number.
@@ -1246,12 +1253,8 @@ const CONFIG = {
   const FOOD_KEY = 'po_food_v1';
   const $ = id => document.getElementById(id);
 
-  // 6 AM-anchored day key — mirrors the Daily Stack / Water reset exactly.
-  function dayKey() {
-    const now = new Date();
-    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
-    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-  }
+  // 6 AM-anchored day key — mirrors the Daily Stack reset exactly (shared helper).
+  function dayKey() { return activeDayKey(); }
   // ── Meal type ────────────────────────────────────────────────────────────
   // Tag every logged meal as breakfast/lunch/dinner/snack. The default is
   // guessed from the local clock; the segmented control lets the user override.
@@ -1287,7 +1290,7 @@ const CONFIG = {
     const p = dateStr.split('-').map(Number);
     const dt = new Date(p[0], p[1] - 1, p[2]);
     dt.setDate(dt.getDate() + delta);
-    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    return fmtYMD(dt);
   }
 
   // Contextual emoji from the meal name — first keyword match wins.

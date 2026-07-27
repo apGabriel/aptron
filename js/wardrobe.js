@@ -1531,9 +1531,6 @@
     return { wire, renderAll, renderSeason, openUpload, openItem, renderOutfits, renderRecs, renderSaved, generate };
   })();
 
-  // expose UI for Closet's inline handlers
-  window.UI = UI;
-
   // ----------------------------------------------------------------
   // App — boot
   // ----------------------------------------------------------------

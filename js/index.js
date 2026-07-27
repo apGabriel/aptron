@@ -832,11 +832,9 @@ window.QuickNotes = (function () {
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
-    moveEvent: (m, hm) => apiRetimeEvent(m, { start: hm }),   // back-compat alias
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
     renameEvent: apiRenameEvent,
-    restoreEvent: apiRestoreEvent, undoLastAction: apiRestoreEvent,   // undo == restore last deletion
-    hasUndo: () => !!lastDeletedEvent,
+    restoreEvent: apiRestoreEvent,
     matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
 })();

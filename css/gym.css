@@ -46,69 +46,9 @@ html, body {
 /* Defeat the default `min-width: auto` on flex/grid items — without
    this, long text or wide buttons can force their parent past the
    viewport even with max-width set. */
-.po-shell *, .tabbar * { min-width: 0; }
+.po-shell * { min-width: 0; }
 /* No image, video, or canvas can ever push the page past the viewport */
 img, video, canvas, svg { max-width: 100%; }
-
-/* ---------- Bottom tab bar (shared with dashboard) ---------- */
-.tabbar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 50;
-  display: flex;
-  justify-content: center;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, rgba(10,10,11,0) 0%, rgba(10,10,11,0.78) 38%, rgba(10,10,11,0.94) 100%);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  pointer-events: none;
-}
-.tabbar-inner {
-  pointer-events: auto;
-  display: flex;
-  width: 100%;
-  max-width: 460px;
-  gap: 6px;
-  padding: 6px;
-  background: rgba(20, 20, 22, 0.72);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  box-shadow: 0 12px 36px rgba(0,0,0,0.55);
-}
-.tab {
-  flex: 1 1 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-radius: 13px;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--text-2);
-  text-decoration: none;
-  background: transparent;
-  border: 1px solid transparent;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-.tab:hover { color: var(--text-1); }
-.tab[aria-current="page"] {
-  color: var(--text-1);
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.10);
-}
-.tab-icon {
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.tab-icon svg { width: 100%; height: 100%; display: block; }
 
 .po-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -656,10 +596,6 @@ img, video, canvas, svg { max-width: 100%; }
 
   /* Progress photos grid — match the available width */
   .wt-photo-grid { gap: 8px; }
-
-  /* Bottom tab bar — slightly smaller pills so both labels always fit */
-  .tab { padding: 11px 10px; font-size: 13px; }
-  .tabbar { padding-left: 12px; padding-right: 12px; }
 }
 
 /* Anything narrower than ~360px (iPhone SE / mini) gets a final pass */
@@ -795,27 +731,6 @@ img, video, canvas, svg { max-width: 100%; }
   margin-top: 6px;
   display: flex; flex-direction: column; gap: 6px;
 }
-.po-tw-past-day {
-  background: rgba(255,255,255,0.025);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-.po-tw-past-day-h {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px;
-}
-.po-tw-past-day-date {
-  font-size: 11px; color: var(--text-3);
-  font-family: var(--font-mono); font-weight: 700;
-  letter-spacing: 0.06em;
-}
-.po-tw-past-day-summary {
-  font-size: 12px; color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-.po-tw-past-day-right { display: flex; align-items: center; gap: 6px; }
-.po-tw-past-del { font-size: 15px; padding: 2px 6px; line-height: 1; }
 .po-tw-past-day-done {
   display: inline-block; padding: 2px 7px; border-radius: 999px;
   background: rgba(110,231,183,0.14); color: var(--good);
@@ -915,7 +830,6 @@ img, video, canvas, svg { max-width: 100%; }
   font-family: inherit;
   -webkit-tap-highlight-color: transparent;
 }
-.wt-photo-card.is-removing { opacity: 0; transform: scale(0.92); transition: 0.25s; }
 .wt-photo-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .wt-photo-overlay { position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.7) 100%); pointer-events: none; }
 .wt-photo-meta {
@@ -1652,17 +1566,6 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input:foc
 }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-w-btn { background: rgba(29,33,41,0.05); }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-w-btn:hover { background: rgba(29,33,41,0.10); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tabbar {
-  background: linear-gradient(180deg, rgba(250,250,250,0) 0%, rgba(250,250,250,0.80) 38%, rgba(250,250,250,0.95) 100%);
-}
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tabbar-inner {
-  background: rgba(255,255,255,0.88);
-  box-shadow: 0 12px 36px rgba(23,28,38,0.16);
-}
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab:hover { color: var(--text-1); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .tab[aria-current="page"] {
-  background: rgba(29,33,41,0.06); border-color: rgba(29,33,41,0.12);
-}
 
 /* Muscle map light-mode surfaces live as token re-declarations in the shared
    light block above (--mm-*), and hover/active bind to --apt-accent globally —
