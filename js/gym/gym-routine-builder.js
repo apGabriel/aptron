@@ -417,22 +417,125 @@
     return li;
   }
 
-  // ── Saved routines ────────────────────────────────────────────
-  function renderSaved() {
+  // ── My Routines (page-top routine-first section) ───────────────
+  // "Current" mirrors G.state.filterRoutine, read read-only from the coach's
+  // localStorage blob via coachState() (same bridge exerciseLogs() already
+  // uses below) — never written directly. Tapping a row dispatches
+  // 'rb:select-routine' and lets the coach module own that state, same as
+  // the routine combobox already does.
+  function currentRoutineId(routines) {
+    const pinned = coachState().filterRoutine;
+    if (pinned && routines.some(r => r.id === pinned)) return pinned;
+    return routines.length ? routines[0].id : null;
+  }
+
+  // Latest logged date across every exercise in the routine, or null if it
+  // has never been logged. Reuses exerciseLogs()'s read-only bridge into the
+  // coach's log history (keyed by 'rt_' + exId).
+  function lastPerformedLabel(r) {
+    let latest = 0;
+    (r.exercises || []).forEach(it => {
+      exerciseLogs(it.exId).forEach(l => {
+        const t = Date.parse(l.date);
+        if (t && t > latest) latest = t;
+      });
+    });
+    if (!latest) return 'Not started yet';
+    const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const d = new Date(latest);
+    return 'Last: ' + mons[d.getMonth()] + ' ' + d.getDate();
+  }
+
+  // Muscle-group + duration estimate for a routine — pure math, no state
+  // dependency, so no bridge is needed. Deliberately duplicated (not shared
+  // via window.GymApp) alongside the equivalent gym-storage.js helpers used
+  // by the Hero, matching this file's established self-contained-IIFE
+  // boundary (see e.g. lastPerformedLabel()/exerciseLogs() above).
+  function routineMuscleGroups(r) {
+    const seen = []; const has = {};
+    (r.exercises || []).forEach(it => {
+      if (it.muscleGroup && !has[it.muscleGroup]) { has[it.muscleGroup] = true; seen.push(it.muscleGroup); }
+    });
+    return seen;
+  }
+  // Rough estimate only — always presented with a "~" prefix in the UI.
+  function estimateRoutineMinutes(r) {
+    let totalSets = 0;
+    (r.exercises || []).forEach(it => { totalSets += Array.isArray(it.sets) ? it.sets.length : 0; });
+    if (!totalSets) return 0;
+    const restSec = (r.restEnabled && r.rest) ? r.rest : 60;
+    const workSec = 40;
+    return Math.max(5, Math.round((totalSets * workSec + Math.max(0, totalSets - 1) * restSec) / 60));
+  }
+  // First few exercise names + "+N more" — enough to recognize the routine
+  // without opening it.
+  function routinePreviewLine(r, max) {
+    max = max || 4;
+    const names = (r.exercises || []).map(it => it.name).filter(Boolean);
+    if (!names.length) return '';
+    const shown = names.slice(0, max);
+    const extra = names.length - shown.length;
+    return shown.join(', ') + (extra > 0 ? ' +' + extra + ' more' : '');
+  }
+
+  function duplicateRoutine(r) {
+    const copy = clone(r);
+    copy.id = 'r_' + Date.now();
+    copy.name = (r.name || 'Routine') + ' copy';
+    copy.updated_at = new Date().toISOString();
     const routines = loadRoutines();
-    const list = $('rbSavedList');
+    routines.push(copy);
+    saveRoutines(routines);
+    renderMyRoutines();
+  }
+
+  function renderMyRoutines() {
+    const routines = loadRoutines();
+    const list = $('myRoutinesList');
     list.innerHTML = '';
-    $('rbSavedEmpty').style.display = routines.length ? 'none' : 'block';
+    $('myRoutinesEmpty').style.display = routines.length ? 'none' : 'block';
+    const curId = currentRoutineId(routines);
 
     routines.forEach(r => {
-      const li = document.createElement('li'); li.className = 'rb-saved-row';
+      const li = document.createElement('li');
+      li.className = 'rb-saved-row' + (r.id === curId ? ' is-current' : '');
 
       const info = document.createElement('div'); info.className = 'rb-saved-info';
+      const nameRow = document.createElement('div'); nameRow.className = 'rb-saved-name-row';
       const nm = document.createElement('div'); nm.className = 'rb-saved-name'; nm.textContent = r.name;
+      nameRow.appendChild(nm);
+      if (r.id === curId) {
+        const badge = document.createElement('span'); badge.className = 'rb-saved-current-badge'; badge.textContent = 'Today';
+        nameRow.appendChild(badge);
+      }
+      const groups = routineMuscleGroups(r);
+      let chipsRow = null;
+      if (groups.length) {
+        chipsRow = document.createElement('div'); chipsRow.className = 'rb-saved-chips';
+        groups.forEach(g => {
+          const chip = document.createElement('span'); chip.className = 'po-muscle-chip'; chip.textContent = g;
+          chipsRow.appendChild(chip);
+        });
+      }
+
       const meta = document.createElement('div'); meta.className = 'rb-saved-meta';
       const totalSets = r.exercises.reduce((s, e) => s + (Array.isArray(e.sets) ? e.sets.length : (Number(e.sets) || 0)), 0);
-      meta.textContent = r.exercises.length + ' exercise' + (r.exercises.length !== 1 ? 's' : '') + ' · ' + totalSets + ' sets';
-      info.append(nm, meta);
+      const mins = estimateRoutineMinutes(r);
+      meta.textContent = r.exercises.length + ' exercise' + (r.exercises.length !== 1 ? 's' : '') + ' · ' + totalSets + ' set' + (totalSets !== 1 ? 's' : '')
+        + (mins ? ' · ~' + mins + ' min' : '') + ' · ' + lastPerformedLabel(r);
+
+      const previewText = routinePreviewLine(r);
+      let preview = null;
+      if (previewText) {
+        preview = document.createElement('div'); preview.className = 'rb-saved-preview'; preview.textContent = previewText;
+      }
+
+      info.append(nameRow);
+      if (chipsRow) info.append(chipsRow);
+      info.append(meta);
+      if (preview) info.append(preview);
+
+      const actions = document.createElement('div'); actions.className = 'rb-saved-actions';
 
       const editBtn = document.createElement('button');
       editBtn.type = 'button'; editBtn.className = 'po-btn-secondary rb-saved-edit'; editBtn.textContent = 'Edit';
@@ -442,18 +545,33 @@
         $('rbCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
 
+      const dupBtn = document.createElement('button');
+      dupBtn.type = 'button'; dupBtn.className = 'po-btn-secondary rb-saved-dup'; dupBtn.textContent = 'Duplicate';
+      dupBtn.addEventListener('click', () => duplicateRoutine(r));
+
       const delBtn = mini('×', () => {
         if (!confirm('Are you sure you want to delete this routine? It will be removed from all your devices.')) return;
         // Immediate local update — drop it from rb_routines_v1. saveRoutines()
         // also fires the 'rb:routines-changed' event so the coach refreshes.
         saveRoutines(loadRoutines().filter(x => x.id !== r.id));
         if (current.id === r.id) { current = freshRoutine(); renderRoutine(); renderGrid(); }
-        renderSaved();
+        renderMyRoutines();
         // Background cloud delete — removes the routine from every other device.
         try { window.GymCloud && window.GymCloud.deleteRoutine(r.id); } catch (e) {}
       }, 'rb-del');
 
-      li.append(info, editBtn, delBtn);
+      actions.append(editBtn, dupBtn, delBtn);
+      li.append(info, actions);
+      // Tap the row (outside the action buttons) to pin this routine as
+      // today's — mirrors what the existing routine combobox already does.
+      li.addEventListener('click', (e) => {
+        if (e.target.closest('.rb-saved-actions')) return;
+        // Synchronous: the coach's listener runs (and persists filterRoutine)
+        // before dispatchEvent() returns, so the list re-render below already
+        // sees the new pin.
+        window.dispatchEvent(new CustomEvent('rb:select-routine', { detail: { id: r.id } }));
+        renderMyRoutines();
+      });
       list.appendChild(li);
     });
   }
@@ -600,7 +718,14 @@
     // clone() above deep-copies each exercise's `sets` array (weight + reps
     // per set) into the saved routine. Now wipe the workspace to free it up.
     current = freshRoutine();
-    renderRoutine(); renderGrid(); renderSaved();
+    renderRoutine(); renderGrid(); renderMyRoutines();
+  });
+
+  $('myRoutinesCreateBtn').addEventListener('click', () => {
+    if (current.exercises.length && !confirm('Discard the routine you\'re currently editing?')) return;
+    current = freshRoutine();
+    renderRoutine(); renderGrid();
+    $('rbCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   $('rbGifClose').addEventListener('click', () => $('rbGifModalBg').classList.remove('show'));
@@ -772,7 +897,7 @@
     buildFilters();
     applyFilter();
     renderRoutine();
-    renderSaved();
+    renderMyRoutines();
   }
   init();
 
@@ -797,7 +922,7 @@
       // Write directly (not via saveRoutines) so we don't echo a push back up.
       try { localStorage.setItem(RB_KEY, JSON.stringify(merged)); } catch (e) {}
       try { window.dispatchEvent(new CustomEvent('rb:routines-changed')); } catch (e) {}
-      try { renderSaved(); } catch (e) {}
+      try { renderMyRoutines(); } catch (e) {}
     }
     return changed;
   };

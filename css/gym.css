@@ -1248,13 +1248,102 @@ img, video, canvas, svg { max-width: 100%; }
 
 .rb-saved-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .rb-saved-row {
-  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  display: flex; align-items: flex-start; gap: 10px; padding: 14px;
   border: 1px solid var(--border); background: rgba(255,255,255,0.025); border-radius: 12px;
 }
+.rb-saved-row { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.rb-saved-actions { margin-top: 2px; }
+.rb-saved-row:hover { border-color: var(--border-strong); }
+.rb-saved-row.is-current { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.045); }
 .rb-saved-info { flex: 1; min-width: 0; }
+.rb-saved-name-row { display: flex; align-items: center; gap: 8px; }
 .rb-saved-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rb-saved-meta { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+.rb-saved-current-badge {
+  flex-shrink: 0; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--cta-ink); background: var(--cta-grad);
+  border-radius: 999px; padding: 2px 8px;
+}
+.rb-saved-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.rb-saved-meta { font-size: 11.5px; color: var(--text-3); margin-top: 5px; }
+.rb-saved-preview {
+  font-size: 11px; color: var(--text-3); margin-top: 4px; line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rb-saved-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .rb-saved-edit { padding: 8px 14px; font-size: 12px; }
+.rb-saved-dup { padding: 8px 14px; font-size: 12px; }
+.rb-create-routine-btn { width: 100%; margin-top: 14px; }
+
+/* ----- Today's Workout hero (the page's primary surface) ----- */
+#todayWorkoutCard { padding: 26px 22px; }
+.po-hero-routine { display: flex; flex-direction: column; gap: 10px; }
+.po-hero-name { font-size: 27px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+.po-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.po-muscle-chip {
+  display: inline-block; padding: 3px 9px; border-radius: 999px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-2); background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+}
+.po-hero-meta { font-size: 13px; color: var(--text-3); }
+.po-hero-progress {
+  font-size: 12.5px; font-weight: 600; color: var(--text-2);
+  padding: 9px 12px; border-radius: 10px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+}
+.po-hero-cta { width: 100%; margin-top: 18px; padding: 17px; font-size: 16px; font-weight: 700; }
+.po-hero-empty {
+  text-align: center; padding: 18px 12px;
+  color: var(--text-2); font-size: 13.5px; line-height: 1.5;
+}
+.po-hero-empty-cta { margin-top: 14px; }
+
+/* ----- Workout Mode ----- */
+/* Everything below is a CSS state on .po-shell (.is-workout-mode) — no DOM
+   is moved. .po-wm-secondary marks existing sections (filters, stats,
+   trend, history, past workouts) that hide by default in Workout Mode and
+   reappear via the "Show details" toggle (#coachCard.wm-details-open). */
+.po-shell.is-workout-mode #todayWorkoutCard,
+.po-shell.is-workout-mode #myRoutinesCard,
+.po-shell.is-workout-mode #rbCard,
+.po-shell.is-workout-mode .wt-section {
+  display: none;
+}
+.po-shell.is-workout-mode #coachCard .po-wm-secondary { display: none; }
+.po-shell.is-workout-mode #coachCard.wm-details-open .po-filters.po-wm-secondary,
+.po-shell.is-workout-mode #coachCard.wm-details-open .po-sub-section.po-wm-secondary {
+  display: block;
+}
+.po-shell.is-workout-mode #coachCard.wm-details-open .po-tw-past-toggle.po-wm-secondary {
+  display: flex;
+}
+
+.po-wm-bar { display: none; }
+.po-shell.is-workout-mode .po-wm-bar {
+  display: block; margin: -4px 0 20px; padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.po-wm-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.po-wm-exit {
+  display: flex; align-items: center; gap: 6px;
+  background: transparent; border: none; color: var(--text-1);
+  font-family: inherit; font-size: 15px; font-weight: 700;
+  padding: 4px 0; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.po-wm-exit-arrow { font-size: 16px; color: var(--text-3); }
+.po-wm-exit:hover .po-wm-exit-arrow { color: var(--text-1); }
+.po-wm-details-toggle {
+  background: transparent; border: 1px solid var(--border); color: var(--text-3);
+  border-radius: 8px; padding: 6px 12px; font-family: inherit; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.04em; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.po-wm-details-toggle:hover { color: var(--text-1); border-color: var(--border-strong); }
+.po-wm-progress-text {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 6px;
+}
+.po-wm-progress-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.po-wm-progress-fill { height: 100%; background: var(--cta-grad); border-radius: 999px; transition: width 0.25s ease; }
+.po-wm-next { margin-top: 10px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
 
 .rb-gif-muscle { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; margin: -8px 0 12px; }
 .rb-gif-img { width: 100%; border-radius: 12px; background: rgba(255,255,255,0.04); display: block; margin-bottom: 4px; }

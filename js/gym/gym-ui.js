@@ -15,7 +15,8 @@
           isTimeMetric, fmtDuration, metricVal, clampDur, DUR_MIN, DUR_MAX } = G;
   const { ensureRoutineExercises, getRoutines, getCurrentRoutine, getFiltered,
           getCurrentEx, getLogs, getRx, getActiveSession, summarizeSession,
-          saveState, rebuildLogIndex } = G;
+          saveState, rebuildLogIndex,
+          routineMuscleGroups, estimateRoutineMinutes, routineLastPerformed } = G;
   void roundToStep; // (kept in alias set for parity; not used directly here)
 
   // A few catalog/routine entries carry percent-encoded names (e.g.
@@ -453,8 +454,140 @@
     input.value = String(time ? clampDur(cur) : clampReps(cur));
   }
 
+  // ============================================================
+  // TODAY'S WORKOUT HERO — the page's primary entry point. Mirrors the
+  // currently pinned routine (G.state.filterRoutine, same value the routine
+  // combobox / My Routines pin already drive). The CTA click enters Workout
+  // Mode (G.setWorkoutMode(true), wired in gym-actions.js).
+  // ============================================================
+  function fmtHeroDate(ms) {
+    const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const d = new Date(ms);
+    return mons[d.getMonth()] + ' ' + d.getDate();
+  }
+
+  function renderTodayHero() {
+    const wrap = $('todayHeroWrap');
+    if (!wrap) return;
+    if (!getRoutines().length) {
+      wrap.innerHTML =
+        '<div class="po-hero-empty">No routines yet. Create one to start tracking your workouts.'
+        + '<div><button type="button" class="po-btn-primary po-hero-empty-cta" id="todayHeroCreateBtn">+ Create Routine</button></div>'
+        + '</div>';
+      return;
+    }
+    const r = getCurrentRoutine();
+    const count = (r.exercises || []).length;
+    const groups = routineMuscleGroups(r);
+    const mins = estimateRoutineMinutes(r);
+    const lastMs = routineLastPerformed(r);
+    const active = getActiveSession();
+
+    const chips = groups.length
+      ? '<div class="po-hero-chips">' + groups.map(g => '<span class="po-muscle-chip">' + escape(g) + '</span>').join('') + '</div>'
+      : '';
+    const metaParts = [
+      count + ' exercise' + (count !== 1 ? 's' : ''),
+      mins ? '~' + mins + ' min' : null,
+      lastMs ? 'Last ' + fmtHeroDate(lastMs) : 'Never trained',
+    ].filter(Boolean);
+
+    let progressHtml = '';
+    let ctaLabel;
+    if (active) {
+      const summary = summarizeSession(active);
+      progressHtml = '<div class="po-hero-progress">'
+        + summary.perEx.length + ' of ' + count + ' exercise' + (count !== 1 ? 's' : '') + ' started · '
+        + summary.totalSets + ' set' + (summary.totalSets !== 1 ? 's' : '') + ' logged'
+        + '</div>';
+      ctaLabel = 'Resume ' + r.name;
+    } else {
+      ctaLabel = 'Start ' + r.name;
+    }
+
+    wrap.innerHTML =
+      '<div class="po-hero-routine">'
+      +   '<div class="po-hero-name">' + escape(r.name) + '</div>'
+      +   chips
+      +   '<div class="po-hero-meta">' + escape(metaParts.join(' · ')) + '</div>'
+      +   progressHtml
+      + '</div>'
+      + '<button type="button" class="po-btn-primary po-hero-cta" id="todayHeroCta">' + escape(ctaLabel) + '</button>';
+  }
+
+  // ============================================================
+  // WORKOUT MODE — a client-only UI state (not persisted; a reload always
+  // lands back on the browse view). Toggled by one CSS class on .po-shell,
+  // so every existing render function keeps working unchanged; this only
+  // adds the progress/next-exercise bar and flips what's visible via CSS
+  // (see .is-workout-mode / .po-wm-secondary in gym.css).
+  // ============================================================
+  let workoutMode = false;
+  function isWorkoutMode() { return workoutMode; }
+  function setWorkoutMode(on) {
+    workoutMode = !!on;
+    const shell = document.querySelector('.po-shell');
+    if (shell) shell.classList.toggle('is-workout-mode', workoutMode);
+    const cc = $('coachCard');
+    if (!workoutMode && cc) cc.classList.remove('wm-details-open');
+    if (workoutMode) {
+      // Past workouts sets its own inline display style (independent of the
+      // .po-wm-secondary class) — force it collapsed on entry so a
+      // previously-open disclosure can't fight the Workout Mode hide rule.
+      const ptBody = $('poTwPastBody'); const ptToggle = $('poTwPastToggle');
+      if (ptBody) ptBody.style.display = 'none';
+      if (ptToggle) ptToggle.setAttribute('aria-expanded', 'false');
+    }
+    renderAll();
+    if (workoutMode) {
+      if (cc) cc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      const hero = $('todayWorkoutCard');
+      if (hero) hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+  function toggleWorkoutDetails() {
+    const cc = $('coachCard');
+    if (cc) cc.classList.toggle('wm-details-open');
+    renderWorkoutBar();
+  }
+  function renderWorkoutBar() {
+    const bar = $('wmBar');
+    if (!bar) return;
+    if (!workoutMode) { bar.innerHTML = ''; return; }
+    const r = getCurrentRoutine();
+    if (!r) { bar.innerHTML = ''; return; }
+    const filtered = getFiltered();
+    const total = filtered.length;
+    const idx = filtered.findIndex(e => e.id === G.state.currentEx);
+    const pos = idx >= 0 ? idx + 1 : (total ? 1 : 0);
+    const pct = total ? Math.round((pos / total) * 100) : 0;
+    const next = (idx >= 0 && idx + 1 < filtered.length) ? filtered[idx + 1] : null;
+    const nextLabel = next ? 'Next: ' + escape(next.name) : (total ? 'Last exercise' : '');
+    const detailsOpen = !!($('coachCard') && $('coachCard').classList.contains('wm-details-open'));
+
+    bar.innerHTML =
+      '<div class="po-wm-top">'
+      +   '<button type="button" class="po-wm-exit" id="wmExitBtn" aria-label="Exit workout mode">'
+      +     '<span class="po-wm-exit-arrow" aria-hidden="true">&larr;</span> ' + escape(r.name)
+      +   '</button>'
+      +   '<button type="button" class="po-wm-details-toggle" id="wmDetailsToggle">'
+      +     (detailsOpen ? 'Hide details' : 'Show details')
+      +   '</button>'
+      + '</div>'
+      + (total
+        ? '<div class="po-wm-progress">'
+          +   '<div class="po-wm-progress-text">Exercise ' + pos + ' of ' + total + '</div>'
+          +   '<div class="po-wm-progress-track"><div class="po-wm-progress-fill" style="width:' + pct + '%"></div></div>'
+          + '</div>'
+          + (nextLabel ? '<div class="po-wm-next">' + nextLabel + '</div>' : '')
+        : '');
+  }
+
   function renderAll() {
     ensureRoutineExercises();
+    renderTodayHero();
+    renderWorkoutBar();
     renderFilters(); renderSelect(); renderForm(); renderLastSet();
     renderExGif();
     renderRepsRow();
@@ -1112,6 +1245,8 @@
   Object.assign(G, {
     renderAll, renderHistory, renderSettings,
     renderTodaysWorkout, renderPastWorkouts,
+    renderTodayHero, renderWorkoutBar,
+    isWorkoutMode, setWorkoutMode, toggleWorkoutDetails,
     photosRender, pcReloadPhotos
   });
 })();

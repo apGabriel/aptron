@@ -151,9 +151,33 @@ const CONFIG = {
     </button>
   </div>
 
-  <div class="card">
+  <!-- TODAY'S WORKOUT — routine-first entry point. Fully rendered by
+       renderTodayHero() in gym-ui.js (called from renderAll()), same pattern
+       as #rxWrap below. -->
+  <div class="card" id="todayWorkoutCard">
+    <div class="po-sub-title">Today's Workout</div>
+    <div id="todayHeroWrap"></div>
+  </div>
+
+  <!-- MY ROUTINES — primary CRUD surface for routines. List + row actions
+       rendered by renderMyRoutines() in gym-routine-builder.js (relocated
+       from the old #rbSavedList footer of the Routine Builder card below).
+       "+ Create Routine" is always visible per the routine-first redesign. -->
+  <div class="card" id="myRoutinesCard">
+    <div class="po-sub-title">My Routines</div>
+    <ul class="rb-saved-list" id="myRoutinesList"></ul>
+    <div class="rb-saved-empty" id="myRoutinesEmpty">No routines yet — create your first one below.</div>
+    <button class="po-btn-primary rb-create-routine-btn" id="myRoutinesCreateBtn" type="button">+ Create Routine</button>
+  </div>
+
+  <div class="card" id="coachCard">
+    <!-- WORKOUT MODE bar — hidden outside Workout Mode (CSS: .is-workout-mode
+         on .po-shell). Fully rendered by renderWorkoutBar() in gym-ui.js
+         (called from renderAll()), same wrap-div pattern as #rxWrap below. -->
+    <div class="po-wm-bar" id="wmBar"></div>
+
     <!-- Filters -->
-    <div class="po-filters">
+    <div class="po-filters po-wm-secondary">
       <div class="po-seg-row">
         <span class="po-seg-label">Gym</span>
         <div class="po-seg-control" id="gymSeg"></div>
@@ -228,7 +252,7 @@ const CONFIG = {
     </div>
 
     <!-- Stats -->
-    <div class="po-sub-section">
+    <div class="po-sub-section po-wm-secondary">
       <div class="po-sub-title">Stats</div>
       <!-- PR / Personal Record — heaviest set ever logged for this exercise -->
       <div class="po-pr-box">
@@ -252,7 +276,7 @@ const CONFIG = {
     </div>
 
     <!-- Trend -->
-    <div class="po-sub-section">
+    <div class="po-sub-section po-wm-secondary">
       <div class="po-sub-title">Trend (last 10 sessions)</div>
       <div class="po-spark-wrap">
         <svg class="po-spark-svg" id="sparkline" viewBox="0 0 300 60" preserveAspectRatio="none">
@@ -268,7 +292,7 @@ const CONFIG = {
     </div>
 
     <!-- History -->
-    <div class="po-sub-section">
+    <div class="po-sub-section po-wm-secondary">
       <div class="po-sub-title po-hist-head">
         <span>History</span>
         <!-- Only dates this exercise was actually logged appear here.
@@ -282,11 +306,12 @@ const CONFIG = {
       </div>
     </div>
 
-    <!-- Today's Workout — every set logged today, grouped by exercise.
+    <!-- Session log — every set logged today, grouped by exercise.
          "Mark done" stamps the day so the past-workouts list shows it
-         as a completed session. -->
+         as a completed session. Named distinctly from the page-level
+         "Today's Workout" hero above (routine selection vs. logged sets). -->
     <div class="po-sub-section">
-      <div class="po-sub-title">Today's workout</div>
+      <div class="po-sub-title">Session log</div>
       <div class="po-tw" id="poTw">
         <div class="po-tw-head">
           <div>
@@ -305,11 +330,11 @@ const CONFIG = {
         <div class="po-tw-empty" id="poTwEmpty">No active session — log a set to start one, or tap “New session”.</div>
       </div>
 
-      <button type="button" class="po-tw-past-toggle" id="poTwPastToggle" aria-expanded="false">
+      <button type="button" class="po-tw-past-toggle po-wm-secondary" id="poTwPastToggle" aria-expanded="false">
         <span>Past workouts <span class="po-tw-past-count" id="poTwPastCount">0</span></span>
         <span class="po-tw-past-arrow" id="poTwPastArrow">▾</span>
       </button>
-      <div class="po-tw-past-body" id="poTwPastBody" style="display:none"></div>
+      <div class="po-tw-past-body po-wm-secondary" id="poTwPastBody" style="display:none"></div>
     </div>
   </div>
 
@@ -742,10 +767,6 @@ const CONFIG = {
       <button class="po-btn-secondary" id="rbClearBtn" type="button">Clear</button>
       <button class="po-btn-primary" id="rbSaveBtn" type="button">Save routine</button>
     </div>
-
-    <div class="po-sub-title" style="margin-top:26px">Saved routines</div>
-    <ul class="rb-saved-list" id="rbSavedList"></ul>
-    <div class="rb-saved-empty" id="rbSavedEmpty">No saved routines yet.</div>
   </div>
 </div>
 

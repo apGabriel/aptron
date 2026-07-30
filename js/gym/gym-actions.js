@@ -16,6 +16,7 @@
           startNewSession, dedupSessionSets, rebuildLogIndex, saveState, loadState,
           normalize, LS_KEY } = G;
   const { renderAll, renderHistory, renderSettings, renderTodaysWorkout, renderPastWorkouts } = G;
+  const { isWorkoutMode, setWorkoutMode, toggleWorkoutDetails } = G;
 
   // ============================================================
   // CURRENT SESSION + PAST WORKOUTS — interaction
@@ -44,6 +45,9 @@
     if (!getActiveSession()) return;
     closeActiveSession();
     saveState();
+    // Finishing the workout naturally exits Workout Mode back to the
+    // (now-updated) hero — setWorkoutMode() already re-renders everything.
+    if (isWorkoutMode()) { setWorkoutMode(false); return; }
     renderTodaysWorkout();
     renderPastWorkouts();
   });
@@ -70,6 +74,43 @@
   // Keep the routine selector live: when the Routine Builder saves / edits /
   // deletes a routine, re-render so the segment control reflects it instantly.
   window.addEventListener('rb:routines-changed', () => { saveState(); renderAll(); });
+
+  // "My Routines" (Routine Builder module) dispatches this when a routine
+  // row is tapped — pins it as current, mirroring what the routine
+  // combobox already does on selection.
+  window.addEventListener('rb:select-routine', (e) => {
+    const id = e.detail && e.detail.id;
+    if (!id) return;
+    G.state.filterRoutine = id;
+    G.state.currentEx = null;
+    saveState();
+    renderAll();
+  });
+
+  // Today's Workout hero — content is fully re-rendered by renderTodayHero(),
+  // so its CTA is wired via delegation on the stable card wrapper. Both the
+  // Start/Resume button and the empty-state "+ Create Routine" button live
+  // here, and "+ Create Routine" mirrors the #rbClearBtn reset so it opens a
+  // blank routine in the builder below.
+  $('todayWorkoutCard').addEventListener('click', (e) => {
+    if (e.target.closest('#todayHeroCta')) {
+      setWorkoutMode(true);
+      return;
+    }
+    if (e.target.closest('#todayHeroCreateBtn')) {
+      const createBtn = $('myRoutinesCreateBtn');
+      if (createBtn) createBtn.click();
+    }
+  });
+
+  // Workout Mode bar — content is fully re-rendered by renderWorkoutBar(),
+  // so its controls are wired via delegation on the stable wrap div. Exit
+  // returns to the browse view without ending the session; Show/Hide
+  // details reveals the collapsed Stats/Trend/History/Filters/Past-workouts.
+  $('wmBar').addEventListener('click', (e) => {
+    if (e.target.closest('#wmExitBtn')) { setWorkoutMode(false); return; }
+    if (e.target.closest('#wmDetailsToggle')) { toggleWorkoutDetails(); }
+  });
 
   $('exSelect').addEventListener('change', e => {
     G.state.currentEx = e.target.value;

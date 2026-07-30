@@ -267,6 +267,41 @@
       .filter(Boolean)
       .filter(e => e.gym === G.state.filterGym || e.gym === 'both');
   }
+  // ── Routine-stat pure helpers (Hero card) ──────────────────────
+  // Everything here is derived from data already on the routine / log index
+  // — no new storage. Mirrored (deliberately, small) in
+  // gym-routine-builder.js for the My Routines list, which never reaches
+  // into window.GymApp — see that file's header comment.
+  function routineMuscleGroups(r) {
+    const seen = []; const has = {};
+    (r.exercises || []).forEach(it => {
+      if (it.muscleGroup && !has[it.muscleGroup]) { has[it.muscleGroup] = true; seen.push(it.muscleGroup); }
+    });
+    return seen;
+  }
+  // Rough estimate only (~work time per set + configured rest between sets)
+  // — always presented with a "~" prefix so it reads as a heuristic.
+  function estimateRoutineMinutes(r) {
+    let totalSets = 0;
+    (r.exercises || []).forEach(it => { totalSets += Array.isArray(it.sets) ? it.sets.length : 0; });
+    if (!totalSets) return 0;
+    const restSec = (r.restEnabled && r.rest) ? r.rest : 60;
+    const workSec = 40;
+    return Math.max(5, Math.round((totalSets * workSec + Math.max(0, totalSets - 1) * restSec) / 60));
+  }
+  // Latest logged date (epoch ms) across every exercise in the routine, or
+  // null if it's never been logged. Reads the already-built log index.
+  function routineLastPerformed(r) {
+    let latest = 0;
+    (r.exercises || []).forEach(it => {
+      (G.state.logs['rt_' + it.exId] || []).forEach(l => {
+        const t = Date.parse(l.date);
+        if (t && t > latest) latest = t;
+      });
+    });
+    return latest || null;
+  }
+
   function getCurrentEx() {
     const f = getFiltered();
     if (!f.length) return null;
@@ -363,6 +398,7 @@
     uidSession, buildLogIndex, rebuildLogIndex, logSetKey, dedupSessionSets, migrateSessions,
     currentSessionLabel, getActiveSession, ensureActiveSession, closeActiveSession,
     startNewSession, summarizeSession,
-    getRoutines, getCurrentRoutine, ensureRoutineExercises, getFiltered, getCurrentEx, getLogs, getRestSeconds, getRx
+    getRoutines, getCurrentRoutine, ensureRoutineExercises, getFiltered, getCurrentEx, getLogs, getRestSeconds, getRx,
+    routineMuscleGroups, estimateRoutineMinutes, routineLastPerformed
   });
 })();
