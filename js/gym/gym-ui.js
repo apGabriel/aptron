@@ -16,7 +16,8 @@
   const { ensureRoutineExercises, getRoutines, getCurrentRoutine, getFiltered,
           getCurrentEx, getLogs, getRx, getActiveSession, summarizeSession,
           saveState, rebuildLogIndex,
-          routineMuscleGroups, estimateRoutineMinutes, routineLastPerformed } = G;
+          routineMuscleGroups, estimateRoutineMinutes, routineLastPerformed,
+          computeStreak, nextPlannedRoutine } = G;
   void roundToStep; // (kept in alias set for parity; not used directly here)
 
   // A few catalog/routine entries carry percent-encoded names (e.g.
@@ -87,7 +88,7 @@
     const routines = getRoutines();
     if (!routines.length) {
       daySeg.className = 'po-seg-control';
-      daySeg.innerHTML = '<span class="po-seg-empty">No routines yet — build one in the <strong>Routine Builder</strong> below to start logging.</span>';
+      daySeg.innerHTML = '<span class="po-seg-empty">No plans yet — create one in <strong>Workout Plans</strong> to start logging.</span>';
       comboElemsBound = false;
       return;
     }
@@ -147,9 +148,11 @@
       sel.innerHTML = '<option>—</option>';
       sel.disabled = true; editBtn.disabled = true; logBtn.disabled = true;
       noMsg.innerHTML = getRoutines().length
-        ? 'This routine has no exercises yet.'
-        : 'No routines yet. Create one in the <strong>Routine Builder</strong> below, then pick it above.';
+        ? 'This plan has no exercises yet.'
+        : 'No plans yet. Create one in <strong>Workout Plans</strong>, then pick it above.';
       noMsg.style.display = 'block'; G.state.currentEx = null;
+      if ($('curExName')) $('curExName').textContent = '—';
+      if ($('curExMuscle')) $('curExMuscle').textContent = '';
       return;
     }
     sel.disabled = false; editBtn.disabled = false; logBtn.disabled = false;
@@ -160,6 +163,13 @@
       const sh = e.gym === 'both' ? ' ★' : '';
       return '<option value="' + e.id + '"' + (e.id === G.state.currentEx ? ' selected' : '') + '>' + escape(decodeName(e.name)) + wLbl + sh + '</option>';
     }).join('');
+    // Current Exercise card's name/muscle heading (Goal 3 — Session
+    // Experience, 2026-08-02) — same exercise object #exSelect already
+    // reads, just also surfaced as a prominent heading instead of only an
+    // <option> label.
+    const cur = f.find(e => e.id === G.state.currentEx);
+    if ($('curExName')) $('curExName').textContent = cur ? decodeName(cur.name) : '—';
+    if ($('curExMuscle')) $('curExMuscle').textContent = cur ? cur.muscleGroup : '';
   }
   function renderForm() {
     const ex = getCurrentEx();
@@ -215,7 +225,7 @@
   function renderRx() {
     const wrap = $('rxWrap');
     const ex = getCurrentEx();
-    if (!ex) { wrap.innerHTML = '<div class="po-rx-empty">' + (getRoutines().length ? 'Pick a routine above.' : 'Create a routine in the Routine Builder below to get started.') + '</div>'; return; }
+    if (!ex) { wrap.innerHTML = '<div class="po-rx-empty">' + (getRoutines().length ? 'Pick a routine above.' : 'Create a plan in Workout Plans to get started.') + '</div>'; return; }
     const logs = getLogs();
     const time = isTimeMetric(ex);
     const rx = getRx(ex, logs);
@@ -465,14 +475,21 @@
     const d = new Date(ms);
     return mons[d.getMonth()] + ' ' + d.getDate();
   }
+  const DAY_LABELS = { sun: 'Sun', mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat' };
 
+  // Primary block stays calm and short: name, muscle groups, exercise count
+  // + duration, one dominant CTA — nothing else competes. Everything else
+  // (streak, last-completed, next-planned, resumed progress) moves into a
+  // single, visually quiet context line below it.
   function renderTodayHero() {
     const wrap = $('todayHeroWrap');
     if (!wrap) return;
     if (!getRoutines().length) {
       wrap.innerHTML =
-        '<div class="po-hero-empty">No routines yet. Create one to start tracking your workouts.'
-        + '<div><button type="button" class="po-btn-primary po-hero-empty-cta" id="todayHeroCreateBtn">+ Create Routine</button></div>'
+        '<div class="po-hero-empty">'
+        +   '<div class="po-hero-empty-icon" aria-hidden="true">🏋️</div>'
+        +   'Build your first plan to start tracking workouts.'
+        +   '<div><button type="button" class="po-btn-primary po-hero-empty-cta" id="todayHeroCreateBtn">+ Create Plan</button></div>'
         + '</div>';
       return;
     }
@@ -480,7 +497,6 @@
     const count = (r.exercises || []).length;
     const groups = routineMuscleGroups(r);
     const mins = estimateRoutineMinutes(r);
-    const lastMs = routineLastPerformed(r);
     const active = getActiveSession();
 
     const chips = groups.length
@@ -489,30 +505,37 @@
     const metaParts = [
       count + ' exercise' + (count !== 1 ? 's' : ''),
       mins ? '~' + mins + ' min' : null,
-      lastMs ? 'Last ' + fmtHeroDate(lastMs) : 'Never trained',
     ].filter(Boolean);
+    const ctaLabel = active ? 'Resume ' + r.name : 'Start ' + r.name;
 
-    let progressHtml = '';
-    let ctaLabel;
+    let contextText;
     if (active) {
       const summary = summarizeSession(active);
-      progressHtml = '<div class="po-hero-progress">'
-        + summary.perEx.length + ' of ' + count + ' exercise' + (count !== 1 ? 's' : '') + ' started · '
-        + summary.totalSets + ' set' + (summary.totalSets !== 1 ? 's' : '') + ' logged'
-        + '</div>';
-      ctaLabel = 'Resume ' + r.name;
+      contextText = 'Workout resumed · ' + summary.perEx.length + ' of ' + count
+        + ' exercise' + (count !== 1 ? 's' : '') + ' started · '
+        + summary.totalSets + ' set' + (summary.totalSets !== 1 ? 's' : '') + ' logged';
     } else {
-      ctaLabel = 'Start ' + r.name;
+      const parts = [];
+      const streak = computeStreak();
+      if (streak >= 2) parts.push(streak + '-day streak');
+      const lastMs = routineLastPerformed(r);
+      parts.push(lastMs ? 'Last ' + fmtHeroDate(lastMs) : 'Never trained');
+      const next = nextPlannedRoutine();
+      if (next && next.routine.id !== r.id) {
+        parts.push('Next: ' + next.routine.name + ' ' + (next.inDays === 1 ? 'tomorrow' : DAY_LABELS[next.code]));
+      }
+      contextText = parts.join(' · ');
     }
+    const contextHtml = contextText ? '<div class="po-hero-context">' + escape(contextText) + '</div>' : '';
 
     wrap.innerHTML =
       '<div class="po-hero-routine">'
       +   '<div class="po-hero-name">' + escape(r.name) + '</div>'
       +   chips
       +   '<div class="po-hero-meta">' + escape(metaParts.join(' · ')) + '</div>'
-      +   progressHtml
       + '</div>'
-      + '<button type="button" class="po-btn-primary po-hero-cta" id="todayHeroCta">' + escape(ctaLabel) + '</button>';
+      + '<button type="button" class="po-btn-primary po-hero-cta" id="todayHeroCta">' + escape(ctaLabel) + '</button>'
+      + contextHtml;
   }
 
   // ============================================================
@@ -551,37 +574,156 @@
     if (cc) cc.classList.toggle('wm-details-open');
     renderWorkoutBar();
   }
+
+  // ── Elapsed-time tick (Gym Polish pass, 2026-08-02) ────────────
+  // Pure presentation over the session model's existing `startedAt` — no new
+  // state, nothing persisted. Re-queries the DOM each tick instead of
+  // caching the node, so it stays correct across renderWorkoutBar()'s own
+  // full innerHTML rebuilds (e.g. after every logged set).
+  let wmTimerHandle = null;
+  function stopWmTimer() { if (wmTimerHandle) { clearInterval(wmTimerHandle); wmTimerHandle = null; } }
+  function startWmTimer() {
+    if (wmTimerHandle) return;
+    wmTimerHandle = setInterval(() => {
+      const el = document.getElementById('wmElapsed');
+      const active = getActiveSession();
+      if (!el || !active) { stopWmTimer(); return; }
+      const secs = Math.max(0, Math.floor((Date.now() - Date.parse(active.startedAt)) / 1000));
+      el.textContent = fmtDuration(secs);
+    }, 1000);
+  }
+
+  // Position + next-exercise lookup, shared by renderWorkoutBar() (the
+  // progress line's "Next: …") and renderNextExercise() (the standalone
+  // preview card) — one derivation, two presentations (Goal 3 — Session
+  // Experience, 2026-08-02; "do not duplicate logic").
+  function currentExerciseProgress() {
+    const filtered = getFiltered();
+    const total = filtered.length;
+    // getCurrentEx() (not a raw G.state.currentEx read) — self-healing
+    // accessor renderForm()/renderSelect() already call; see the Gym Polish
+    // pass note this replaced (a raw-state read here previously showed no
+    // name and a wrong "Last exercise" label on every fresh workout start).
+    const cur = getCurrentEx();
+    const idx = cur ? filtered.findIndex(e => e.id === cur.id) : -1;
+    const pos = idx >= 0 ? idx + 1 : (total ? 1 : 0);
+    const curName = idx >= 0 ? filtered[idx].name : null;
+    const next = (idx >= 0 && idx + 1 < filtered.length) ? filtered[idx + 1] : null;
+    return { filtered, total, idx, pos, curName, next };
+  }
+
   function renderWorkoutBar() {
     const bar = $('wmBar');
     if (!bar) return;
-    if (!workoutMode) { bar.innerHTML = ''; return; }
+    if (!workoutMode) { bar.innerHTML = ''; stopWmTimer(); return; }
     const r = getCurrentRoutine();
-    if (!r) { bar.innerHTML = ''; return; }
-    const filtered = getFiltered();
-    const total = filtered.length;
-    const idx = filtered.findIndex(e => e.id === G.state.currentEx);
-    const pos = idx >= 0 ? idx + 1 : (total ? 1 : 0);
+    if (!r) { bar.innerHTML = ''; stopWmTimer(); return; }
+    const { total, pos, curName, next } = currentExerciseProgress();
     const pct = total ? Math.round((pos / total) * 100) : 0;
-    const next = (idx >= 0 && idx + 1 < filtered.length) ? filtered[idx + 1] : null;
     const nextLabel = next ? 'Next: ' + escape(next.name) : (total ? 'Last exercise' : '');
     const detailsOpen = !!($('coachCard') && $('coachCard').classList.contains('wm-details-open'));
+    const active = getActiveSession();
+    const elapsed = active ? fmtDuration(Math.max(0, Math.floor((Date.now() - Date.parse(active.startedAt)) / 1000))) : '0:00';
 
+    // Top row communicates "you're training now" at a glance: Exit (leaves
+    // the UI, session stays open) is deliberately lighter-weight than
+    // Finish (ends the session) — the two are NOT the same action, so both
+    // being visible isn't the duplicated-control principle 2 warns about.
     bar.innerHTML =
       '<div class="po-wm-top">'
       +   '<button type="button" class="po-wm-exit" id="wmExitBtn" aria-label="Exit workout mode">'
       +     '<span class="po-wm-exit-arrow" aria-hidden="true">&larr;</span> ' + escape(r.name)
       +   '</button>'
-      +   '<button type="button" class="po-wm-details-toggle" id="wmDetailsToggle">'
-      +     (detailsOpen ? 'Hide details' : 'Show details')
-      +   '</button>'
+      +   '<div class="po-wm-elapsed" id="wmElapsed" title="Time in this workout">' + elapsed + '</div>'
+      +   '<button type="button" class="po-wm-finish" id="wmFinishBtn"' + (active ? '' : ' disabled') + '>Finish</button>'
       + '</div>'
       + (total
         ? '<div class="po-wm-progress">'
-          +   '<div class="po-wm-progress-text">Exercise ' + pos + ' of ' + total + '</div>'
+          +   '<div class="po-wm-progress-text">Exercise ' + pos + ' of ' + total + (curName ? ' — ' + escape(curName) : '') + '</div>'
           +   '<div class="po-wm-progress-track"><div class="po-wm-progress-fill" style="width:' + pct + '%"></div></div>'
           + '</div>'
           + (nextLabel ? '<div class="po-wm-next">' + nextLabel + '</div>' : '')
-        : '');
+        : '')
+      // Secondary, text-link weight — Finish is the bar's one prominent
+      // action, this is just a disclosure toggle.
+      + '<button type="button" class="po-wm-details-toggle" id="wmDetailsToggle">'
+      +   (detailsOpen ? 'Hide details' : 'Show details')
+      + '</button>';
+
+    if (active) startWmTimer(); else stopWmTimer();
+  }
+
+  // Single-exercise preview (Goal 3 — Session Experience, 2026-08-02) — "the
+  // user should think about ONE exercise at a time," so this shows only the
+  // next exercise, never the whole routine. Reuses currentExerciseProgress()
+  // (the exact same lookup the wmBar's "Next: …" line uses) and decodeName()/
+  // escape() already used throughout this file. Tapping it advances exactly
+  // like picking it in #exSelect — same G.state.currentEx write, wired in
+  // gym-actions.js.
+  function renderNextExercise() {
+    const card = $('nextExCard');
+    const btn = $('nextExBtn');
+    if (!card || !btn) return;
+    if (!workoutMode) { card.style.display = 'none'; return; }
+    const { next } = currentExerciseProgress();
+    if (!next) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    btn.dataset.exId = next.id;
+    const thumb = next.gifUrl
+      ? '<img class="po-next-ex-thumb" src="' + decodeName(next.gifUrl) + '" alt="" loading="lazy">'
+      : '<div class="po-next-ex-thumb"></div>';
+    btn.innerHTML = thumb
+      + '<div class="po-next-ex-info">'
+      +   '<div class="po-next-ex-name">' + escape(decodeName(next.name)) + '</div>'
+      +   '<div class="po-next-ex-muscle">' + escape(next.muscleGroup || '') + '</div>'
+      + '</div>'
+      + '<span class="po-next-ex-arrow" aria-hidden="true">&rarr;</span>';
+  }
+
+  // Workout Summary overlay (Goal 3 — Session Experience, 2026-08-02).
+  // `summary` is buildWorkoutSummary()'s output (gym-storage.js) — this
+  // function only formats it; every number in it was already computed by
+  // existing engines (summarizeSession, G.state.logs, getRx). Opened by
+  // finishWorkout() (gym-actions.js) right after closing the session.
+  function statBox(label, val) {
+    return '<div class="po-summary-stat">'
+      +   '<div class="po-summary-stat-val">' + val + '</div>'
+      +   '<div class="po-summary-stat-label">' + label + '</div>'
+      + '</div>';
+  }
+  function openWorkoutSummary(summary) {
+    const body = $('summaryBody');
+    if (!body) return;
+    const u = unit();
+    $('summaryTitle').textContent = escape(summary.routineName) + ' — Complete';
+
+    const prsHtml = summary.prs.length
+      ? '<div class="po-summary-prs">' + summary.prs.map((p) =>
+          '<div class="po-summary-pr">🏆 New PR — ' + escape(p.name) + ' · ' + (p.bw ? p.weight + ' reps' : p.weight + u) + '</div>'
+        ).join('') + '</div>'
+      : '';
+    const recsHtml = summary.recs.length
+      ? '<div class="po-sub-title" style="margin-top:22px">Next time</div>'
+        + '<div class="po-summary-recs">' + summary.recs.map((r) =>
+            '<div class="po-summary-rec">'
+            +   '<div class="po-summary-rec-name">' + escape(decodeName(r.name)) + '</div>'
+            +   '<div class="po-summary-rec-tag">' + escape(r.rx.tag) + '</div>'
+            +   '<div class="po-summary-rec-reason">' + escape(r.rx.reason) + '</div>'
+            + '</div>'
+          ).join('') + '</div>'
+      : '';
+
+    body.innerHTML =
+      '<div class="po-summary-stats">'
+      +   statBox('Duration', fmtDuration(summary.durationSec))
+      +   statBox('Volume', summary.totalVolume.toLocaleString() + u)
+      +   statBox('Exercises', String(summary.exerciseCount))
+      + '</div>'
+      + prsHtml
+      + recsHtml;
+
+    $('workoutSummaryOverlay').classList.add('is-open');
+    $('workoutSummaryOverlay').setAttribute('aria-hidden', 'false');
   }
 
   function renderAll() {
@@ -592,6 +734,7 @@
     renderExGif();
     renderRepsRow();
     renderRx(); renderStats(); renderPr(); renderSparkline(); renderHistory();
+    renderNextExercise();
     renderTodaysWorkout();
     renderPastWorkouts();
     // Pre-fill weight input with last logged weight (or starting weight)
@@ -658,7 +801,6 @@
     const eyebrow = $('poTwDateLabel');
     const list = $('poTwList');
     const empty = $('poTwEmpty');
-    const btn = $('poTwDoneBtn');
     const dows = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
     const mons = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
@@ -668,9 +810,6 @@
       list.innerHTML = '';
       empty.classList.remove('hidden');
       empty.textContent = 'No active session — log a set to start one, or tap “New session”.';
-      btn.textContent = 'Mark done';
-      btn.classList.remove('is-done');
-      btn.disabled = true; btn.style.opacity = '0.4';
       return;
     }
 
@@ -688,11 +827,6 @@
       empty.classList.add('hidden');
       list.innerHTML = sum.perEx.map(e => twRowHtml(e, u)).join('');
     }
-
-    btn.textContent = '✓ Mark done';
-    btn.classList.remove('is-done');
-    btn.disabled = sum.totalSets === 0;
-    btn.style.opacity = btn.disabled ? '0.4' : '';
   }
 
   // ── Past-workouts calendar ────────────────────────────────────
@@ -1247,6 +1381,7 @@
     renderTodaysWorkout, renderPastWorkouts,
     renderTodayHero, renderWorkoutBar,
     isWorkoutMode, setWorkoutMode, toggleWorkoutDetails,
+    openWorkoutSummary,
     photosRender, pcReloadPhotos
   });
 })();

@@ -114,7 +114,7 @@ img, video, canvas, svg { max-width: 100%; }
 }
 
 /* ----- Sub-section title ----- */
-.po-sub-section { margin-top: 22px; }
+.po-sub-section { margin-top: 18px; }
 .po-sub-section:first-child { margin-top: 0; }
 .po-sub-title {
   display: flex; align-items: center; gap: 8px;
@@ -125,6 +125,47 @@ img, video, canvas, svg { max-width: 100%; }
 .po-sub-title::before {
   content: ''; width: 24px; height: 1px; background: var(--border-strong);
 }
+
+/* ----- Current Exercise card (Goal 3 — Session Experience, 2026-08-02) -----
+   Name is the dominant element; #exSelect (still the same dropdown) is
+   demoted into a small "switch exercise" cluster instead of the primary
+   navigation surface — Next Exercise (below) is primary now. */
+.po-cur-ex-head {
+  display: flex; flex-wrap: wrap; align-items: flex-start;
+  justify-content: space-between; gap: 10px; margin-bottom: 14px;
+}
+.po-cur-ex-id { min-width: 0; }
+.po-cur-ex-name {
+  font-size: 22px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2;
+  margin-top: 4px;
+}
+.po-cur-ex-muscle {
+  font-size: 11px; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px;
+}
+.po-cur-ex-switch { display: flex; gap: 6px; flex-shrink: 0; max-width: 150px; }
+.po-cur-ex-switch .po-ex-select { flex: 1 1 auto; min-width: 64px; padding: 8px 24px 8px 10px; font-size: 12px; }
+.po-cur-ex-switch .po-btn-icon { width: 36px; height: 36px; min-width: 36px; }
+
+/* ----- Next Exercise preview (single card, not the whole routine) ----- */
+.po-next-ex {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  border-radius: 14px; padding: 10px 12px; cursor: pointer;
+  font-family: inherit; text-align: left; color: var(--text-1);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.po-next-ex:hover { background: rgba(255,255,255,0.06); border-color: var(--border-strong); }
+.po-next-ex:active { transform: scale(0.99); }
+.po-next-ex-thumb {
+  width: 44px; height: 44px; border-radius: 10px; object-fit: contain;
+  background: rgba(255,255,255,0.05); flex-shrink: 0;
+}
+.po-next-ex-info { min-width: 0; flex: 1 1 auto; }
+.po-next-ex-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.po-next-ex-muscle { font-size: 10.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+.po-next-ex-arrow { flex-shrink: 0; color: var(--text-3); font-size: 18px; }
 
 /* ----- Exercise picker ----- */
 .po-exercise-bar { display: flex; gap: 8px; align-items: center; }
@@ -375,6 +416,38 @@ img, video, canvas, svg { max-width: 100%; }
   font-variant-numeric: tabular-nums;
 }
 .po-unit { font-size: 11px; color: var(--text-3); font-weight: 500; margin-left: 2px; }
+
+/* ----- Workout Summary (Goal 3 — Session Experience, 2026-08-02) -----
+   Deliberately mirrors the existing Stats/PR visual language (.po-stat-box,
+   .po-pr-box) instead of inventing a new one — same grid, same green PR
+   treatment, same card rhythm. */
+.po-summary-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px;
+}
+.po-summary-stat {
+  padding: 14px 10px; background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border); border-radius: 12px; text-align: center;
+}
+.po-summary-stat-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.po-summary-stat-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-3); margin-top: 4px;
+}
+.po-summary-prs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.po-summary-pr {
+  padding: 12px 14px; font-size: 13.5px; font-weight: 700;
+  background: linear-gradient(180deg, rgba(110,231,183,0.10) 0%, rgba(110,231,183,0.03) 100%);
+  border: 1px solid rgba(110,231,183,0.28); border-radius: 12px; color: var(--good);
+}
+.po-summary-recs { display: flex; flex-direction: column; gap: 8px; }
+.po-summary-rec {
+  padding: 12px 14px; background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border); border-radius: 12px;
+}
+.po-summary-rec-name { font-size: 13px; font-weight: 700; }
+.po-summary-rec-tag { font-size: 11px; font-weight: 700; color: var(--accent); margin-top: 4px; }
+.po-summary-rec-reason { font-size: 12px; color: var(--text-3); margin-top: 3px; line-height: 1.4; }
+.po-summary-done { width: 100%; margin-top: 24px; }
 
 /* ----- Active exercise GIF ----- */
 .po-ex-gif {
@@ -630,21 +703,6 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .po-tw-summary-label {
   font-size: 12px; color: var(--text-3); font-weight: 500;
-}
-.po-tw-done-btn {
-  background: var(--cta-grad);
-  color: var(--cta-ink); border: none; border-radius: 999px;
-  padding: 9px 16px;
-  font-family: inherit; font-size: 12px; font-weight: 700;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  white-space: nowrap;
-}
-.po-tw-done-btn:hover { transform: translateY(-1px); }
-.po-tw-done-btn:active { transform: scale(0.98); }
-.po-tw-done-btn.is-done {
-  background: rgba(110,231,183,0.16);
-  color: var(--good);
 }
 .po-tw-actions { display: flex; gap: 8px; align-items: center; }
 .po-tw-new-btn {
@@ -1020,7 +1078,7 @@ img, video, canvas, svg { max-width: 100%; }
   border-radius: 999px;
 }
 .mm-toggle-btn {
-  padding: 5px 14px; border: none; background: transparent;
+  padding: 11px 16px; border: none; background: transparent;
   color: var(--text-3); font-family: inherit; font-size: 12px; font-weight: 700;
   border-radius: 999px; cursor: pointer; -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s;
@@ -1103,6 +1161,13 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-lib-empty, .rb-routine-empty, .rb-saved-empty {
   font-size: 13px; color: var(--text-3); padding: 14px 4px; text-align: center; line-height: 1.5;
 }
+.rb-empty-clear {
+  display: block; margin: 10px auto 0; padding: 8px 16px;
+  background: transparent; border: 1px solid var(--border); color: var(--text-1);
+  border-radius: 999px; font-family: inherit; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.rb-empty-clear:hover { background: rgba(255,255,255,0.06); }
 
 .rb-name-input {
   width: 100%; padding: 12px 14px; border: 1px solid var(--border);
@@ -1111,6 +1176,25 @@ img, video, canvas, svg { max-width: 100%; }
 }
 .rb-name-input:focus { outline: none; border-color: rgba(255,255,255,0.40); box-shadow: 0 0 0 3px rgba(255,255,255,0.06); }
 .rb-name-input::placeholder { color: var(--text-4); font-weight: 500; }
+
+/* ----- Lightweight routine creation flow (3 steps) ----- */
+.rb-create-step label { display: block; margin-bottom: 10px; }
+#rbCreateStep1 .rb-name-input { margin-top: 6px; }
+.rb-create-optional { text-transform: none; font-weight: 500; color: var(--text-4); letter-spacing: 0; }
+.rb-create-pills, .rb-create-days { display: flex; flex-wrap: wrap; gap: 8px; }
+.rb-create-pill, .rb-create-day {
+  padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+  color: var(--text-2); font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.rb-create-day { padding: 10px 12px; min-width: 46px; text-align: center; }
+.rb-create-pill:hover, .rb-create-day:hover { border-color: var(--border-strong); }
+.rb-create-pill.active, .rb-create-day.active { background: var(--cta-grad); color: var(--cta-ink); border-color: transparent; }
+.rb-create-dots { display: flex; justify-content: center; gap: 6px; margin-top: 20px; }
+.rb-create-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--border-strong); }
+.rb-create-dot.is-active { background: var(--text-1); }
 
 .rb-routine-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .rb-row {
@@ -1129,7 +1213,7 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-row-controls { display: flex; flex-direction: column; gap: 4px; }
 .rb-mini {
   background: transparent; border: 1px solid var(--border); color: var(--text-3);
-  border-radius: 6px; cursor: pointer; width: 28px; height: 22px; font-size: 12px;
+  border-radius: 8px; cursor: pointer; width: 36px; height: 32px; font-size: 13px;
   font-family: inherit; -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
@@ -1246,38 +1330,105 @@ img, video, canvas, svg { max-width: 100%; }
 .rb-routine-actions .po-btn-primary { flex: 2; }
 .rb-routine-actions .po-btn-secondary { flex: 1; }
 
-.rb-saved-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+/* Routine cards — whitespace-led (Notion-style), not bordered boxes. Rows
+   are separated by a hairline divider + generous padding rather than a
+   card border; hover/current add only a soft background tint. */
+.rb-saved-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .rb-saved-row {
-  display: flex; align-items: flex-start; gap: 10px; padding: 14px;
-  border: 1px solid var(--border); background: rgba(255,255,255,0.025); border-radius: 12px;
+  display: flex; align-items: flex-start; gap: 10px; padding: 16px 8px;
+  border-radius: 12px; background: transparent;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background 0.15s;
 }
-.rb-saved-row { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
-.rb-saved-actions { margin-top: 2px; }
-.rb-saved-row:hover { border-color: var(--border-strong); }
-.rb-saved-row.is-current { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.045); }
+.rb-saved-row:last-child { border-bottom: none; }
+.rb-saved-row:hover { background: rgba(255,255,255,0.03); }
+.rb-saved-row.is-current { background: rgba(255,255,255,0.05); }
 .rb-saved-info { flex: 1; min-width: 0; }
 .rb-saved-name-row { display: flex; align-items: center; gap: 8px; }
-.rb-saved-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rb-saved-name { font-size: 14.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rb-saved-current-badge {
   flex-shrink: 0; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--cta-ink); background: var(--cta-grad);
   border-radius: 999px; padding: 2px 8px;
 }
-.rb-saved-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
-.rb-saved-meta { font-size: 11.5px; color: var(--text-3); margin-top: 5px; }
-.rb-saved-preview {
-  font-size: 11px; color: var(--text-3); margin-top: 4px; line-height: 1.4;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.rb-saved-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.rb-saved-edit { padding: 8px 14px; font-size: 12px; }
-.rb-saved-dup { padding: 8px 14px; font-size: 12px; }
-.rb-create-routine-btn { width: 100%; margin-top: 14px; }
+.rb-saved-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.rb-saved-meta { font-size: 11.5px; color: var(--text-3); margin-top: 6px; }
+.rb-create-routine-btn { width: 100%; margin-top: 16px; }
 
-/* ----- Today's Workout hero (the page's primary surface) ----- */
-#todayWorkoutCard { padding: 26px 22px; }
-.po-hero-routine { display: flex; flex-direction: column; gap: 10px; }
-.po-hero-name { font-size: 27px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+/* Leading play glyph — decorative "tap to start" affordance, not a second
+   control (the whole row is already the tap target). Gym Polish pass,
+   2026-08-02. */
+.rb-saved-play {
+  flex-shrink: 0; width: 30px; height: 30px; margin-top: 2px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06); color: var(--text-2);
+  font-size: 10px; padding-left: 2px; /* optically center the triangle */
+}
+.rb-saved-row.is-current .rb-saved-play { background: var(--cta-grad); color: var(--cta-ink); }
+
+/* Kebab menu — one visible secondary control per card, Notion-style. */
+.rb-card-menu { position: relative; flex-shrink: 0; }
+.rb-card-menu-btn {
+  width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 8px;
+  color: var(--text-3); font-size: 16px; line-height: 1; cursor: pointer;
+  transition: background 0.15s, color 0.15s; -webkit-tap-highlight-color: transparent;
+}
+.rb-card-menu-btn:hover, .rb-card-menu-btn[aria-expanded="true"] { background: rgba(255,255,255,0.08); color: var(--text-1); }
+.rb-card-menu-pop {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
+  min-width: 150px; padding: 6px;
+  background: var(--bg-card); border: 1px solid var(--border-strong); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; gap: 2px;
+  /* `animation` (not `transition`) — it plays correctly right after a
+     [hidden] toggle, where a transition would have no "from" state to
+     interpolate from. Fast + subtle, Gym Polish pass 2026-08-02. */
+  animation: rb-pop-in 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top right;
+}
+@keyframes rb-pop-in {
+  from { opacity: 0; transform: scale(0.94) translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+/* Author CSS always wins over the UA [hidden] stylesheet regardless of
+   specificity — without this, the unconditional `display: flex` above
+   would keep every closed popover visually rendered despite .hidden = true.
+   Same defensive rule the existing .po-combo-pop already needed. */
+.rb-card-menu-pop[hidden] { display: none; }
+.rb-card-menu-item {
+  text-align: left; padding: 9px 10px; border-radius: 8px;
+  background: transparent; border: none; color: var(--text-1);
+  font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rb-card-menu-item:hover { background: rgba(255,255,255,0.07); }
+.rb-card-menu-item.rb-card-menu-danger { color: var(--bad); }
+.rb-card-menu-item.rb-card-menu-danger:hover { background: rgba(255,138,138,0.10); }
+
+/* ----- Exercise Library (persistent, independent section) -----
+   No longer collapsible (Gym Simplification pass, 2026-08-02) — it's a
+   first-class page section now, not a secondary editor workspace, so it's
+   always browsable. The .rb-explore-* collapse classes it used to need are
+   gone; #rbPickerBody just lives here or inside #planEditorOverlay. */
+
+/* ----- Plan Editor overlay (Gym Simplification pass, 2026-08-02) -----
+   Reuses the existing full-screen .wt-overlay drawer pattern (Progress
+   Photos) instead of inventing a new one — same .is-open toggle, same
+   .wt-overlay-inner/.wt-overlay-h/.wt-back/.wt-overlay-title shell. Only
+   appears on Create/Edit; #rbPickerBody (the exercise picker) is relocated
+   into it while open, then back to #exerciseLibraryCard on close — one DOM
+   node, never duplicated. */
+.plan-editor-picker-slot { margin-top: 18px; }
+.plan-editor-picker-heading { margin-bottom: 12px; }
+
+/* ----- Today's Workout hero (the page's primary surface) -----
+   Calm, spacious primary block (name → chips → count/duration → CTA);
+   a separate, quieter context line (streak / last / next-planned /
+   resumed) sits below a hairline so it never competes with the CTA. */
+#todayWorkoutCard { padding: 28px 22px 22px; }
+.po-hero-routine { display: flex; flex-direction: column; gap: 12px; }
+.po-hero-name { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
 .po-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .po-muscle-chip {
   display: inline-block; padding: 3px 9px; border-radius: 999px;
@@ -1285,26 +1436,48 @@ img, video, canvas, svg { max-width: 100%; }
   color: var(--text-2); background: rgba(255,255,255,0.06); border: 1px solid var(--border);
 }
 .po-hero-meta { font-size: 13px; color: var(--text-3); }
-.po-hero-progress {
-  font-size: 12.5px; font-weight: 600; color: var(--text-2);
-  padding: 9px 12px; border-radius: 10px;
-  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+.po-hero-cta { width: 100%; margin-top: 18px; padding: 16px; font-size: 16.5px; font-weight: 700; }
+.po-hero-context {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-3); text-align: center;
 }
-.po-hero-cta { width: 100%; margin-top: 18px; padding: 17px; font-size: 16px; font-weight: 700; }
 .po-hero-empty {
-  text-align: center; padding: 18px 12px;
+  text-align: center; padding: 24px 12px;
   color: var(--text-2); font-size: 13.5px; line-height: 1.5;
 }
+.po-hero-empty-icon { font-size: 30px; margin-bottom: 10px; opacity: 0.85; }
 .po-hero-empty-cta { margin-top: 14px; }
+
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-muscle-chip {
+  background: rgba(29,33,41,0.05);
+}
 
 /* ----- Workout Mode ----- */
 /* Everything below is a CSS state on .po-shell (.is-workout-mode) — no DOM
    is moved. .po-wm-secondary marks existing sections (filters, stats,
    trend, history, past workouts) that hide by default in Workout Mode and
-   reappear via the "Show details" toggle (#coachCard.wm-details-open). */
+   reappear via the "Show details" toggle (#coachCard.wm-details-open).
+
+   #coachCard itself is folded exclusively into Workout Mode (Gym
+   Simplification pass, 2026-08-02): hidden outside it entirely — no more
+   ad-hoc logging surface in the main browse view — and shown only while
+   .is-workout-mode is active. */
+#coachCard { display: none; }
+.po-shell.is-workout-mode #coachCard {
+  display: block;
+  /* Same become-visible animation technique as .rb-card-menu-pop — plays
+     correctly right after display:none -> block, unlike a transition.
+     Reinforces "you're now training" the instant Workout Mode opens. */
+  animation: po-wm-enter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes po-wm-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
 .po-shell.is-workout-mode #todayWorkoutCard,
 .po-shell.is-workout-mode #myRoutinesCard,
-.po-shell.is-workout-mode #rbCard,
+.po-shell.is-workout-mode #exerciseLibraryCard,
 .po-shell.is-workout-mode .wt-section {
   display: none;
 }
@@ -1318,28 +1491,59 @@ img, video, canvas, svg { max-width: 100%; }
 }
 
 .po-wm-bar { display: none; }
+/* Session header (Gym Polish pass, 2026-08-02) — elapsed time, progress,
+   Finish, all in one place at the top of Workout Mode. NOT position:sticky:
+   this app's shared `html, body { overflow-x: hidden }` rule (every page,
+   not Gym-specific) makes <html> the element that actually scrolls while
+   <body> reports its own non-scrolling overflow box — sticky binds to the
+   nearest scrolling ancestor and picks <body>, so it silently never sticks.
+   Fixing that is a cross-page CSS change, out of scope for a Gym-only
+   polish pass — verified empirically (Playwright), not assumed, before
+   reverting to static positioning here. */
 .po-shell.is-workout-mode .po-wm-bar {
   display: block; margin: -4px 0 20px; padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
 .po-wm-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .po-wm-exit {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 6px; min-width: 0;
   background: transparent; border: none; color: var(--text-1);
-  font-family: inherit; font-size: 15px; font-weight: 700;
+  font-family: inherit; font-size: 14px; font-weight: 700;
   padding: 4px 0; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.po-wm-exit-arrow { font-size: 16px; color: var(--text-3); }
+.po-wm-exit-arrow { font-size: 16px; color: var(--text-3); flex-shrink: 0; }
 .po-wm-exit:hover .po-wm-exit-arrow { color: var(--text-1); }
-.po-wm-details-toggle {
-  background: transparent; border: 1px solid var(--border); color: var(--text-3);
-  border-radius: 8px; padding: 6px 12px; font-family: inherit; font-size: 11px; font-weight: 700;
-  letter-spacing: 0.04em; cursor: pointer; -webkit-tap-highlight-color: transparent;
+.po-wm-elapsed {
+  flex-shrink: 0; font-family: var(--font-mono);
+  font-size: 13px; font-weight: 700; color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
-.po-wm-details-toggle:hover { color: var(--text-1); border-color: var(--border-strong); }
+/* The bar's one prominent action — ending the session is meaningfully
+   different from Exit (which just returns to browse, session stays open),
+   so both being visible here isn't the duplicated-control smell principle 2
+   warns about; it's two different actions with two different weights. */
+.po-wm-finish {
+  flex-shrink: 0; background: var(--cta-grad); color: var(--cta-ink);
+  border: none; border-radius: 999px; padding: 8px 16px;
+  font-family: inherit; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.po-wm-finish:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Demoted to a small text-link weight — it's a disclosure toggle, not an
+   action competing with Finish. */
+.po-wm-details-toggle {
+  display: block; margin: 12px auto 0;
+  background: transparent; border: none; color: var(--text-3);
+  font-family: inherit; font-size: 11.5px; font-weight: 700;
+  letter-spacing: 0.02em; text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; padding: 4px 8px;
+}
+.po-wm-details-toggle:hover { color: var(--text-1); }
 .po-wm-progress-text {
   font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--text-3); margin-bottom: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .po-wm-progress-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .po-wm-progress-fill { height: 100%; background: var(--cta-grad); border-radius: 999px; transition: width 0.25s ease; }
@@ -1388,26 +1592,38 @@ img, video, canvas, svg { max-width: 100%; }
 /* ============================================================
    Rest Timer overlay — between-sets countdown (gym-rest-timer.js)
    ============================================================ */
+/* Unobtrusive floating rest widget (Goal 3 — Session Experience, 2026-08-02).
+   Was a full-screen blocking modal (position:fixed;inset:0 + dark backdrop);
+   the brief requires rest to never block interaction or force waiting, so
+   this is now a small corner card with no backdrop — the rest of the page
+   stays fully clickable underneath it. Zero JS changes: gym-rest-timer.js
+   only ever toggled classes/text, so this is a pure presentation swap on
+   the exact same markup/ids/logic. */
 .po-rest {
-  display: none; position: fixed; inset: 0; z-index: 200;
-  align-items: center; justify-content: center; padding: 24px;
-  background: rgba(0,0,0,0.78); backdrop-filter: blur(8px);
-  -webkit-tap-highlight-color: transparent;
+  display: none; position: fixed; left: 50%; bottom: 0; z-index: 90;
+  width: calc(100% - 32px); max-width: 380px;
+  transform: translate(-50%, 0);
+  margin-bottom: max(16px, env(safe-area-inset-bottom));
+  pointer-events: none; /* only the card itself should catch taps */
 }
 .po-rest.is-open { display: flex; animation: poRestIn 0.2s ease; }
-@keyframes poRestIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes poRestIn { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 .po-rest-card {
-  display: flex; flex-direction: column; align-items: center; gap: 26px;
-  width: 100%; max-width: 320px; text-align: center;
+  pointer-events: auto;
+  display: flex; flex-direction: row; align-items: center; gap: 12px;
+  width: 100%; text-align: left;
+  background: var(--bg-card); border: 1px solid var(--border-strong);
+  border-radius: 16px; padding: 10px 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
 }
 .po-rest-eyebrow {
-  font-size: 11px; font-weight: 800; letter-spacing: 0.18em;
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.12em;
   color: var(--text-3); text-transform: uppercase;
-  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.po-rest-ring-wrap { position: relative; width: 220px; height: 220px; }
+.po-rest-ring-wrap { position: relative; width: 44px; height: 44px; flex-shrink: 0; }
 .po-rest-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
 .po-rest-ring-bg { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 6; }
 .po-rest-ring-fg {
@@ -1417,22 +1633,22 @@ img, video, canvas, svg { max-width: 100%; }
 .po-rest-time {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 54px; font-weight: 700;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
   color: var(--text-1); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
 }
 
-.po-rest-actions { display: flex; align-items: center; gap: 12px; }
+.po-rest-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .po-rest-skip {
-  padding: 13px 30px; border-radius: 12px; cursor: pointer; font-family: inherit;
-  font-size: 14px; font-weight: 700; color: var(--cta-ink);
+  padding: 8px 14px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  font-size: 12px; font-weight: 700; color: var(--cta-ink);
   border: 1px solid rgba(255,255,255,0.85);
   background: var(--cta-grad);
   -webkit-tap-highlight-color: transparent;
 }
 .po-rest-skip:active { transform: scale(0.96); }
 .po-rest-adjust {
-  padding: 13px 16px; border-radius: 12px; cursor: pointer; font-family: inherit;
-  font-size: 13px; font-weight: 700; color: var(--text-2);
+  padding: 8px 9px; border-radius: 10px; cursor: pointer; font-family: inherit;
+  font-size: 11px; font-weight: 700; color: var(--text-2);
   border: 1px solid var(--border-strong); background: rgba(255,255,255,0.04);
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, color 0.15s;
@@ -1440,23 +1656,14 @@ img, video, canvas, svg { max-width: 100%; }
 .po-rest-adjust:hover { background: rgba(255,255,255,0.10); color: var(--text-1); }
 .po-rest-adjust:active { transform: scale(0.94); }
 
-/* Finish cue at 0:00 — green flash on the backdrop + a pulse on the card,
-   alongside the audio beep and haptic buzz fired from JS. */
-.po-rest.is-done { animation: poRestFlash 0.5s ease 2; }
+/* Finish cue at 0:00 — a quiet pulse on the card + the time turning green,
+   alongside the audio beep and haptic buzz fired from JS. No backdrop flash
+   anymore — there's no backdrop to flash. */
 .po-rest.is-done .po-rest-time { color: var(--good); }
 .po-rest.is-done .po-rest-card { animation: poRestDone 0.5s ease; }
-@keyframes poRestFlash {
-  0%, 100% { background: rgba(0,0,0,0.78); }
-  50%      { background: rgba(60,120,90,0.55); }
-}
 @keyframes poRestDone {
   0%, 100% { transform: scale(1); }
-  30%      { transform: scale(1.06); }
-}
-
-@media (max-width: 600px) {
-  .po-rest-ring-wrap { width: 200px; height: 200px; }
-  .po-rest-time { font-size: 48px; }
+  30%      { transform: scale(1.03); }
 }
 
 /* ============================================================
@@ -1479,9 +1686,11 @@ img, video, canvas, svg { max-width: 100%; }
 
 .po-combo-pop {
   position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0;
-  background: #16161a; border: 1px solid var(--border-strong);
+  background: var(--bg-card); border: 1px solid var(--border-strong);
   border-radius: 12px; padding: 8px;
   box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+  animation: rb-pop-in 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: top center;
 }
 .po-combo-pop[hidden] { display: none; }
 .po-combo-search {

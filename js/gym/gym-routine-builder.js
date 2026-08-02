@@ -21,8 +21,17 @@
   // Routine being built. Rest is now routine-wide: `restEnabled` master switch
   // + `rest` (seconds) shared by every exercise. New routines default to a 90s
   // rest enabled (the previous per-exercise default).
-  function freshRoutine() { return { id: null, name: '', exercises: [], restEnabled: true, rest: DEFAULTS.rest }; }
+  // goal/trainingDays are optional, captured by the lightweight creation
+  // flow below — local-only for now (not yet in the Supabase routines row
+  // mapping, gym-cloud.js; same accepted shape of gap as routine-wide rest,
+  // see the Brain's Database notes).
+  function freshRoutine() { return { id: null, name: '', exercises: [], restEnabled: true, rest: DEFAULTS.rest, goal: null, trainingDays: [] }; }
   let current      = freshRoutine();
+  // Whether the Plan Editor overlay is open (Gym Simplification pass,
+  // 2026-08-02) — gates the catalog's "+ Add"/GIF-modal "Add to routine"
+  // affordance, so browsing the Exercise Library never implies editing a
+  // plan unless the editor is actually open.
+  let editorOpen   = false;
 
   // ── Rest model helpers ────────────────────────────────────────
   // Seconds → "MM:SS" (zero-padded). 90 → "01:30".
@@ -261,7 +270,12 @@
       empty.textContent = 'Exercise catalog not found. Run scripts/generate-exercises.js and commit js/exercises-data.json, then refresh.';
     } else if (!filtered.length) {
       empty.style.display = 'block';
-      empty.textContent = 'No exercises match your search.';
+      // Search misses get a friendlier message + a one-tap way out — the
+      // most common empty case, and the easiest to teach out of (Gym
+      // Polish pass, 2026-08-02).
+      empty.innerHTML = search.trim()
+        ? '🔍 Nothing matches “' + escapeHtml(search.trim()) + '”.<button type="button" class="rb-empty-clear" id="rbClearSearchBtn">Clear search</button>'
+        : 'No exercises in this muscle group yet.';
     } else {
       empty.style.display = 'none';
     }
@@ -288,12 +302,18 @@
 
     const body = document.createElement('div'); body.className = 'rb-ex-body';
     const nm = document.createElement('div'); nm.className = 'rb-ex-name'; nm.textContent = e.name;
-    const add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'rb-ex-add' + (added ? ' added' : '');
-    add.textContent = added ? '✓ Added' : '+ Add';
-    add.addEventListener('click', () => addToRoutine(e));
-    body.append(nm, add);
+    body.append(nm);
+    // "+ Add" only makes sense while a plan is actually being edited — pure
+    // browsing (Plan Editor closed) shows the card as reference only, tap
+    // the thumbnail for the GIF/history preview.
+    if (editorOpen) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'rb-ex-add' + (added ? ' added' : '');
+      add.textContent = added ? '✓ Added' : '+ Add';
+      add.addEventListener('click', () => addToRoutine(e));
+      body.append(add);
+    }
 
     card.append(tw, body);
     return card;
@@ -420,9 +440,10 @@
   // ── My Routines (page-top routine-first section) ───────────────
   // "Current" mirrors G.state.filterRoutine, read read-only from the coach's
   // localStorage blob via coachState() (same bridge exerciseLogs() already
-  // uses below) — never written directly. Tapping a row dispatches
-  // 'rb:select-routine' and lets the coach module own that state, same as
-  // the routine combobox already does.
+  // uses below) — never written directly. Tapping a card dispatches
+  // 'rb:start-routine' and lets the coach module own that state (pin +
+  // enter Workout Mode), same window-bridge boundary the routine combobox
+  // already respects.
   function currentRoutineId(routines) {
     const pinned = coachState().filterRoutine;
     if (pinned && routines.some(r => r.id === pinned)) return pinned;
@@ -467,17 +488,6 @@
     const workSec = 40;
     return Math.max(5, Math.round((totalSets * workSec + Math.max(0, totalSets - 1) * restSec) / 60));
   }
-  // First few exercise names + "+N more" — enough to recognize the routine
-  // without opening it.
-  function routinePreviewLine(r, max) {
-    max = max || 4;
-    const names = (r.exercises || []).map(it => it.name).filter(Boolean);
-    if (!names.length) return '';
-    const shown = names.slice(0, max);
-    const extra = names.length - shown.length;
-    return shown.join(', ') + (extra > 0 ? ' +' + extra + ' more' : '');
-  }
-
   function duplicateRoutine(r) {
     const copy = clone(r);
     copy.id = 'r_' + Date.now();
@@ -487,6 +497,100 @@
     routines.push(copy);
     saveRoutines(routines);
     renderMyRoutines();
+  }
+
+  function renameRoutine(r) {
+    const name = prompt('Rename routine', r.name);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const routines = loadRoutines().map(x => x.id === r.id
+      ? Object.assign({}, x, { name: trimmed, updated_at: new Date().toISOString() })
+      : x);
+    saveRoutines(routines);
+    if (current.id === r.id) current.name = trimmed;
+    renderMyRoutines();
+  }
+
+  // ── Kebab menu (Notion-style) — one shared open/close tracker so opening
+  // a new card's menu closes any other, plus outside-click/Escape close.
+  // Mirrors the open/close pattern gym-ui.js already uses for the routine
+  // combobox popover.
+  let openCardMenu = null;
+  let cardMenuDocBound = false;
+  function closeCardMenu() {
+    if (!openCardMenu) return;
+    openCardMenu.pop.hidden = true;
+    openCardMenu.btn.setAttribute('aria-expanded', 'false');
+    openCardMenu = null;
+  }
+  function ensureCardMenuDocBound() {
+    if (cardMenuDocBound) return;
+    document.addEventListener('click', (e) => {
+      if (openCardMenu && !openCardMenu.wrap.contains(e.target)) closeCardMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCardMenu(); });
+    cardMenuDocBound = true;
+  }
+  function buildCardMenu(r) {
+    const wrap = document.createElement('div'); wrap.className = 'rb-card-menu';
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'rb-card-menu-btn'; btn.textContent = '⋮';
+    btn.setAttribute('aria-label', 'Routine options');
+    btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
+
+    const pop = document.createElement('div'); pop.className = 'rb-card-menu-pop'; pop.hidden = true;
+    const item = (label, fn, danger) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'rb-card-menu-item' + (danger ? ' rb-card-menu-danger' : '');
+      b.textContent = label;
+      b.addEventListener('click', (e) => { e.stopPropagation(); closeCardMenu(); fn(); });
+      return b;
+    };
+    pop.append(
+      item('Edit', () => {
+        current = ensureRestModel(clone(r));   // backfill rest model for legacy routines
+        openPlanEditor();
+      }),
+      item('Duplicate', () => duplicateRoutine(r)),
+      item('Rename', () => renameRoutine(r)),
+      item('Delete', () => {
+        if (!confirm('Are you sure you want to delete this routine? It will be removed from all your devices.')) return;
+        // Immediate local update — drop it from rb_routines_v1. saveRoutines()
+        // also fires the 'rb:routines-changed' event so the coach refreshes.
+        saveRoutines(loadRoutines().filter(x => x.id !== r.id));
+        if (current.id === r.id) { current = freshRoutine(); renderRoutine(); renderGrid(); }
+        renderMyRoutines();
+        // Background cloud delete — removes the routine from every other device.
+        try { window.GymCloud && window.GymCloud.deleteRoutine(r.id); } catch (e) {}
+      }, true)
+    );
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't also trigger the card's start-routine click
+      const willOpen = pop.hidden;
+      closeCardMenu(); // closes whichever menu (possibly this one) is currently open
+      if (willOpen) {
+        pop.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        openCardMenu = { wrap, pop, btn };
+      }
+    });
+    wrap.append(btn, pop);
+    ensureCardMenuDocBound();
+    return wrap;
+  }
+
+  // Compact "Mon/Wed/Fri" label from a routine's optional trainingDays codes
+  // — local to this file (same self-contained-IIFE precedent as
+  // lastPerformedLabel/exerciseLogs above), not shared with gym-storage.js's
+  // own WEEKDAY_CODES since the two never run in the same closure.
+  const DAY_SHORT = { sun: 'Sun', mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat' };
+  const DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  function trainingDaysLabel(r) {
+    const days = Array.isArray(r.trainingDays) ? r.trainingDays : [];
+    if (!days.length) return null;
+    return DAY_ORDER.filter(d => days.includes(d)).map(d => DAY_SHORT[d]).join('/');
   }
 
   function renderMyRoutines() {
@@ -499,6 +603,12 @@
     routines.forEach(r => {
       const li = document.createElement('li');
       li.className = 'rb-saved-row' + (r.id === curId ? ' is-current' : '');
+
+      // Decorative only — reinforces "tap this card to start" (Gym Polish
+      // pass, 2026-08-02) without being a second, separately-clickable
+      // control: it's part of the same row tap target below, not its own
+      // listener, so there's still exactly one way to start a routine.
+      const play = document.createElement('span'); play.className = 'rb-saved-play'; play.setAttribute('aria-hidden', 'true'); play.textContent = '▶';
 
       const info = document.createElement('div'); info.className = 'rb-saved-info';
       const nameRow = document.createElement('div'); nameRow.className = 'rb-saved-name-row';
@@ -518,59 +628,33 @@
         });
       }
 
+      // name (above), target muscles (chips above), exercise count,
+      // estimated duration, training days (if set), last completed.
       const meta = document.createElement('div'); meta.className = 'rb-saved-meta';
-      const totalSets = r.exercises.reduce((s, e) => s + (Array.isArray(e.sets) ? e.sets.length : (Number(e.sets) || 0)), 0);
       const mins = estimateRoutineMinutes(r);
-      meta.textContent = r.exercises.length + ' exercise' + (r.exercises.length !== 1 ? 's' : '') + ' · ' + totalSets + ' set' + (totalSets !== 1 ? 's' : '')
-        + (mins ? ' · ~' + mins + ' min' : '') + ' · ' + lastPerformedLabel(r);
-
-      const previewText = routinePreviewLine(r);
-      let preview = null;
-      if (previewText) {
-        preview = document.createElement('div'); preview.className = 'rb-saved-preview'; preview.textContent = previewText;
-      }
+      const days = trainingDaysLabel(r);
+      const metaParts = [
+        r.exercises.length + ' exercise' + (r.exercises.length !== 1 ? 's' : ''),
+        mins ? '~' + mins + ' min' : null,
+        days,
+        lastPerformedLabel(r),
+      ].filter(Boolean);
+      meta.textContent = metaParts.join(' · ');
 
       info.append(nameRow);
       if (chipsRow) info.append(chipsRow);
       info.append(meta);
-      if (preview) info.append(preview);
 
-      const actions = document.createElement('div'); actions.className = 'rb-saved-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.type = 'button'; editBtn.className = 'po-btn-secondary rb-saved-edit'; editBtn.textContent = 'Edit';
-      editBtn.addEventListener('click', () => {
-        current = ensureRestModel(clone(r));   // backfill rest model for legacy routines
-        renderRoutine(); renderGrid();
-        $('rbCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-
-      const dupBtn = document.createElement('button');
-      dupBtn.type = 'button'; dupBtn.className = 'po-btn-secondary rb-saved-dup'; dupBtn.textContent = 'Duplicate';
-      dupBtn.addEventListener('click', () => duplicateRoutine(r));
-
-      const delBtn = mini('×', () => {
-        if (!confirm('Are you sure you want to delete this routine? It will be removed from all your devices.')) return;
-        // Immediate local update — drop it from rb_routines_v1. saveRoutines()
-        // also fires the 'rb:routines-changed' event so the coach refreshes.
-        saveRoutines(loadRoutines().filter(x => x.id !== r.id));
-        if (current.id === r.id) { current = freshRoutine(); renderRoutine(); renderGrid(); }
-        renderMyRoutines();
-        // Background cloud delete — removes the routine from every other device.
-        try { window.GymCloud && window.GymCloud.deleteRoutine(r.id); } catch (e) {}
-      }, 'rb-del');
-
-      actions.append(editBtn, dupBtn, delBtn);
-      li.append(info, actions);
-      // Tap the row (outside the action buttons) to pin this routine as
-      // today's — mirrors what the existing routine combobox already does.
+      const menu = buildCardMenu(r);
+      li.append(play, info, menu);
+      // Tap the card (outside the kebab menu) to start it immediately —
+      // pins it as current AND enters Workout Mode in one action (the
+      // routine's one primary purpose, per the brief). gym-actions.js's
+      // listener does both; Workout Mode hides this whole list right after,
+      // so no extra re-render is needed here.
       li.addEventListener('click', (e) => {
-        if (e.target.closest('.rb-saved-actions')) return;
-        // Synchronous: the coach's listener runs (and persists filterRoutine)
-        // before dispatchEvent() returns, so the list re-render below already
-        // sees the new pin.
-        window.dispatchEvent(new CustomEvent('rb:select-routine', { detail: { id: r.id } }));
-        renderMyRoutines();
+        if (e.target.closest('.rb-card-menu')) return;
+        window.dispatchEvent(new CustomEvent('rb:start-routine', { detail: { id: r.id } }));
       });
       list.appendChild(li);
     });
@@ -654,20 +738,68 @@
     const u = coachUnit();
     renderPr(exId, u);
     renderHist(exId, u);
+    // "Add to routine" only makes sense while a plan is being edited — pure
+    // browsing (Plan Editor closed) shows PR/history only, same as exCard().
     const addBtn = $('rbGifAdd');
-    const inRoutine = current.exercises.some(x => x.exId === exId);
-    addBtn.textContent = inRoutine ? '✓ In routine' : 'Add to routine';
-    addBtn.disabled = inRoutine;
-    addBtn.onclick = () => {
-      addToRoutine({ id: exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl });
-      $('rbGifModalBg').classList.remove('show');
-    };
+    if (editorOpen) {
+      addBtn.hidden = false;
+      const inRoutine = current.exercises.some(x => x.exId === exId);
+      addBtn.textContent = inRoutine ? '✓ In routine' : 'Add to routine';
+      addBtn.disabled = inRoutine;
+      addBtn.onclick = () => {
+        addToRoutine({ id: exId, name: e.name, muscleGroup: e.muscleGroup, gifUrl: e.gifUrl });
+        $('rbGifModalBg').classList.remove('show');
+      };
+    } else {
+      addBtn.hidden = true;
+      addBtn.onclick = null;
+    }
     $('rbGifModalBg').classList.add('show');
   }
+
+  // ── Plan Editor overlay (Gym Simplification pass, 2026-08-02) ──
+  // #rbPickerBody (Exercise Library's search/muscle-map/catalog) is one DOM
+  // node that lives in #exerciseLibraryCard by default and is relocated
+  // (appendChild — moved, never cloned) into #planEditorPickerSlot while
+  // the editor is open, then moved back on close. Only Create/Edit open it.
+  function openPlanEditor() {
+    const slot = $('planEditorPickerSlot');
+    const picker = $('rbPickerBody');
+    if (slot && picker) slot.appendChild(picker);
+    $('planEditorTitle').textContent = current.id ? 'Edit Routine' : 'New Routine';
+    editorOpen = true;
+    renderRoutine();
+    renderGrid();
+    $('planEditorOverlay').classList.add('is-open');
+    $('planEditorOverlay').setAttribute('aria-hidden', 'false');
+  }
+  function closePlanEditor() {
+    if (current.exercises.length && !confirm('Discard changes to this routine?')) return;
+    const library = $('exerciseLibraryCard');
+    const picker = $('rbPickerBody');
+    if (library && picker) library.appendChild(picker);
+    editorOpen = false;
+    current = freshRoutine();
+    renderRoutine();
+    renderGrid();
+    $('planEditorOverlay').classList.remove('is-open');
+    $('planEditorOverlay').setAttribute('aria-hidden', 'true');
+  }
+  $('planEditorBack').addEventListener('click', closePlanEditor);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('planEditorOverlay').classList.contains('is-open')) closePlanEditor();
+  });
 
   // ── Wire up controls ──────────────────────────────────────────
   $('rbSearch').addEventListener('input', () => { search = $('rbSearch').value; visible = PAGE; applyFilter(); });
   $('rbMore').addEventListener('click', () => { visible += PAGE; renderGrid(); });
+  // #rbLibEmpty's "Clear search" button is rebuilt on every renderGrid(), so
+  // it's wired via delegation on the stable parent rather than per-render.
+  $('rbLibEmpty').addEventListener('click', (e) => {
+    if (!e.target.closest('#rbClearSearchBtn')) return;
+    search = ''; $('rbSearch').value = ''; visible = PAGE; applyFilter();
+    $('rbSearch').focus();
+  });
   $('rbRoutineName').addEventListener('input', () => { current.name = $('rbRoutineName').value; });
 
   // ── Global rest config ────────────────────────────────────────
@@ -718,14 +850,77 @@
     // clone() above deep-copies each exercise's `sets` array (weight + reps
     // per set) into the saved routine. Now wipe the workspace to free it up.
     current = freshRoutine();
-    renderRoutine(); renderGrid(); renderMyRoutines();
+    renderMyRoutines();
+    closePlanEditor(); // current is already empty here, so this never prompts
   });
 
-  $('myRoutinesCreateBtn').addEventListener('click', () => {
+  // ── Lightweight routine creation flow (3 steps: name → goal →
+  // training days) — replaces jumping straight into the full builder,
+  // per the "reduce friction, three simple decisions, nothing more" brief.
+  // "Create" builds `current` exactly like the old direct-to-builder path
+  // did, then opens the (now-collapsed-by-default) Explore Exercises.
+  let createStep = 1;
+  let createGoal = null;
+  let createDays = [];
+
+  function showCreateStep(n) {
+    createStep = n;
+    $('rbCreateStep1').hidden = n !== 1;
+    $('rbCreateStep2').hidden = n !== 2;
+    $('rbCreateStep3').hidden = n !== 3;
+    $('rbCreateBack').style.display = n === 1 ? 'none' : '';
+    $('rbCreateNext').textContent = n === 3 ? 'Create Routine' : 'Next';
+    document.querySelectorAll('#rbCreateDots .rb-create-dot').forEach((d, i) => d.classList.toggle('is-active', i === n - 1));
+  }
+  function openCreateFlow() {
     if (current.exercises.length && !confirm('Discard the routine you\'re currently editing?')) return;
+    createGoal = null; createDays = [];
+    $('rbCreateName').value = '';
+    document.querySelectorAll('#rbCreateGoalPills .rb-create-pill, #rbCreateDays .rb-create-day')
+      .forEach(b => b.classList.remove('active'));
+    showCreateStep(1);
+    $('rbCreateModalBg').classList.add('show');
+    setTimeout(() => { try { $('rbCreateName').focus(); } catch (e) {} }, 0);
+  }
+  function closeCreateFlow() { $('rbCreateModalBg').classList.remove('show'); }
+
+  $('myRoutinesCreateBtn').addEventListener('click', openCreateFlow);
+  $('rbCreateModalBg').addEventListener('click', (e) => { if (e.target === $('rbCreateModalBg')) closeCreateFlow(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCreateFlow(); });
+
+  document.querySelectorAll('#rbCreateGoalPills .rb-create-pill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const already = btn.classList.contains('active');
+      document.querySelectorAll('#rbCreateGoalPills .rb-create-pill').forEach(b => b.classList.remove('active'));
+      createGoal = already ? null : btn.dataset.goal;
+      if (createGoal) btn.classList.add('active');
+    });
+  });
+  document.querySelectorAll('#rbCreateDays .rb-create-day').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('active');
+      const day = btn.dataset.day;
+      if (btn.classList.contains('active')) { if (!createDays.includes(day)) createDays.push(day); }
+      else { createDays = createDays.filter(d => d !== day); }
+    });
+  });
+
+  $('rbCreateBack').addEventListener('click', () => { if (createStep > 1) showCreateStep(createStep - 1); });
+  $('rbCreateNext').addEventListener('click', () => {
+    if (createStep === 1) {
+      if (!$('rbCreateName').value.trim()) { alert('Give your routine a name to continue.'); return; }
+      showCreateStep(2);
+      return;
+    }
+    if (createStep === 2) { showCreateStep(3); return; }
+    // Step 3 → finish. Same effect the old direct-to-builder button had,
+    // plus the two captured fields.
     current = freshRoutine();
-    renderRoutine(); renderGrid();
-    $('rbCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    current.name = $('rbCreateName').value.trim() || 'Routine ' + new Date().toLocaleDateString();
+    current.goal = createGoal;
+    current.trainingDays = createDays.slice();
+    closeCreateFlow();
+    openPlanEditor();
   });
 
   $('rbGifClose').addEventListener('click', () => $('rbGifModalBg').classList.remove('show'));

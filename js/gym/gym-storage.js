@@ -201,6 +201,48 @@
     };
   }
 
+  // Workout Summary — pure derivation over a just-finished session (Goal 3 —
+  // Session Experience, 2026-08-02). Deliberately reuses, not reimplements:
+  // summarizeSession() above for the per-exercise grouping, G.state.logs
+  // (the same derived index the prescription/PR/history UI already reads)
+  // for "was this session's max a new PR," and getRx() — the exact same
+  // deterministic prescription engine #rxWrap uses during the workout — for
+  // the "next time" recommendation. No new storage, no new stats invented.
+  function buildWorkoutSummary(sess) {
+    const sum = summarizeSession(sess);
+    const startedMs = Date.parse(sess.startedAt) || Date.now();
+    const endedMs = Date.parse(sess.endedAt) || Date.now();
+    const durationSec = Math.max(0, Math.round((endedMs - startedMs) / 1000));
+
+    let totalVolume = 0;
+    const prs = [];
+    const recs = [];
+    sum.perEx.forEach(({ ex, sets }) => {
+      sets.forEach((s) => { totalVolume += (Number(s.weight) || 0) * (Number(s.reps) || 0); });
+      const allLogs = G.state.logs[ex.id] || [];
+      // "PR" = this session's heaviest set for the movement beat every set
+      // logged before this session (excluded by session id, already carried
+      // on each log entry by buildLogIndex()).
+      const priorMax = allLogs
+        .filter((l) => l.session !== sess.id)
+        .reduce((m, l) => Math.max(m, Number(l.weight) || 0), 0);
+      const sessionMax = sets.reduce((m, s) => Math.max(m, Number(s.weight) || 0), 0);
+      if (sessionMax > 0 && sessionMax > priorMax) prs.push({ name: ex.name, weight: sessionMax, bw: ex.bw });
+      const rx = getRx(ex, allLogs);
+      if (rx) recs.push({ name: ex.name, rx });
+    });
+
+    return {
+      routineName: sess.label || 'Workout',
+      durationSec,
+      totalVolume: Math.round(totalVolume),
+      exerciseCount: sum.perEx.length,
+      setCount: sum.totalSets,
+      prs,
+      recs,
+    };
+  }
+
   // ── Routines bridge ──────────────────────────────────────────
   // The exercise list is driven by the user's saved routines from the Routine
   // Builder (localStorage 'rb_routines_v1'). Each routine exercise is mirrored
@@ -302,6 +344,65 @@
     return latest || null;
   }
 
+  // ── Streak + schedule (pass-3 "lightweight context") ───────────
+  // Streak reuses the already-built per-exercise log index (G.state.logs) —
+  // no new storage, no re-walking of sessions.
+  function fmtDayKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function trainedDaySet() {
+    const days = {};
+    Object.keys(G.state.logs || {}).forEach(exId => {
+      (G.state.logs[exId] || []).forEach(l => {
+        if (!l || !l.date) return;
+        const d = new Date(l.date);
+        if (!isNaN(d)) days[fmtDayKey(d)] = true;
+      });
+    });
+    return days;
+  }
+  // Consecutive trained days ending today (or yesterday, so an in-progress
+  // streak doesn't read as broken before today's session happens).
+  function computeStreak() {
+    const days = trainedDaySet();
+    const cursor = new Date();
+    cursor.setHours(0, 0, 0, 0);
+    if (!days[fmtDayKey(cursor)]) cursor.setDate(cursor.getDate() - 1);
+    let streak = 0;
+    while (days[fmtDayKey(cursor)]) { streak++; cursor.setDate(cursor.getDate() - 1); }
+    return streak;
+  }
+
+  // Training-days scheduling — routine.trainingDays is an optional array of
+  // these codes, set by the routine-creation flow (gym-routine-builder.js).
+  const WEEKDAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  function todaysScheduledRoutine() {
+    const code = WEEKDAY_CODES[new Date().getDay()];
+    return getRoutines().find(r => Array.isArray(r.trainingDays) && r.trainingDays.includes(code)) || null;
+  }
+  // Looks ahead (not including today) for the next routine with a matching
+  // training day. Returns null if no routine has any day configured.
+  function nextPlannedRoutine() {
+    const routines = getRoutines();
+    const todayIdx = new Date().getDay();
+    for (let offset = 1; offset <= 7; offset++) {
+      const code = WEEKDAY_CODES[(todayIdx + offset) % 7];
+      const match = routines.find(r => Array.isArray(r.trainingDays) && r.trainingDays.includes(code));
+      if (match) return { routine: match, code: code, inDays: offset };
+    }
+    return null;
+  }
+  // Boot-time only (see gym-core.js G.boot()) — prefers today's scheduled
+  // routine, but never overrides a routine with a session already in
+  // progress, and never re-fires mid-session.
+  function applyTodaysSchedule() {
+    if (getActiveSession()) return;
+    const scheduled = todaysScheduledRoutine();
+    if (scheduled && G.state.filterRoutine !== scheduled.id) {
+      G.state.filterRoutine = scheduled.id;
+      G.state.currentEx = null;
+      saveState();
+    }
+  }
+
   function getCurrentEx() {
     const f = getFiltered();
     if (!f.length) return null;
@@ -397,8 +498,9 @@
     loadState, normalize, saveState,
     uidSession, buildLogIndex, rebuildLogIndex, logSetKey, dedupSessionSets, migrateSessions,
     currentSessionLabel, getActiveSession, ensureActiveSession, closeActiveSession,
-    startNewSession, summarizeSession,
+    startNewSession, summarizeSession, buildWorkoutSummary,
     getRoutines, getCurrentRoutine, ensureRoutineExercises, getFiltered, getCurrentEx, getLogs, getRestSeconds, getRx,
-    routineMuscleGroups, estimateRoutineMinutes, routineLastPerformed
+    routineMuscleGroups, estimateRoutineMinutes, routineLastPerformed,
+    computeStreak, todaysScheduledRoutine, nextPlannedRoutine, applyTodaysSchedule
   });
 })();

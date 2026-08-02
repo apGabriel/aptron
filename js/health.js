@@ -1386,6 +1386,32 @@ function activeDayKey() {
     return 'Could not analyze that image. Please try again.';
   }
 
+  // ── Meal streak ───────────────────────────────────────────────────────────
+  // Consecutive 6 AM-anchored days with at least one logged meal. Computed on
+  // the fly from po_food_v1 (no new storage key) via the shared StreakEngine
+  // (js/streak-engine.js) — same day-key convention as the rest of this file.
+  function mealStreak() {
+    const all = load();
+    const hitDays = {};
+    Object.keys(all).forEach(k => { if ((all[k] || []).length) hitDays[k] = true; });
+    return window.StreakEngine ? window.StreakEngine.compute(hitDays, dayKey()) : { current: 0, lastDate: null };
+  }
+  function streakNote(n) {
+    if (n >= 14) return 'Excellent consistency. Keep fueling your body.';
+    if (n >= 2) return 'Great consistency. Keep fueling your body.';
+    return 'Nice start — keep it going.';
+  }
+  function renderMealStreak() {
+    const wrap = $('mealStreakWrap'); if (!wrap) return;
+    const s = mealStreak();
+    wrap.innerHTML = s.current > 0
+      ? '<div class="sf-eyebrow">🔥 Meal Streak</div>'
+        + '<div class="sf-title">' + s.current + (s.current === 1 ? ' day' : ' days') + '</div>'
+        + '<div class="streak-note">' + streakNote(s.current) + '</div>'
+      : '<div class="sf-eyebrow">🔥 Start your first streak</div>'
+        + '<div class="streak-note">Log today\'s meal to begin.</div>';
+  }
+
   // ── Persistence ops ──────────────────────────────────────────────────────
   function addMeal(m) {
     const all = load(), k = selectedDate;
@@ -1442,6 +1468,7 @@ function activeDayKey() {
     const list = $('foodLog'); if (!list) return;
     list.innerHTML = meals.map(mealCardHTML).join('');
     const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
+    renderMealStreak();
   }
 
   // Reflect the active meal type on the segmented control.

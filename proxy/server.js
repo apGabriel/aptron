@@ -279,7 +279,12 @@ app.post('/api/gemini/meal-scan', expensiveLimiter, async (req, res) => {
 // commands locally (instant/offline); anything free-form is forwarded here and
 // Gemini returns ONE structured intent the frontend applies to the calendar /
 // modules. Same server-side key as meal-scan — never reaches the browser.
-// Body: { message: string, context?: { date, events:[{title,start,end,done}] } }
+// Body: { message: string, context?: { date, events:[{title,start,end,done}],
+//         gym: {...}|null, health: {...}|null } }
+// gym/health are read-only summaries js/index.js assembles straight from
+// localStorage (index.html never loads health.js/gym/*.js — see the comment
+// above todayGymSummary()/todayHealthSummary() there); null means "no data
+// logged yet", not "omit this domain" — the prompt below must say so, not guess.
 // Returns the intent object (see responseSchema below).
 app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
   if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
@@ -287,11 +292,22 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   const events = (context && Array.isArray(context.events)) ? context.events : [];
+  const gymStatus = (context && context.gym) || null;
+  const healthStatus = (context && context.health) || null;
   const sys =
     'You are the orchestrator AI for a personal day-planner dashboard. ' +
     'Convert the user message into EXACTLY ONE structured action. ' +
     'Today is ' + ((context && context.date) || new Date().toISOString().slice(0, 10)) + '. ' +
     "The user's current calendar events (JSON): " + JSON.stringify(events).slice(0, 4000) + '. ' +
+    "Today's gym status (JSON, null means no gym data logged yet): " + JSON.stringify(gymStatus).slice(0, 1000) + '. ' +
+    "Today's health/nutrition status (JSON, null means no data logged yet): " + JSON.stringify(healthStatus).slice(0, 1000) + '. ' +
+    'GROUNDING (more important than being helpful-sounding): only state facts present in the JSON above. ' +
+    'If a field is null or a value is missing, say plainly that you don\'t have that data or nothing is logged yet — ' +
+    'never invent a number, event, workout, or meal, and never assume something didn\'t happen just because it\'s ' +
+    'not in the data. When the user asks about their day, prioritize this local data over generic knowledge. ' +
+    'TONE: behave like a personal chief of staff, not a generic chatbot — short, concrete, actionable sentences ' +
+    '(e.g. "You have two meetings before lunch. Train after 18:00. You still need water today.") rather than ' +
+    'long or hedging paragraphs. ' +
     'Rules: all times are 24-hour "HH:MM". Dates are ALWAYS absolute "YYYY-MM-DD" — if the user names a day ' +
     '("tomorrow", "next Friday", a specific date), resolve it against today\'s date above and set "date"; ' +
     'leave "date" absent when the user does not mention a day (it then applies to whatever day is already ' +

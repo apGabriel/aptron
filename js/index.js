@@ -1365,13 +1365,66 @@ window.QuickNotes = (function () {
     }
   }
 
+  // ── Cross-module context (pre-Shelron stopgap, see Shelron.md § v0.2) ────────
+  // index.html never loads js/health.js or js/gym/*.js — they're separate
+  // static pages sharing only localStorage, not a live JS object. So Shenlong
+  // reads the same storage those modules own directly, read-only, and reports
+  // only facts it can state with certainty (raw logged totals/state) — never a
+  // derived judgment those modules would compute themselves (e.g. no
+  // personalized water-goal %, which needs health.js's substance-adjusted
+  // formula). A field left null means "no data available"; the assistant must
+  // say so rather than guess. This is intentionally NOT a shared module — it's
+  // a wider ad hoc context slice inside the existing stopgap, not the real
+  // Context Builder engine Shelron.md designs.
+  function activeFoodDayKey() {
+    const now = new Date();
+    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+    return now.getFullYear() + '-' + padZ(now.getMonth() + 1) + '-' + padZ(now.getDate());
+  }
+  function todayHealthSummary() {
+    let waterMlToday = null, mealsLoggedToday = null;
+    try {
+      const w = JSON.parse(localStorage.getItem('po_water_v1') || 'null');
+      if (w && w.logs) waterMlToday = Number(w.logs[todayStr()]) || 0;
+    } catch (e) {}
+    try {
+      const f = JSON.parse(localStorage.getItem('po_food_v1') || 'null');
+      if (f) mealsLoggedToday = (f[activeFoodDayKey()] || []).length;
+    } catch (e) {}
+    if (waterMlToday === null && mealsLoggedToday === null) return null;
+    return { waterMlToday, mealsLoggedToday };
+  }
+  function todayGymSummary() {
+    let coach;
+    try { coach = JSON.parse(localStorage.getItem('po_coach_v1') || 'null'); } catch (e) { coach = null; }
+    if (!coach) return null;
+    let routines = [];
+    try { routines = JSON.parse(localStorage.getItem('rb_routines_v1') || '[]'); } catch (e) {}
+    const pinned = Array.isArray(routines) ? routines.find(r => r.id === coach.filterRoutine) : null;
+    const openSession = Array.isArray(coach.sessions) ? coach.sessions.find(s => !s.endedAt) : null;
+    return {
+      pinnedRoutineName: pinned ? pinned.name : null,
+      pinnedRoutineExerciseCount: pinned ? (pinned.exercises || []).length : null,
+      workoutInProgress: !!openSession,
+      setsLoggedInOpenSession: openSession ? (openSession.sets || []).length : 0,
+    };
+  }
+
   // ── Gemini fallback ──────────────────────────────────────────────────────────
   async function askGemini(message) {
     const res = await fetch(GEMINI_ENDPOINT, {
       method: 'POST',
       headers: Object.assign({ 'Content-Type': 'application/json' },
         window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
-      body: JSON.stringify({ message, context: { date: todayStr(), events: window.AptCal.getEvents() } }),
+      body: JSON.stringify({
+        message,
+        context: {
+          date: todayStr(),
+          events: window.AptCal.getEvents(),
+          gym: todayGymSummary(),
+          health: todayHealthSummary(),
+        },
+      }),
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);

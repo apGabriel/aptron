@@ -105,6 +105,10 @@
       G.renderAll();
       return removed;
     };
+    // Once per boot only — prefers today's scheduled routine (if any) before
+    // the first render, without fighting a manual pick made later this
+    // session. See gym-storage.js applyTodaysSchedule().
+    if (G.applyTodaysSchedule) G.applyTodaysSchedule();
     G.renderAll();
     G.photosRender();
   };
