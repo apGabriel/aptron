@@ -97,54 +97,6 @@ body > * { position: relative; z-index: 1; }
   font-size: 12px;
 }
 
-/* Input row (reused by the calendar add-row) */
-.gm-input-wrap {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  align-items: center;
-  border-top: 1px solid rgba(210,188,138,0.08);
-  padding-top: 14px;
-  margin-top: 14px;
-}
-
-.gm-input {
-  flex: 1;
-  background: rgba(0,0,0,0.22);
-  border: 1px solid rgba(210,188,138,0.14);
-  border-radius: 12px;
-  padding: 11px 14px;
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text-primary);
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.gm-input::placeholder { color: var(--text-tertiary); }
-.gm-input:focus { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-
-.gm-add-btn {
-  background: linear-gradient(180deg, #d2bc8a 0%, #b8a06e 100%);
-  color: #101010;
-  border: none;
-  border-radius: 12px;
-  padding: 11px 20px;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 4px 12px rgba(0,0,0,0.35);
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-
-.gm-add-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px rgba(0,0,0,0.40);
-}
-
-
 .gm-status-line {
   font-size: 11px;
   color: var(--text-tertiary);
@@ -544,17 +496,13 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .aios-msg-user { co
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .aios-chip {
   background: rgba(29,33,41,0.05); border-color: rgba(29,33,41,0.13);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) :is(.aios-chat-input, .aios-notes-input, .shelron-form) input {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) :is(.aios-chat-input, .aios-notes-input) input {
   color: var(--text-primary); background: rgba(29,33,41,0.05); border-color: rgba(29,33,41,0.14);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) :is(.aios-notes-input, .shelron-form) button {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .aios-notes-input button {
   background: rgba(29,33,41,0.05); border-color: rgba(29,33,41,0.14);
 }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .aios-note { border-bottom-color: rgba(29,33,41,0.08); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .gm-input {
-  color: var(--text-primary); background: rgba(29,33,41,0.04); border-color: rgba(29,33,41,0.14);
-}
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .gm-input-wrap { border-top-color: rgba(29,33,41,0.10); }
 /* calendar rows */
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .cal-event-time { color: rgba(29,33,41,0.52); }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .cal-event-title { color: var(--text-primary); }
@@ -807,26 +755,6 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.is-re
   color: var(--text-secondary); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
 }
 .aios-notes-input button:hover { color: var(--text-primary); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-
-/* Shelron v0.1 — deliberately plain, reuses the notes-input pattern exactly.
-   No animation, no theming beyond the existing tokens. */
-.shelron-head { margin-bottom: 10px; }
-.shelron-output {
-  font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; min-height: 18px;
-}
-.shelron-output.is-error { color: #e57373; }
-.shelron-form { display: flex; gap: 8px; }
-.shelron-form input {
-  flex: 1; min-width: 0; color: #FAFAFA; font-size: 13px; padding: 8px 12px;
-  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10); border-radius: 10px;
-}
-.shelron-form input::placeholder { color: var(--text-tertiary); }
-.shelron-form input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.shelron-form button {
-  flex: none; width: 36px; border-radius: 10px; cursor: pointer; font-size: 16px; line-height: 1;
-  color: var(--text-secondary); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
-}
-.shelron-form button:hover { color: var(--text-primary); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
 /* =====================================================================
    SHENLONG persona — additive jade/amber aura over the existing dark

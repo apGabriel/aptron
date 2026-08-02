@@ -14,8 +14,9 @@
           isTimeMetric, clampDur, DUR_MIN } = G;
   const { getCurrentEx, getActiveSession, ensureActiveSession, closeActiveSession,
           startNewSession, dedupSessionSets, rebuildLogIndex, saveState, loadState,
-          normalize, LS_KEY } = G;
+          normalize, LS_KEY, buildWorkoutSummary } = G;
   const { renderAll, renderHistory, renderSettings, renderTodaysWorkout, renderPastWorkouts } = G;
+  const { setWorkoutMode, toggleWorkoutDetails, openWorkoutSummary } = G;
 
   // ============================================================
   // CURRENT SESSION + PAST WORKOUTS — interaction
@@ -38,14 +39,30 @@
     renderAll();
   }
 
-  // Done = close (lock) the active session → it moves to Past workouts and no
-  // further sets can be appended to it.
-  $('poTwDoneBtn').addEventListener('click', () => {
-    if (!getActiveSession()) return;
+  // Finish = close (lock) the active session → it moves to Past workouts and
+  // no further sets can be appended to it. Lives only in the sticky #wmBar
+  // (#wmFinishBtn, wired below) since #coachCard — and everything in it —
+  // is only ever visible during Workout Mode now (Gym Polish pass,
+  // 2026-08-02); the old standalone "Mark done" button in Session log was
+  // removed as the now-redundant second copy of this same action.
+  //
+  // Goal 3 — Session Experience (2026-08-02): finishing now shows the
+  // Workout Summary before actually leaving Workout Mode. buildWorkoutSummary
+  // reads the session while it's still fully intact (closeActiveSession()
+  // only stamps endedAt, it doesn't clear anything), so the summary is built
+  // right after closing, then setWorkoutMode(false) is deferred until the
+  // user dismisses the summary (#summaryDoneBtn, wired below).
+  function finishWorkout() {
+    const sess = getActiveSession();
+    if (!sess) return;
     closeActiveSession();
     saveState();
-    renderTodaysWorkout();
-    renderPastWorkouts();
+    openWorkoutSummary(buildWorkoutSummary(sess));
+  }
+  $('summaryDoneBtn').addEventListener('click', () => {
+    $('workoutSummaryOverlay').classList.remove('is-open');
+    $('workoutSummaryOverlay').setAttribute('aria-hidden', 'true');
+    setWorkoutMode(false); // returns to the (now-updated) hero
   });
   // New session = close any open session and start a fresh, empty one, so a
   // second workout the same day is isolated from the first.
@@ -71,9 +88,60 @@
   // deletes a routine, re-render so the segment control reflects it instantly.
   window.addEventListener('rb:routines-changed', () => { saveState(); renderAll(); });
 
+  // "My Routines" (Routine Builder module) dispatches this when a routine
+  // card is tapped — pins it as current (same as the routine combobox does
+  // on selection) AND enters Workout Mode immediately: a routine's one
+  // primary purpose is to be started, per the pass-3 UX brief.
+  window.addEventListener('rb:start-routine', (e) => {
+    const id = e.detail && e.detail.id;
+    if (!id) return;
+    G.state.filterRoutine = id;
+    G.state.currentEx = null;
+    saveState();
+    setWorkoutMode(true); // already calls renderAll() + scrolls to #coachCard
+  });
+
+  // Today's Workout hero — content is fully re-rendered by renderTodayHero(),
+  // so its CTA is wired via delegation on the stable card wrapper. Both the
+  // Start/Resume button and the empty-state "+ Create Routine" button live
+  // here, and "+ Create Routine" mirrors the #rbClearBtn reset so it opens a
+  // blank routine in the builder below.
+  $('todayWorkoutCard').addEventListener('click', (e) => {
+    if (e.target.closest('#todayHeroCta')) {
+      setWorkoutMode(true);
+      return;
+    }
+    if (e.target.closest('#todayHeroCreateBtn')) {
+      const createBtn = $('myRoutinesCreateBtn');
+      if (createBtn) createBtn.click();
+    }
+  });
+
+  // Workout Mode bar — content is fully re-rendered by renderWorkoutBar(),
+  // so its controls are wired via delegation on the stable wrap div. Exit
+  // returns to the browse view without ending the session; Finish ends it
+  // (see finishWorkout() above); Show/Hide details reveals the collapsed
+  // Stats/Trend/History/Filters/Past-workouts.
+  $('wmBar').addEventListener('click', (e) => {
+    if (e.target.closest('#wmExitBtn')) { setWorkoutMode(false); return; }
+    if (e.target.closest('#wmFinishBtn')) { finishWorkout(); return; }
+    if (e.target.closest('#wmDetailsToggle')) { toggleWorkoutDetails(); }
+  });
+
   $('exSelect').addEventListener('change', e => {
     G.state.currentEx = e.target.value;
     G.histDate = ''; // new exercise → reset the History date filter
+    saveState(); renderAll();
+  });
+
+  // Next Exercise preview card — advances exactly like picking it in
+  // #exSelect above (same write, same reset, same re-render). Goal 3 —
+  // Session Experience, 2026-08-02.
+  $('nextExBtn').addEventListener('click', () => {
+    const id = $('nextExBtn').dataset.exId;
+    if (!id) return;
+    G.state.currentEx = id;
+    G.histDate = '';
     saveState(); renderAll();
   });
 
@@ -196,13 +264,21 @@
         metric: isTime ? 'time' : 'reps', date: iso, unit: unit(), session: sess.id, is_dropset: isDrop
       });
     } catch (e) {}
-    // Tiny pulse on the button so the user feels the save
+    // Tiny pulse on the button so the user feels the save — the only
+    // confirmation; no modal, no toast (Goal 3 — Session Experience,
+    // 2026-08-02: "logging a set should feel effortless").
     const btn = $('logBtn');
     if (btn) {
       btn.style.transition = 'transform 0.15s';
       btn.style.transform = 'scale(0.96)';
       setTimeout(() => { btn.style.transform = ''; }, 160);
     }
+    // Keep the Set Logger in view for the next set — `block:'nearest'` means
+    // this is a no-op if it's already visible, so it never scrolls when it
+    // doesn't need to (e.g. logging from the GIF-preview flow at the top of
+    // the card shouldn't yank the page if the logger's already on-screen).
+    const loggerCard = $('setLoggerCard');
+    if (loggerCard) loggerCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     // Kick off the between-sets rest countdown for this exercise. The duration
     // is the rest planned for this movement in the ACTIVE routine (0 = off).
     // The timer is a self-contained overlay (window.GymRestTimer) that holds no

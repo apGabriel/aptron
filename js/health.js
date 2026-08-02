@@ -36,6 +36,22 @@ const CONFIG = {
   defaultSubstances: []
 };
 
+// ===================== Shared date helpers =====================
+// YYYY-MM-DD, local time (no UTC drift) — the one formatter every section
+// below reuses instead of reimplementing.
+function fmtYMD(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// 6 AM-anchored "active day" — a day doesn't roll over until 6am local, so a
+// midnight snack still logs against "today". Shared by Daily Stack and the
+// Food Diary. The Water Tracker deliberately uses true midnight instead
+// (see its own todayKey()) — not the same rule, not a bug.
+function activeDayKey() {
+  const now = new Date();
+  if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+  return fmtYMD(now);
+}
+
 // ===================== Daily Stack =====================
 (() => {
   'use strict';
@@ -43,14 +59,7 @@ const CONFIG = {
   const storeGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
   const storeSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-  function getActiveDate() {
-    const now = new Date();
-    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
+  function getActiveDate() { return activeDayKey(); }
 
   const TEMPLATE_VERSION = 5;
 
@@ -681,9 +690,7 @@ const CONFIG = {
   $('appTitle').textContent = CONFIG.appTitle || 'Water Coach';
 
   // Helpers
-  function dateKey(d) {
-    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-  }
+  function dateKey(d) { return fmtYMD(d); }
   function todayKey() { return dateKey(new Date()); }
   // Source of truth for "today" is absolute ml. Servings are only ever a
   // display/input convenience derived from this number.
@@ -1246,12 +1253,8 @@ const CONFIG = {
   const FOOD_KEY = 'po_food_v1';
   const $ = id => document.getElementById(id);
 
-  // 6 AM-anchored day key — mirrors the Daily Stack / Water reset exactly.
-  function dayKey() {
-    const now = new Date();
-    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
-    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-  }
+  // 6 AM-anchored day key — mirrors the Daily Stack reset exactly (shared helper).
+  function dayKey() { return activeDayKey(); }
   // ── Meal type ────────────────────────────────────────────────────────────
   // Tag every logged meal as breakfast/lunch/dinner/snack. The default is
   // guessed from the local clock; the segmented control lets the user override.
@@ -1287,7 +1290,7 @@ const CONFIG = {
     const p = dateStr.split('-').map(Number);
     const dt = new Date(p[0], p[1] - 1, p[2]);
     dt.setDate(dt.getDate() + delta);
-    return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    return fmtYMD(dt);
   }
 
   // Contextual emoji from the meal name — first keyword match wins.
@@ -1373,8 +1376,7 @@ const CONFIG = {
 
   // RC-1 polish: never show the user a raw HTTP status / server error
   // string — only a plain-language sentence. The technical detail (status +
-  // server message, if any) is logged to the console instead. Mirrors the
-  // same policy applied to Shelron (js/shelron/ui.js).
+  // server message, if any) is logged to the console instead.
   function friendlyMealScanError(err) {
     const code = err && err.code;
     if (code === 'http_429') return "You're scanning too fast — please wait a moment and try again.";
@@ -1382,6 +1384,32 @@ const CONFIG = {
     if (typeof code === 'string' && code.indexOf('http_') === 0) return "Couldn't reach the AI service. Please try again in a moment.";
     if (code === 'network') return "Couldn't reach the AI service. Please try again in a moment.";
     return 'Could not analyze that image. Please try again.';
+  }
+
+  // ── Meal streak ───────────────────────────────────────────────────────────
+  // Consecutive 6 AM-anchored days with at least one logged meal. Computed on
+  // the fly from po_food_v1 (no new storage key) via the shared StreakEngine
+  // (js/streak-engine.js) — same day-key convention as the rest of this file.
+  function mealStreak() {
+    const all = load();
+    const hitDays = {};
+    Object.keys(all).forEach(k => { if ((all[k] || []).length) hitDays[k] = true; });
+    return window.StreakEngine ? window.StreakEngine.compute(hitDays, dayKey()) : { current: 0, lastDate: null };
+  }
+  function streakNote(n) {
+    if (n >= 14) return 'Excellent consistency. Keep fueling your body.';
+    if (n >= 2) return 'Great consistency. Keep fueling your body.';
+    return 'Nice start — keep it going.';
+  }
+  function renderMealStreak() {
+    const wrap = $('mealStreakWrap'); if (!wrap) return;
+    const s = mealStreak();
+    wrap.innerHTML = s.current > 0
+      ? '<div class="sf-eyebrow">🔥 Meal Streak</div>'
+        + '<div class="sf-title">' + s.current + (s.current === 1 ? ' day' : ' days') + '</div>'
+        + '<div class="streak-note">' + streakNote(s.current) + '</div>'
+      : '<div class="sf-eyebrow">🔥 Start your first streak</div>'
+        + '<div class="streak-note">Log today\'s meal to begin.</div>';
   }
 
   // ── Persistence ops ──────────────────────────────────────────────────────
@@ -1440,6 +1468,7 @@ const CONFIG = {
     const list = $('foodLog'); if (!list) return;
     list.innerHTML = meals.map(mealCardHTML).join('');
     const empty = $('foodEmpty'); if (empty) empty.hidden = meals.length > 0;
+    renderMealStreak();
   }
 
   // Reflect the active meal type on the segmented control.

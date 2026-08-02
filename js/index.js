@@ -832,11 +832,9 @@ window.QuickNotes = (function () {
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
-    moveEvent: (m, hm) => apiRetimeEvent(m, { start: hm }),   // back-compat alias
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
     renameEvent: apiRenameEvent,
-    restoreEvent: apiRestoreEvent, undoLastAction: apiRestoreEvent,   // undo == restore last deletion
-    hasUndo: () => !!lastDeletedEvent,
+    restoreEvent: apiRestoreEvent,
     matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
 })();
@@ -913,7 +911,11 @@ window.QuickNotes = (function () {
       return { h, m: m[2] ? +m[2] : 0 };
     }
     m = t.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (m) return { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]) };
+    // Known Issue #16 fix: reject an out-of-range HH:MM (e.g. "30:99") instead
+    // of clamping it to 23:59 — a clamped value schedules a real event at a
+    // time the user never asked for. window.Shelron.Intent.parseStrictTime is
+    // the shared deterministic validator (js/shelron/intent-engine.js).
+    if (m) return window.Shelron.Intent.parseStrictTime(m[1] + ':' + m[2]);
     return null;
   }
   // Every time token in a string, in order — for ranges like "10pm to 12am".
@@ -924,7 +926,7 @@ window.QuickNotes = (function () {
     while ((m = re.exec(text))) {
       if (m[6]) out.push(/noon/i.test(m[6]) ? { h: 12, m: 0 } : { h: 0, m: 0 });
       else if (m[3]) { let h = +m[1] % 12; if (/pm/i.test(m[3])) h += 12; out.push({ h, m: m[2] ? +m[2] : 0 }); }
-      else if (m[4]) out.push({ h: Math.min(23, +m[4]), m: Math.min(59, +m[5]) });
+      else if (m[4]) { const hm = window.Shelron.Intent.parseStrictTime(m[4] + ':' + m[5]); if (hm) out.push(hm); }
     }
     return out;
   }
@@ -939,7 +941,11 @@ window.QuickNotes = (function () {
     let m = t.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
     if (m) { let h = +m[1] % 12; if (m[3] === 'pm') h += 12; return { h, m: m[2] ? +m[2] : 0, mer: true }; }
     m = t.match(/^(\d{1,2}):(\d{2})$/);
-    if (m) return { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]), mer: false };
+    if (m) {
+      // Known Issue #16 fix: reject, don't clamp — see parseTime() above.
+      const hm = window.Shelron.Intent.parseStrictTime(m[1] + ':' + m[2]);
+      return hm ? { h: hm.h, m: hm.m, mer: false } : null;
+    }
     m = t.match(/^(\d{1,2})$/);
     if (m && +m[1] >= 0 && +m[1] <= 23) return { h: +m[1], m: 0, mer: false };
     return null;
@@ -975,17 +981,38 @@ window.QuickNotes = (function () {
       .replace(/^./, c => c.toUpperCase());
   }
 
+  // ── date resolution ──────────────────────────────────────────────────────────
+  // Recognises the explicit date references the assistant commits to acting
+  // on: a bare "YYYY-MM-DD" token, or "tomorrow". "today"/"tonight" resolve to
+  // null (no day change) since that's already the assistant's default target
+  // — every existing caller that never mentions a date keeps behaving exactly
+  // as before. Anything richer ("next Friday") is left to the Gemini
+  // fallback, which resolves it to an absolute date server-side
+  // (proxy/server.js, /api/gemini/assistant) the same way this used to work
+  // in the now-retired js/shelron/parser.js.
+  function resolveDate(raw) {
+    const t = raw.toLowerCase();
+    const iso = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+    if (iso) return iso[1];
+    if (/\btomorrow\b/.test(t)) {
+      const d = new Date(); d.setDate(d.getDate() + 1);
+      return d.getFullYear() + '-' + padZ(d.getMonth() + 1) + '-' + padZ(d.getDate());
+    }
+    return null;
+  }
+
   // ── local intent parser ─────────────────────────────────────────────────────
   // Order matters: more specific bridges (water/food/notes) before the generic
   // calendar verbs so "log water" never reads as "complete an event".
   function parseLocal(raw) {
     const t = raw.toLowerCase().trim();
+    const date = resolveDate(raw);
 
     // summarize / greeting
     if (/^(summari[sz]e|recap|overview|brief)\b/.test(t) ||
-        /\b(what('?s| is)?|show|how('?s| is)?).*(today|schedule|day|plan|on|calendar|left)\b/.test(t) ||
+        /\b(what('?s| is)?|show|how('?s| is)?).*(today|tomorrow|tonight|schedule|day|plan|on|calendar|left)\b/.test(t) ||
         /^(good\s+(morning|afternoon|evening)|hi|hey|hello)\b/.test(t)) {
-      return { action: 'summarize' };
+      return { action: 'summarize', date };
     }
     // water
     if (/\b(water|hydrat)/.test(t) || /\b(drank|drink|had)\b.*\b(glass|bottle|cup)\b/.test(t) ||
@@ -1013,7 +1040,7 @@ window.QuickNotes = (function () {
     // back to creation when no block matches.
     const A = window.AptCal;
     // Words that aren't part of a block title — dropped before fuzzy matching.
-    const FILLER = /\b(the|my|a|an|that|this|please|it|i|just|to|item|entry|event|block|task|as|off|for|on|today|tonight|already|done|complete[d]?|finished?)\b/gi;
+    const FILLER = /\b(the|my|a|an|that|this|please|it|i|just|to|item|entry|event|block|task|as|off|for|on|today|tonight|tomorrow|already|done|complete[d]?|finished?)\b/gi;
     const phraseFrom = (re) => raw.replace(re, ' ').replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
     const resolve = (phrase) => (A && A.matchTitle ? A.matchTitle(phrase) : null);
     // Coreference: a phrase that is empty or just a pronoun ("it", "that",
@@ -1064,21 +1091,21 @@ window.QuickNotes = (function () {
     if (/\b(uncheck|unmark|un-?mark|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
       const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|incomplete|untick(ed)?|not\s+done)\b/gi));
       const title = resolve(phrase);
-      if (title) return { action: 'uncheck_event', match: title };
-      if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
+      if (title) return { action: 'uncheck_event', match: title, date };
+      if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null, date };
     }
     // CHECK / complete / finish / done / tick / "log that I…"  → toggle done:true
     if (/\b(check(\s*off)?|complete[d]?|finish(ed)?|done|tick(ed)?)\b/.test(t) ||
         /\bmark\b[\s\S]*\b(done|complete[d]?)\b/.test(t) || /^log\s+(that\s+)?i\b/.test(t)) {
       const phrase = coref(phraseFrom(/\b(log|check(\s*off)?|checkoff|complete[d]?|finish(ed)?|done|tick(ed)?|mark|did)\b/gi));
       const title = resolve(phrase);
-      if (title) return { action: 'complete_event', match: title };
-      if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null };
+      if (title) return { action: 'complete_event', match: title, date };
+      if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null, date };
     }
     // DELETE / remove / cancel  → remove the block entirely
     if (/\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
       const phrase = coref(phraseFrom(/\b(delete|remove|cancel|clear|drop)\b/gi));
-      return { action: 'delete_event', match: resolve(phrase) || phrase };
+      return { action: 'delete_event', match: resolve(phrase) || phrase, date };
     }
     // RE-TIME — move / reschedule / shift / reduce / extend / shorten / lengthen.
     // Pulls the task name + any time(s) or duration so it can recompute start AND
@@ -1101,7 +1128,7 @@ window.QuickNotes = (function () {
           .replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ')
           .replace(/\s+/g, ' ').trim());
-        const out = { action: 'retime_event', match: resolve(phrase) || phrase };
+        const out = { action: 'retime_event', match: resolve(phrase) || phrase, date };
         if (times.length >= 2) { out.time = times[0]; out.endTime = times[1]; }
         else if (times.length === 1) { out.time = times[0]; }
         if (times.length < 2) {
@@ -1133,10 +1160,11 @@ window.QuickNotes = (function () {
         .replace(/\bat\b\s*[\d:apm\s]+/i, '')
         .replace(/\bfor\b\s*\d+\s*(min|minute|hour|hr)s?/i, '')
         .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
+        .replace(/\b\d{4}-\d{2}-\d{2}\b/g, '')
         .replace(/\s+/g, ' ').trim()
         .replace(/\b(event|block)s?\s*$/i, '')   // drop a dangling connector noun
         .trim();
-      return { action: 'add_event', title: cleanTitle(title), time, durationMin, endTime };
+      return { action: 'add_event', title: cleanTitle(title), time, durationMin, endTime, date };
     }
     // Bare "TASK from X to Y" (no verb) — re-time, but ONLY when the phrase maps
     // to an existing block, so it never hijacks creation of a brand-new entry.
@@ -1149,7 +1177,7 @@ window.QuickNotes = (function () {
         const phrase = coref(stripped.replace(/\bfrom\b|\bto\b|\bat\b/gi, ' ').replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ').replace(/\s+/g, ' ').trim());
         const title = resolve(phrase);
-        if (title) return { action: 'retime_event', match: title, time: times[0], endTime: times[1] };
+        if (title) return { action: 'retime_event', match: title, time: times[0], endTime: times[1], date };
       }
     }
     return null; // unknown → Gemini fallback
@@ -1185,20 +1213,45 @@ window.QuickNotes = (function () {
   async function applyIntent(intent) {
     const A = window.AptCal;
     // Accept times as {h,m} (local parser) or "HH:MM"/"4pm" strings (Gemini).
+    // A malformed "HH:MM" (e.g. Gemini hallucinating "30:99") is rejected here
+    // the same way parseTime() rejects one locally — Known Issue #16.
     const asTime = (v) => !v ? null
       : (typeof v === 'string'
-          ? (parseTime(v) || (function () { const m = v.match(/(\d{1,2}):(\d{2})/); return m ? { h: +m[1], m: +m[2] } : null; })())
+          ? (parseTime(v) || window.Shelron.Intent.parseStrictTime((v.match(/(\d{1,2}):(\d{2})/) || []).slice(1).join(':')))
           : v);
     const time = asTime(intent.time);
 
+    // Commands can now target a date other than whatever day is currently
+    // selected in the calendar widget (intent.date, from resolveDate() or
+    // Gemini's "date" field) — Known Issue #15 fix (reject a malformed date
+    // deterministically) plus the day-selection this needs to actually apply
+    // against the right day. AptCal.selectDay() kicks off loadEvents()
+    // without awaiting it internally, so a caller that immediately reads/
+    // matches against that day's events must re-await reload() first, or it
+    // races a stale day (same fix as the retired calendar-adapter.js's
+    // ensureDayLoaded()). No-op when no date was mentioned — the overwhelming
+    // common case is unaffected.
+    async function ensureDate(dateStr) {
+      if (!dateStr) return true;
+      if (!window.Shelron.Intent.isValidCalendarDate(dateStr)) {
+        addMsg('ai', "That doesn't look like a valid date.");
+        return false;
+      }
+      A.selectDay(dateStr);
+      await A.reload();
+      return true;
+    }
+
     switch (intent.action) {
       case 'summarize':
+        if (!(await ensureDate(intent.date))) return;
         addMsg('ai', A.summarize());
         return;
 
       case 'add_event': {
         if (!intent.title) { addMsg('ai', 'What should I call that block?'); return; }
         if (!time) { addMsg('ai', 'When should I schedule “' + intent.title + '”? Try “at 4pm”.'); return; }
+        if (!(await ensureDate(intent.date))) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
         // Derive duration from an end time when only a range was supplied (e.g.
         // a Gemini intent that gives endTime but no durationMin).
@@ -1230,6 +1283,7 @@ window.QuickNotes = (function () {
           addMsg('ai', 'Re-time it to when? Try “move workout to 4pm” or “reduce film 10pm to 12am”.');
           return;
         }
+        if (!(await ensureDate(intent.date))) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to re-time that."); return; }
         const r = await A.retimeEvent(intent.match, opts);
         if (r.ok) remember(r.title);
@@ -1251,6 +1305,7 @@ window.QuickNotes = (function () {
         return;
       }
       case 'complete_event': {
+        if (!(await ensureDate(intent.date))) return;
         const r = A.completeEvent(intent.match);
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? '✓ Awesome — marked “' + r.title + '” as completed.'
@@ -1259,6 +1314,7 @@ window.QuickNotes = (function () {
         return;
       }
       case 'uncheck_event': {
+        if (!(await ensureDate(intent.date))) return;
         const r = A.uncheckEvent(intent.match);
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? "✓ I've unchecked “" + r.title + '” — back on your list.'
@@ -1267,6 +1323,7 @@ window.QuickNotes = (function () {
         return;
       }
       case 'delete_event': {
+        if (!(await ensureDate(intent.date))) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to delete that."); return; }
         const r = await A.deleteEvent(intent.match);
         addMsg('ai', r.ok ? '✓ Deleted “' + r.title + '”.'
@@ -1308,13 +1365,66 @@ window.QuickNotes = (function () {
     }
   }
 
+  // ── Cross-module context (pre-Shelron stopgap, see Shelron.md § v0.2) ────────
+  // index.html never loads js/health.js or js/gym/*.js — they're separate
+  // static pages sharing only localStorage, not a live JS object. So Shenlong
+  // reads the same storage those modules own directly, read-only, and reports
+  // only facts it can state with certainty (raw logged totals/state) — never a
+  // derived judgment those modules would compute themselves (e.g. no
+  // personalized water-goal %, which needs health.js's substance-adjusted
+  // formula). A field left null means "no data available"; the assistant must
+  // say so rather than guess. This is intentionally NOT a shared module — it's
+  // a wider ad hoc context slice inside the existing stopgap, not the real
+  // Context Builder engine Shelron.md designs.
+  function activeFoodDayKey() {
+    const now = new Date();
+    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+    return now.getFullYear() + '-' + padZ(now.getMonth() + 1) + '-' + padZ(now.getDate());
+  }
+  function todayHealthSummary() {
+    let waterMlToday = null, mealsLoggedToday = null;
+    try {
+      const w = JSON.parse(localStorage.getItem('po_water_v1') || 'null');
+      if (w && w.logs) waterMlToday = Number(w.logs[todayStr()]) || 0;
+    } catch (e) {}
+    try {
+      const f = JSON.parse(localStorage.getItem('po_food_v1') || 'null');
+      if (f) mealsLoggedToday = (f[activeFoodDayKey()] || []).length;
+    } catch (e) {}
+    if (waterMlToday === null && mealsLoggedToday === null) return null;
+    return { waterMlToday, mealsLoggedToday };
+  }
+  function todayGymSummary() {
+    let coach;
+    try { coach = JSON.parse(localStorage.getItem('po_coach_v1') || 'null'); } catch (e) { coach = null; }
+    if (!coach) return null;
+    let routines = [];
+    try { routines = JSON.parse(localStorage.getItem('rb_routines_v1') || '[]'); } catch (e) {}
+    const pinned = Array.isArray(routines) ? routines.find(r => r.id === coach.filterRoutine) : null;
+    const openSession = Array.isArray(coach.sessions) ? coach.sessions.find(s => !s.endedAt) : null;
+    return {
+      pinnedRoutineName: pinned ? pinned.name : null,
+      pinnedRoutineExerciseCount: pinned ? (pinned.exercises || []).length : null,
+      workoutInProgress: !!openSession,
+      setsLoggedInOpenSession: openSession ? (openSession.sets || []).length : 0,
+    };
+  }
+
   // ── Gemini fallback ──────────────────────────────────────────────────────────
   async function askGemini(message) {
     const res = await fetch(GEMINI_ENDPOINT, {
       method: 'POST',
       headers: Object.assign({ 'Content-Type': 'application/json' },
         window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
-      body: JSON.stringify({ message, context: { date: todayStr(), events: window.AptCal.getEvents() } }),
+      body: JSON.stringify({
+        message,
+        context: {
+          date: todayStr(),
+          events: window.AptCal.getEvents(),
+          gym: todayGymSummary(),
+          health: todayHealthSummary(),
+        },
+      }),
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);

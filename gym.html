@@ -151,9 +151,44 @@ const CONFIG = {
     </button>
   </div>
 
-  <div class="card">
+  <!-- TODAY'S WORKOUT — routine-first entry point. Fully rendered by
+       renderTodayHero() in gym-ui.js (called from renderAll()), same pattern
+       as #rxWrap below. -->
+  <div class="card" id="todayWorkoutCard">
+    <div class="po-sub-title">Today's Workout</div>
+    <div id="todayHeroWrap"></div>
+  </div>
+
+  <!-- WORKOUT PLANS — primary CRUD surface for routines. List + row actions
+       rendered by renderMyRoutines() in gym-routine-builder.js (relocated
+       from the old #rbSavedList footer of the Routine Builder card below).
+       "+ Create Plan" is always visible per the routine-first redesign.
+       Internal id/JS naming stays "myRoutines*" — user-facing label only
+       changed to "Workout Plans" (Gym Simplification pass, 2026-08-02),
+       same internal-vs-user-facing precedent as Shelron/Shenlong. -->
+  <div class="card" id="myRoutinesCard">
+    <div class="po-sub-title">Workout Plans</div>
+    <ul class="rb-saved-list" id="myRoutinesList"></ul>
+    <div class="rb-saved-empty" id="myRoutinesEmpty">💪 No plans yet — build one to start tracking workouts.</div>
+    <!-- Secondary weight, deliberately: the hero's Start/Resume CTA above is
+       the page's one primary action. Creating a plan is a lighter, less
+       frequent action and shouldn't compete with it visually (Gym Polish
+       pass, 2026-08-02). -->
+    <button class="po-btn-secondary rb-create-routine-btn" id="myRoutinesCreateBtn" type="button">+ Create Plan</button>
+  </div>
+
+  <!-- COACH / logging card — folded exclusively into Workout Mode (Gym
+       Simplification pass, 2026-08-02): hidden by default, shown only while
+       .is-workout-mode is active on .po-shell (css/gym.css). No ad-hoc
+       logging surface exists outside an active workout anymore. -->
+  <div class="card" id="coachCard">
+    <!-- WORKOUT MODE bar — hidden outside Workout Mode (CSS: .is-workout-mode
+         on .po-shell). Fully rendered by renderWorkoutBar() in gym-ui.js
+         (called from renderAll()), same wrap-div pattern as #rxWrap below. -->
+    <div class="po-wm-bar" id="wmBar"></div>
+
     <!-- Filters -->
-    <div class="po-filters">
+    <div class="po-filters po-wm-secondary">
       <div class="po-seg-row">
         <span class="po-seg-label">Gym</span>
         <div class="po-seg-control" id="gymSeg"></div>
@@ -167,32 +202,55 @@ const CONFIG = {
       </div>
     </div>
 
-    <!-- Exercise -->
-    <div class="po-sub-section">
-      <div class="po-sub-title">Exercise</div>
-      <div class="po-exercise-bar">
-        <select class="po-ex-select" id="exSelect"></select>
-        <button class="po-btn-icon" id="addExBtn" title="Add exercise" aria-label="Add">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-        <button class="po-btn-icon" id="editExBtn" title="Edit / delete" aria-label="Edit">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-        </button>
+    <!-- CURRENT EXERCISE — Workout Mode's primary card (Goal 3 — Session
+         Experience, 2026-08-02). Name/muscle/gif/last-performance/
+         recommendation, grouped into one cohesive card instead of three
+         separate sections (Exercise / Log a set's "Last time" / Prescription
+         used to be split apart). Nothing here is new: #exSelect is the exact
+         same dropdown + change handler, #lastSet/#rxWrap are the exact same
+         elements rendered by the exact same renderLastSet()/renderRx() —
+         only their grouping and the new #curExName/#curExMuscle heading
+         (populated by the existing renderSelect(), gym-ui.js) are new.
+         #exSelect is deliberately demoted to a small "switch exercise"
+         control here — primary navigation is now the Next Exercise preview
+         below the Set Logger, not this dropdown (still fully functional for
+         jumping to any exercise, e.g. supersets or going back). -->
+    <div class="po-sub-section po-cur-ex">
+      <div class="po-cur-ex-head">
+        <div class="po-cur-ex-id">
+          <div class="po-sub-title">Current Exercise</div>
+          <div class="po-cur-ex-name" id="curExName">—</div>
+          <div class="po-cur-ex-muscle" id="curExMuscle"></div>
+        </div>
+        <div class="po-cur-ex-switch">
+          <select class="po-ex-select" id="exSelect" aria-label="Switch exercise"></select>
+          <button class="po-btn-icon" id="addExBtn" title="Add exercise" aria-label="Add">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <button class="po-btn-icon" id="editExBtn" title="Edit / delete" aria-label="Edit">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+          </button>
+        </div>
       </div>
       <div class="po-no-ex" id="noExMsg" style="display:none">No exercises here yet. Tap <strong>+</strong> to add one.</div>
       <!-- Visual reference GIF — bound to the active exercise's gifUrl -->
       <img id="exGifImg" class="po-ex-gif" alt="" style="display:none">
-    </div>
-
-    <!-- Log a set -->
-    <div class="po-sub-section">
-      <div class="po-sub-title">Log today's top set</div>
-      <div class="po-bw-banner" id="bwBanner">Bodyweight — log reps only</div>
       <div class="po-last-set" id="lastSet">
         <span class="po-last-label">Last time</span>
         <span class="po-last-value" id="lastSetValue"></span>
         <span class="po-last-meta" id="lastSetMeta"></span>
       </div>
+      <!-- Today's recommendation — same deterministic prescription engine
+           (getRx/getRxTime, gym-storage.js), just relocated next to the
+           exercise it's about instead of a separate section below the
+           logger. -->
+      <div id="rxWrap"></div>
+    </div>
+
+    <!-- SET LOGGER -->
+    <div class="po-sub-section" id="setLoggerCard">
+      <div class="po-sub-title">Set Logger</div>
+      <div class="po-bw-banner" id="bwBanner">Bodyweight — log reps only</div>
       <div class="po-log-grid" id="logGrid">
         <div class="po-field" id="weightField">
           <label id="weightLabel">Weight (kg)</label>
@@ -221,14 +279,20 @@ const CONFIG = {
       </div>
     </div>
 
-    <!-- Prescription -->
-    <div class="po-sub-section">
-      <div class="po-sub-title">Next session</div>
-      <div id="rxWrap"></div>
+    <!-- NEXT EXERCISE — single-exercise preview, not the whole routine
+         (Goal 3 — Session Experience, 2026-08-02). Tapping it advances
+         exactly like picking it in #exSelect above (same
+         `G.state.currentEx = id; saveState(); renderAll();` — see
+         gym-actions.js). Reuses the exact same "next" lookup
+         renderWorkoutBar() already computes for the wmBar's "Next: …" line;
+         hidden when there's no next exercise (last in the routine). -->
+    <div class="po-sub-section" id="nextExCard" style="display:none">
+      <div class="po-sub-title">Next Exercise</div>
+      <button type="button" class="po-next-ex" id="nextExBtn"></button>
     </div>
 
     <!-- Stats -->
-    <div class="po-sub-section">
+    <div class="po-sub-section po-wm-secondary">
       <div class="po-sub-title">Stats</div>
       <!-- PR / Personal Record — heaviest set ever logged for this exercise -->
       <div class="po-pr-box">
@@ -252,7 +316,7 @@ const CONFIG = {
     </div>
 
     <!-- Trend -->
-    <div class="po-sub-section">
+    <div class="po-sub-section po-wm-secondary">
       <div class="po-sub-title">Trend (last 10 sessions)</div>
       <div class="po-spark-wrap">
         <svg class="po-spark-svg" id="sparkline" viewBox="0 0 300 60" preserveAspectRatio="none">
@@ -268,7 +332,7 @@ const CONFIG = {
     </div>
 
     <!-- History -->
-    <div class="po-sub-section">
+    <div class="po-sub-section po-wm-secondary">
       <div class="po-sub-title po-hist-head">
         <span>History</span>
         <!-- Only dates this exercise was actually logged appear here.
@@ -282,11 +346,14 @@ const CONFIG = {
       </div>
     </div>
 
-    <!-- Today's Workout — every set logged today, grouped by exercise.
-         "Mark done" stamps the day so the past-workouts list shows it
-         as a completed session. -->
+    <!-- Session log — every set logged today, grouped by exercise. Named
+         distinctly from the page-level "Today's Workout" hero above
+         (routine selection vs. logged sets). The finish-workout action
+         ("Mark done") moved into the sticky #wmBar (Gym Polish pass,
+         2026-08-02) — it's the one reachable-from-anywhere place to end a
+         session now, so it's not duplicated here too (see #wmFinishBtn). -->
     <div class="po-sub-section">
-      <div class="po-sub-title">Today's workout</div>
+      <div class="po-sub-title">Session log</div>
       <div class="po-tw" id="poTw">
         <div class="po-tw-head">
           <div>
@@ -298,25 +365,31 @@ const CONFIG = {
           </div>
           <div class="po-tw-actions">
             <button class="po-tw-new-btn" id="poTwNewBtn" type="button">+ New session</button>
-            <button class="po-tw-done-btn" id="poTwDoneBtn" type="button">Mark done</button>
           </div>
         </div>
         <ul class="po-tw-list" id="poTwList"></ul>
         <div class="po-tw-empty" id="poTwEmpty">No active session — log a set to start one, or tap “New session”.</div>
       </div>
 
-      <button type="button" class="po-tw-past-toggle" id="poTwPastToggle" aria-expanded="false">
+      <button type="button" class="po-tw-past-toggle po-wm-secondary" id="poTwPastToggle" aria-expanded="false">
         <span>Past workouts <span class="po-tw-past-count" id="poTwPastCount">0</span></span>
         <span class="po-tw-past-arrow" id="poTwPastArrow">▾</span>
       </button>
-      <div class="po-tw-past-body" id="poTwPastBody" style="display:none"></div>
+      <div class="po-tw-past-body po-wm-secondary" id="poTwPastBody" style="display:none"></div>
     </div>
   </div>
 
-  <!-- ROUTINE BUILDER — browse the exercise library, compose & save routines -->
-  <div class="card" id="rbCard">
-    <div class="po-sub-title">Routine Builder</div>
+  <!-- EXERCISE LIBRARY — independent, always-browsable section (Gym
+       Simplification pass, 2026-08-02). No longer collapsible and no longer
+       shares a card with the routine editor. #rbPickerBody is the single
+       exercise-picker DOM node — it lives here by default and is relocated
+       (appendChild, not cloned) into #planEditorOverlay's picker slot while
+       that overlay is open, then moved back here on close. Browsing here
+       never touches or requires a routine being edited. -->
+  <div class="card" id="exerciseLibraryCard">
+    <div class="po-sub-title">Exercise Library</div>
 
+    <div id="rbPickerBody">
     <input type="text" id="rbSearch" class="rb-search" placeholder="Search exercises…" autocomplete="off">
     <!-- MUSCLE MAP — interactive anatomical selector, synced with the pills below.
          SVG paths were adapted from an external anatomical reference and inlined
@@ -711,41 +784,124 @@ const CONFIG = {
     <div class="rb-grid" id="rbGrid"></div>
     <div class="rb-lib-empty" id="rbLibEmpty" style="display:none"></div>
     <button class="rb-more" id="rbMore" type="button" style="display:none">Show more</button>
+    </div>
+  </div>
 
-    <div class="po-sub-title" style="margin-top:26px">Your routine</div>
-    <input type="text" id="rbRoutineName" class="rb-name-input" placeholder="Routine name (e.g. Push Day A)" autocomplete="off">
-    <ul class="rb-routine-list" id="rbRoutineList"></ul>
-    <div class="rb-routine-empty" id="rbRoutineEmpty">No exercises yet — add some from the library above.</div>
+  <!-- PLAN EDITOR — overlay/drawer, mounted only via Create Plan / Edit (Gym
+       Simplification pass, 2026-08-02). Reuses the .wt-overlay full-screen
+       drawer pattern (same one Progress Photos uses) rather than a new
+       component. #rbPickerBody (defined above, inside Exercise Library) is
+       relocated into #planEditorPickerSlot while this is open via
+       openPlanEditor()/closePlanEditor() in gym-routine-builder.js — the
+       exercise picker is one DOM node, never duplicated. -->
+  <div class="wt-overlay" id="planEditorOverlay" aria-hidden="true">
+    <div class="wt-overlay-inner">
+      <div class="wt-overlay-h">
+        <button class="wt-back" id="planEditorBack" aria-label="Close plan editor">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <div class="wt-overlay-title" id="planEditorTitle">Routine</div>
+      </div>
 
-    <!-- GLOBAL REST CONFIG — one rest value for the whole routine. Replaces the
-         per-exercise stepper rows. The MM:SS field accepts manual typing
-         (validated) as well as the live timer's ±15s once a set is logged. -->
-    <div class="rb-rest-global" id="rbRestGlobal">
-      <label class="rb-rest-switch">
-        <input type="checkbox" id="rbRestToggle">
-        <span class="rb-rest-switch-track"><span class="rb-rest-switch-thumb"></span></span>
-        <span class="rb-rest-switch-label">Add rest between sets?</span>
-      </label>
-      <div class="rb-rest-field" id="rbRestField" hidden>
-        <label for="rbRestInput">Rest between sets · MM:SS</label>
-        <div class="rb-rest-field-row">
-          <input type="text" id="rbRestInput" class="rb-rest-input" inputmode="numeric"
-                 placeholder="01:30" value="01:30" autocomplete="off" maxlength="5"
-                 aria-describedby="rbRestErr">
-          <span class="rb-rest-hint" id="rbRestHint">for all sets</span>
+      <input type="text" id="rbRoutineName" class="rb-name-input" placeholder="Routine name (e.g. Push Day A)" autocomplete="off">
+      <ul class="rb-routine-list" id="rbRoutineList"></ul>
+      <div class="rb-routine-empty" id="rbRoutineEmpty">No exercises yet — add some from the library below.</div>
+
+      <!-- GLOBAL REST CONFIG — one rest value for the whole routine. Replaces the
+           per-exercise stepper rows. The MM:SS field accepts manual typing
+           (validated) as well as the live timer's ±15s once a set is logged. -->
+      <div class="rb-rest-global" id="rbRestGlobal">
+        <label class="rb-rest-switch">
+          <input type="checkbox" id="rbRestToggle">
+          <span class="rb-rest-switch-track"><span class="rb-rest-switch-thumb"></span></span>
+          <span class="rb-rest-switch-label">Add rest between sets?</span>
+        </label>
+        <div class="rb-rest-field" id="rbRestField" hidden>
+          <label for="rbRestInput">Rest between sets · MM:SS</label>
+          <div class="rb-rest-field-row">
+            <input type="text" id="rbRestInput" class="rb-rest-input" inputmode="numeric"
+                   placeholder="01:30" value="01:30" autocomplete="off" maxlength="5"
+                   aria-describedby="rbRestErr">
+            <span class="rb-rest-hint" id="rbRestHint">for all sets</span>
+          </div>
+          <span class="rb-rest-err" id="rbRestErr" hidden>Invalid format — use MM:SS (max 10:00).</span>
         </div>
-        <span class="rb-rest-err" id="rbRestErr" hidden>Invalid format — use MM:SS (max 10:00).</span>
+      </div>
+
+      <div class="rb-routine-actions">
+        <button class="po-btn-secondary" id="rbClearBtn" type="button">Clear</button>
+        <button class="po-btn-primary" id="rbSaveBtn" type="button">Save routine</button>
+      </div>
+
+      <!-- #rbPickerBody (Exercise Library's search/muscle-map/catalog) is
+           appended here while the editor is open — see openPlanEditor(). -->
+      <div class="po-sub-title plan-editor-picker-heading">Add exercises</div>
+      <div class="plan-editor-picker-slot" id="planEditorPickerSlot"></div>
+    </div>
+  </div>
+
+  <!-- WORKOUT SUMMARY — shown on Finish, before Workout Mode actually exits
+       (Goal 3 — Session Experience, 2026-08-02). Reuses the .wt-overlay
+       drawer pattern (same as Plan Editor / Progress Photos). Every number
+       here comes from buildWorkoutSummary() (gym-storage.js), which itself
+       only calls existing, already-shipped functions — summarizeSession(),
+       G.state.logs, getRx() — no new calculations invented for this screen. -->
+  <div class="wt-overlay" id="workoutSummaryOverlay" aria-hidden="true">
+    <div class="wt-overlay-inner">
+      <div class="wt-overlay-h">
+        <div class="wt-overlay-title" id="summaryTitle">Workout Complete</div>
+      </div>
+      <div id="summaryBody"></div>
+      <button type="button" class="po-btn-primary po-summary-done" id="summaryDoneBtn">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightweight routine creation flow — 3 steps (name → goal → training
+     days), each optional past step 1, before the full builder ever opens.
+     Reuses the standard .po-modal-bg/.po-modal/.po-modal-actions shell. -->
+<div class="po-modal-bg" id="rbCreateModalBg">
+  <div class="po-modal">
+    <h3>New Routine</h3>
+
+    <div class="rb-create-step" id="rbCreateStep1">
+      <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Routine name</label>
+      <input type="text" id="rbCreateName" class="rb-name-input" placeholder="e.g. Push Day" autocomplete="off">
+    </div>
+
+    <div class="rb-create-step" id="rbCreateStep2" hidden>
+      <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Goal <span class="rb-create-optional">(optional)</span></label>
+      <div class="rb-create-pills" id="rbCreateGoalPills">
+        <button type="button" class="rb-create-pill" data-goal="strength">Strength</button>
+        <button type="button" class="rb-create-pill" data-goal="hypertrophy">Hypertrophy</button>
+        <button type="button" class="rb-create-pill" data-goal="endurance">Endurance</button>
+        <button type="button" class="rb-create-pill" data-goal="general">General Fitness</button>
       </div>
     </div>
 
-    <div class="rb-routine-actions">
-      <button class="po-btn-secondary" id="rbClearBtn" type="button">Clear</button>
-      <button class="po-btn-primary" id="rbSaveBtn" type="button">Save routine</button>
+    <div class="rb-create-step" id="rbCreateStep3" hidden>
+      <label style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.04em;text-transform:uppercase">Training days <span class="rb-create-optional">(optional)</span></label>
+      <div class="rb-create-days" id="rbCreateDays">
+        <button type="button" class="rb-create-day" data-day="mon">Mon</button>
+        <button type="button" class="rb-create-day" data-day="tue">Tue</button>
+        <button type="button" class="rb-create-day" data-day="wed">Wed</button>
+        <button type="button" class="rb-create-day" data-day="thu">Thu</button>
+        <button type="button" class="rb-create-day" data-day="fri">Fri</button>
+        <button type="button" class="rb-create-day" data-day="sat">Sat</button>
+        <button type="button" class="rb-create-day" data-day="sun">Sun</button>
+      </div>
     </div>
 
-    <div class="po-sub-title" style="margin-top:26px">Saved routines</div>
-    <ul class="rb-saved-list" id="rbSavedList"></ul>
-    <div class="rb-saved-empty" id="rbSavedEmpty">No saved routines yet.</div>
+    <div class="rb-create-dots" id="rbCreateDots" aria-hidden="true">
+      <span class="rb-create-dot is-active"></span>
+      <span class="rb-create-dot"></span>
+      <span class="rb-create-dot"></span>
+    </div>
+
+    <div class="po-modal-actions">
+      <button class="po-btn-secondary" id="rbCreateBack" type="button">Back</button>
+      <button class="po-btn-primary" id="rbCreateNext" type="button">Next</button>
+    </div>
   </div>
 </div>
 
