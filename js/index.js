@@ -220,7 +220,7 @@ window.QuickNotes = (function () {
   function dateObj(dateStr) { const p = partsOf(dateStr); return new Date(p.y, p.m, p.d); }
   // A local Date on the selected day at h:m — so the assistant/create paths
   // schedule onto whatever day is in view, not always today.
-  function dtOnSelected(h, m) { const p = partsOf(selectedDate); return new Date(p.y, p.m, p.d, h, m, 0, 0); }
+  function dtOnSelected(h, m, dateStr) { const p = partsOf(dateStr || selectedDate); return new Date(p.y, p.m, p.d, h, m, 0, 0); }
   // The local calendar day an event belongs to (handles all-day + timed).
   function eventDateKey(ev) {
     const s = ev.start || '';
@@ -272,21 +272,27 @@ window.QuickNotes = (function () {
   }
 
   // ── completion state (the events table has no "done" flag) ────────────────
-  function doneKey() { return 'cal_done:' + selectedDate; }
-  function manualKey() { return 'cal_manual:' + selectedDate; }
-  function getDoneSet() {
-    try { return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); } catch (e) { return new Set(); }
+  // Known Issue #22: these keys were derived from the shared selectedDate with
+  // no way to target a different day — a mutating action resolving an event
+  // for day X could still record its done-state under whatever day Y
+  // selectedDate happened to be at the moment it ran, if a concurrent command
+  // changed it in between. Every function here now takes an optional dateStr,
+  // defaulting to selectedDate so every existing caller is unaffected.
+  function doneKey(dateStr) { return 'cal_done:' + (dateStr || selectedDate); }
+  function manualKey(dateStr) { return 'cal_manual:' + (dateStr || selectedDate); }
+  function getDoneSet(dateStr) {
+    try { return new Set(JSON.parse(localStorage.getItem(doneKey(dateStr))) || []); } catch (e) { return new Set(); }
   }
-  function setDone(id, done) {
-    const s = getDoneSet(); if (done) s.add(id); else s.delete(id);
-    localStorage.setItem(doneKey(), JSON.stringify([...s]));
+  function setDone(id, done, dateStr) {
+    const s = getDoneSet(dateStr); if (done) s.add(id); else s.delete(id);
+    localStorage.setItem(doneKey(dateStr), JSON.stringify([...s]));
   }
-  function getManualMap() {
-    try { return JSON.parse(localStorage.getItem(manualKey())) || {}; } catch (e) { return {}; }
+  function getManualMap(dateStr) {
+    try { return JSON.parse(localStorage.getItem(manualKey(dateStr))) || {}; } catch (e) { return {}; }
   }
-  function setManual(id, done) {
-    const m = getManualMap(); m[id] = !!done;
-    localStorage.setItem(manualKey(), JSON.stringify(m));
+  function setManual(id, done, dateStr) {
+    const m = getManualMap(dateStr); m[id] = !!done;
+    localStorage.setItem(manualKey(dateStr), JSON.stringify(m));
   }
   function autoCheckPastEvents(events) {
     const now = new Date(), manual = getManualMap(), s = getDoneSet();
@@ -559,6 +565,26 @@ window.QuickNotes = (function () {
     }
   }
 
+  // Known Issue #22 (Shenlong half) — request-scoped fetch for a specific
+  // day, independent of loadEvents()/selectedDate/currentEvents/render. Used
+  // by ensureDate() so a mutating applyIntent action always has a correct,
+  // freshly-fetched array for the day it actually resolved, immune to a
+  // concurrent command changing selectedDate out from under it. Still writes
+  // eventsByDate[dateStr] (that key is always correct regardless of what's
+  // currently selected) so the day's cache stays warm for later navigation.
+  async function fetchEventsForDate(dateStr) {
+    try {
+      const rows = await fetchWindow(
+        dayStartUTC(addDaysStr(dateStr, -1)), dayEndUTC(addDaysStr(dateStr, 1)));
+      if (rows === null) return eventsByDate[dateStr] || [];
+      const events = rows.filter(ev => eventDateKey(ev) === dateStr);
+      eventsByDate[dateStr] = events;
+      return events;
+    } catch (err) {
+      return eventsByDate[dateStr] || [];
+    }
+  }
+
   // Bulk-fetch the visible month in one range call, group events into the
   // per-date cache, and (re)paint the grid so days with blocks show a dot.
   async function loadMonth() {
@@ -691,10 +717,16 @@ window.QuickNotes = (function () {
   // Pick the event that best matches a keyword. `prefer` biases ties: 'done' for
   // unchecking (target the completed slot), 'undone' for completing, else the
   // upcoming/active one so "move my workout" hits the right block.
-  function findEvent(match, prefer) {
+  // Known Issue #22 (Shenlong half): events defaults to the shared
+  // currentEvents for every existing caller (the UI grid, matchTitle()'s
+  // pre-resolution), but a mutating applyIntent action now passes its own
+  // request-scoped array (see ensureDate/fetchEventsForDate) so it searches
+  // the day IT resolved, not whatever currentEvents holds by the time this
+  // call actually runs.
+  function findEvent(match, prefer, events) {
     const q = String(match || '').toLowerCase().trim();
     if (!q) return null;
-    const scored = currentEvents.map(ev => ({ ev, s: scoreMatch(ev.title, q) })).filter(x => x.s > 0);
+    const scored = (events || currentEvents).map(ev => ({ ev, s: scoreMatch(ev.title, q) })).filter(x => x.s > 0);
     if (!scored.length) return null;
     scored.sort((a, b) => b.s - a.s);
     const best = scored[0].s;
@@ -715,11 +747,15 @@ window.QuickNotes = (function () {
   // Resolve a phrase to a real event title (or null) — lets the parser decide
   // between mutating an existing block and creating a new one.
   function matchTitle(q) { const ev = findEvent(q); return ev ? ev.title : null; }
-  async function apiAddEvent(title, hm, durationMin, notes) {
-    const startDt = dtOnSelected(hm.h, hm.m);
+  // dateStr (optional, from ensureDate's request-scoped resolution — Known
+  // Issue #22) targets a day other than whatever's currently selected; the
+  // optimistic loadEvents() refresh only fires when it's the live-displayed
+  // day, same convention as the other mutating api* functions below.
+  async function apiAddEvent(title, hm, durationMin, notes, dateStr) {
+    const startDt = dtOnSelected(hm.h, hm.m, dateStr);
     const endDt = new Date(startDt.getTime() + (durationMin || 30) * 60000);
     const made = await createEvent({ title, notes, startDt, endDt });
-    await loadEvents();
+    if (!dateStr || dateStr === selectedDate) await loadEvents();
     return {
       title,
       when: fmtTime(made.start || startDt.toISOString()),
@@ -731,8 +767,9 @@ window.QuickNotes = (function () {
   //   • start + end (range) → set both (end wraps past midnight, e.g. 10pm→12am)
   //   • durationMin         → absolute length from the (new or current) start
   //   • deltaMin            → grow/shrink by N minutes (reduce/extend)
-  async function apiRetimeEvent(match, opts) {
-    const ev = findEvent(match);
+  async function apiRetimeEvent(match, opts, dateStr) {
+    const events = (dateStr && eventsByDate[dateStr]) || currentEvents;
+    const ev = findEvent(match, undefined, events);
     if (!ev) return { ok: false };
     const origMs = new Date(ev.end) - new Date(ev.start);
     let start = new Date(ev.start);
@@ -746,27 +783,33 @@ window.QuickNotes = (function () {
     if (opts.deltaMin != null) end = new Date(end.getTime() + opts.deltaMin * 60000);
     if (end <= start) end = new Date(start.getTime() + 5 * 60000);  // never zero/negative
     ev.start = toLocalISO(start); ev.end = toLocalISO(end);
-    sortEvents(); renderEvents(currentEvents);
+    // Only optimistically re-render the shared display when this IS the
+    // shared display's day — a different (concurrently-targeted) day isn't
+    // visible, so there's nothing to update; its cache self-corrects next
+    // time it's actually navigated to.
+    if (!dateStr || dateStr === selectedDate) { sortEvents(); renderEvents(currentEvents); }
     await patchEvent(ev, { startTime: ev.start, endTime: ev.end }, null);
     return {
       ok: true, title: ev.title, when: fmtTime(ev.start), end: fmtTime(ev.end),
       durationMin: Math.round((end - start) / 60000),
     };
   }
-  function apiCompleteEvent(match) {
-    const ev = findEvent(match, 'undone');
+  function apiCompleteEvent(match, dateStr) {
+    const events = (dateStr && eventsByDate[dateStr]) || currentEvents;
+    const ev = findEvent(match, 'undone', events);
     if (!ev) return { ok: false };
-    setManual(ev.id, true); setDone(ev.id, true);
-    applyDoneStateToDOM();
+    setManual(ev.id, true, dateStr); setDone(ev.id, true, dateStr);
+    if (!dateStr || dateStr === selectedDate) applyDoneStateToDOM();
     if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
     return { ok: true, title: ev.title };
   }
-  function apiUncheckEvent(match) {
-    const ev = findEvent(match, 'done');
+  function apiUncheckEvent(match, dateStr) {
+    const events = (dateStr && eventsByDate[dateStr]) || currentEvents;
+    const ev = findEvent(match, 'done', events);
     if (!ev) return { ok: false };
     // Record an explicit "not done" so autoCheckPastEvents won't re-tick a past slot.
-    setManual(ev.id, false); setDone(ev.id, false);
-    applyDoneStateToDOM();
+    setManual(ev.id, false, dateStr); setDone(ev.id, false, dateStr);
+    if (!dateStr || dateStr === selectedDate) applyDoneStateToDOM();
     if (typeof window.cloudSyncFlush === 'function') { try { window.cloudSyncFlush(); } catch (e) {} }
     return { ok: true, title: ev.title };
   }
@@ -782,8 +825,9 @@ window.QuickNotes = (function () {
     await patchEvent(ev, { title }, null);  // reverts via loadEvents() on failure
     return { ok: true, title: ev.title };
   }
-  async function apiDeleteEvent(match) {
-    const ev = findEvent(match);
+  async function apiDeleteEvent(match, dateStr) {
+    const events = (dateStr && eventsByDate[dateStr]) || currentEvents;
+    const ev = findEvent(match, undefined, events);
     if (!ev) return { ok: false };
     // Soft delete: set deleted_at (the row is filtered out of every live query)
     // and keep the id so a follow-up "recover/undo" clears the tombstone and the
@@ -796,7 +840,7 @@ window.QuickNotes = (function () {
         .update({ deleted_at: new Date().toISOString(), sync_state: 'local' }).eq('id', ev.id);
       if (error) throw new Error(error.message || 'delete failed');
       lastDeletedEvent = snapshot;
-      await loadEvents();
+      if (!dateStr || dateStr === selectedDate) await loadEvents();
       return { ok: true, title: ev.title };
     } catch { return { ok: false, error: true }; }
   }
@@ -879,12 +923,14 @@ window.QuickNotes = (function () {
     reload: loadEvents,
     selectDay,
     getEvents: () => currentEvents.map(ev => ({ title: ev.title, start: ev.start, end: ev.end, allDay: ev.allDay, done: getDoneSet().has(ev.id) })),
+    getSelectedDate: () => selectedDate,
     isOffline: () => { const o = document.getElementById('calOfflineMsg'); return !!o && o.style.display !== 'none'; },
     summarize, addEvent: apiAddEvent, retimeEvent: apiRetimeEvent,
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
     renameEvent: apiRenameEvent,
     restoreEvent: apiRestoreEvent,
     wasLastMatchAmbiguous: () => { const v = lastMatchWasAmbiguous; lastMatchWasAmbiguous = false; return v; },
+    fetchEventsForDate,
     matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
 })();
@@ -1274,27 +1320,33 @@ window.QuickNotes = (function () {
     // Commands can now target a date other than whatever day is currently
     // selected in the calendar widget (intent.date, from resolveDate() or
     // Gemini's "date" field) — Known Issue #15 fix (reject a malformed date
-    // deterministically) plus the day-selection this needs to actually apply
-    // against the right day. AptCal.selectDay() kicks off loadEvents()
-    // without awaiting it internally, so a caller that immediately reads/
-    // matches against that day's events must re-await reload() first, or it
-    // races a stale day (same fix as the retired calendar-adapter.js's
-    // ensureDayLoaded()). No-op when no date was mentioned — the overwhelming
-    // common case is unaffected.
+    // deterministically). Known Issue #22 (Shenlong half): `target` is
+    // captured HERE, synchronously, before any await — a concurrent command
+    // (another tab, or a future automated caller) changing selectedDate after
+    // this point can no longer affect what THIS command resolves against.
+    // When a date is explicitly named, A.selectDay() still runs so the UI
+    // visibly navigates there (unchanged behaviour) — but the returned
+    // `date` is what every downstream find/mutate call actually uses, not
+    // whatever selectedDate reads by the time they run. fetchEventsForDate()
+    // always does a fresh, request-scoped fetch (see its own comment) so the
+    // resolved date's data is guaranteed current, not whatever currentEvents
+    // happened to hold.
     async function ensureDate(dateStr) {
-      if (!dateStr) return true;
-      if (!window.Shelron.Intent.isValidCalendarDate(dateStr)) {
-        addMsg('ai', "That doesn't look like a valid date.");
-        return false;
+      const target = dateStr || A.getSelectedDate();
+      if (dateStr) {
+        if (!window.Shelron.Intent.isValidCalendarDate(dateStr)) {
+          addMsg('ai', "That doesn't look like a valid date.");
+          return { ok: false };
+        }
+        A.selectDay(dateStr);
       }
-      A.selectDay(dateStr);
-      await A.reload();
-      return true;
+      await A.fetchEventsForDate(target);
+      return { ok: true, date: target };
     }
 
     switch (intent.action) {
       case 'summarize':
-        if (!(await ensureDate(intent.date))) return;
+        if (!(await ensureDate(intent.date)).ok) return;
         addMsg('ai', A.summarize());
         return;
 
@@ -1304,7 +1356,8 @@ window.QuickNotes = (function () {
         if (typeof intent.title !== 'string' || !intent.title.trim()) { addMsg('ai', 'What should I call that block?'); return; }
         intent.title = intent.title.trim();
         if (!time) { addMsg('ai', 'When should I schedule “' + intent.title + '”? Try “at 4pm”.'); return; }
-        if (!(await ensureDate(intent.date))) return;
+        const d1 = await ensureDate(intent.date);
+        if (!d1.ok) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
         // Derive duration from an end time when only a range was supplied (e.g.
         // a Gemini intent that gives endTime but no durationMin).
@@ -1315,7 +1368,7 @@ window.QuickNotes = (function () {
           if (durationMin <= 0) durationMin += 24 * 60;
         }
         try {
-          const r = await A.addEvent(intent.title, time, durationMin, intent.notes);
+          const r = await A.addEvent(intent.title, time, durationMin, intent.notes, d1.date);
           remember(r.title);
           // Show the full span when an explicit length/range was given; otherwise
           // just the start (default 30-min blocks read cleaner as a single time).
@@ -1336,9 +1389,10 @@ window.QuickNotes = (function () {
           addMsg('ai', 'Re-time it to when? Try “move workout to 4pm” or “reduce film 10pm to 12am”.');
           return;
         }
-        if (!(await ensureDate(intent.date))) return;
+        const d2 = await ensureDate(intent.date);
+        if (!d2.ok) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to re-time that."); return; }
-        const r = await A.retimeEvent(intent.match, opts);
+        const r = await A.retimeEvent(intent.match, opts, d2.date);
         const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok
@@ -1360,8 +1414,9 @@ window.QuickNotes = (function () {
         return;
       }
       case 'complete_event': {
-        if (!(await ensureDate(intent.date))) return;
-        const r = A.completeEvent(intent.match);
+        const d3 = await ensureDate(intent.date);
+        if (!d3.ok) return;
+        const r = A.completeEvent(intent.match, d3.date);
         const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? '✓ Awesome — marked “' + r.title + '” as completed.'
@@ -1371,8 +1426,9 @@ window.QuickNotes = (function () {
         return;
       }
       case 'uncheck_event': {
-        if (!(await ensureDate(intent.date))) return;
-        const r = A.uncheckEvent(intent.match);
+        const d4 = await ensureDate(intent.date);
+        if (!d4.ok) return;
+        const r = A.uncheckEvent(intent.match, d4.date);
         const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? "✓ I've unchecked “" + r.title + '” — back on your list.'
@@ -1382,9 +1438,10 @@ window.QuickNotes = (function () {
         return;
       }
       case 'delete_event': {
-        if (!(await ensureDate(intent.date))) return;
+        const d5 = await ensureDate(intent.date);
+        if (!d5.ok) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to delete that."); return; }
-        const r = await A.deleteEvent(intent.match);
+        const r = await A.deleteEvent(intent.match, d5.date);
         const ambiguous = A.wasLastMatchAmbiguous();
         addMsg('ai', r.ok ? '✓ Deleted “' + r.title + '”.'
           : r.error ? 'Deleting that failed — is the proxy running?'
