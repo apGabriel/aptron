@@ -411,7 +411,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
       const merged = Object.assign({}, current, { po_water_v1: localWater });
       await supa.from('app_state').upsert(
         { key: 'health', data: merged, updated_at: new Date().toISOString() },
-        { onConflict: 'key' }
+        { onConflict: 'user_id,key' }
       );
     } catch (e) {}
   }

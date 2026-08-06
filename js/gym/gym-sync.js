@@ -142,7 +142,7 @@
         .from('app_state')
         .upsert(
           { key: APP_KEY, data: snapshot, updated_at: new Date().toISOString() },
-          { onConflict: 'key' }
+          { onConflict: 'user_id,key' }
         );
       if (!error) pcLastSyncedJson = json;
     } catch (_) {}
@@ -162,7 +162,7 @@
     const json = JSON.stringify(snapshot);
     if (json === pcLastSyncedJson) return;
     try {
-      fetch(SUPABASE_URL + '/rest/v1/app_state?on_conflict=key', {
+      fetch(SUPABASE_URL + '/rest/v1/app_state?on_conflict=user_id,key', {
         method: 'POST',
         headers: {
           'apikey': SUPABASE_KEY,
