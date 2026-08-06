@@ -517,7 +517,21 @@ window.QuickNotes = (function () {
 
   // Refresh the schedule list for whichever day is selected. Caches the result
   // in eventsByDate and re-syncs that day's dot on the grid.
+  //
+  // Known Issue #22 (grid-click half): selectDay() fires this without waiting
+  // for it, so clicking day A then day B before A's fetch resolves used to let
+  // A's response land AFTER B took over — writing/rendering A's events under
+  // B's now-current selectedDate. requestedDate snapshots which day THIS call
+  // is actually for; if selectedDate has moved on by the time the awaited
+  // fetch returns, the response is simply discarded instead of corrupting the
+  // now-current day's cache/view. This closes the single-tab/rapid-click race
+  // completely. It does NOT close the Shenlong half of #22 (two concurrent
+  // ensureDate() calls targeting different days can still each see the wrong
+  // day's currentEvents) — that needs findEvent()/applyIntent to read a
+  // per-call snapshot instead of the shared currentEvents, a larger change
+  // left open pending an architecture decision.
   async function loadEvents() {
+    const requestedDate = selectedDate;
     const offlineEl = document.getElementById('calOfflineMsg');
     const countEl = document.getElementById('calEventCount');
     const refreshBtn = document.getElementById('calRefreshBtn');
@@ -527,14 +541,16 @@ window.QuickNotes = (function () {
       // Over-fetch ±1 day (UTC) then keep only blocks whose LOCAL day is the
       // selected one, so a timezone offset can never drop or misplace an event.
       const rows = await fetchWindow(
-        dayStartUTC(addDaysStr(selectedDate, -1)), dayEndUTC(addDaysStr(selectedDate, 1)));
+        dayStartUTC(addDaysStr(requestedDate, -1)), dayEndUTC(addDaysStr(requestedDate, 1)));
+      if (selectedDate !== requestedDate) return;   // superseded — see comment above
       if (rows === null) throw Object.assign(new Error('not configured'), { notConfigured: true });
-      const events = rows.filter(ev => eventDateKey(ev) === selectedDate);
+      const events = rows.filter(ev => eventDateKey(ev) === requestedDate);
       offlineEl.style.display = 'none';
-      eventsByDate[selectedDate] = events;
+      eventsByDate[requestedDate] = events;
       renderEvents(events);
-      markGridDot(selectedDate, events.length > 0);
+      markGridDot(requestedDate, events.length > 0);
     } catch (err) {
+      if (selectedDate !== requestedDate) return;   // superseded — don't show a stale error either
       offlineEl.style.display = 'block';
       calShowError(offlineEl, countEl, err);
       document.getElementById('calEventList').innerHTML = '';
