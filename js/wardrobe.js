@@ -1077,7 +1077,7 @@
         const lockTitle = lock === 'include' ? 'Forced in — tap to exclude'
           : lock === 'exclude' ? 'Excluded — tap to clear' : 'Tap to force into outfits';
         html +=
-          '<div class="wr-item' + (lock ? ' wr-item-' + lock : '') + '" data-id="' + i.id + '" tabindex="0">' +
+          '<div class="wr-item' + (lock ? ' wr-item-' + lock : '') + '" data-id="' + i.id + '" tabindex="0" role="button">' +
             '<img src="' + i.image_url + '" alt="' + (cat ? cat.label : '') + '" loading="lazy">' +
             '<button class="wr-item-lock" data-lock="' + i.id + '" title="' + lockTitle + '" aria-label="' + lockTitle + '">' + lockIcon + '</button>' +
             '<button class="wr-item-del" data-del="' + i.id + '" aria-label="Remove">✕</button>' +
@@ -1103,8 +1103,18 @@
         b.addEventListener('click', (e) => { e.stopPropagation(); remove(b.dataset.del); }));
       grid.querySelectorAll('.wr-item-lock').forEach((b) =>
         b.addEventListener('click', (e) => { e.stopPropagation(); cycleLock(b.dataset.lock); }));
-      grid.querySelectorAll('.wr-item[data-id]').forEach((el) =>
-        el.addEventListener('click', () => UI.openItem(el.dataset.id)));
+      grid.querySelectorAll('.wr-item[data-id]').forEach((el) => {
+        el.addEventListener('click', () => UI.openItem(el.dataset.id));
+        // Keyboard access (the card is a role="button" div, not a native
+        // button — it wraps two real <button>s of its own, so it can't be
+        // one itself). Guard e.target === el so Enter/Space on the nested
+        // lock/delete buttons — already natively keyboard-operable — doesn't
+        // also bubble up and open the item, mirroring those buttons' own
+        // click handlers' e.stopPropagation() a few lines up.
+        el.addEventListener('keydown', (e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && e.target === el) { e.preventDefault(); UI.openItem(el.dataset.id); }
+        });
+      });
     }
 
     return { addFromFile, addFromImage, update, remove, cycleLock, render, setCat, uid };
@@ -1500,6 +1510,10 @@
       document.getElementById('wrHeadAdd').addEventListener('click', () => openUpload('tops'));
       // portrait
       document.getElementById('wrPortrait').addEventListener('click', () => fileInput((f) => Profile.setPortrait(f)));
+      // Keyboard access (the portrait is a role="button" div, not a native button).
+      document.getElementById('wrPortrait').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput((f) => Profile.setPortrait(f)); }
+      });
       // profile segmented controls (delegated)
       [['wrUndertone', 'undertone', 'undertone'], ['wrFaceShape', 'faceShape', 'face'], ['wrStyle', 'style', 'style']]
         .forEach(([id, field, attr]) => {

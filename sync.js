@@ -125,7 +125,7 @@
       try {
         const { error } = await supa.from('app_state').upsert(
           { key: appKey, data: state, updated_at: stamp },
-          { onConflict: 'key' }
+          { onConflict: 'user_id,key' }
         );
         if (error) return false;
         // Remember our own timestamp so the fallback poll doesn't treat our push
@@ -182,7 +182,7 @@
       const json = JSON.stringify(state);
       if (json === lastSyncedJson) return;
       try {
-        fetch(SUPABASE_URL + '/rest/v1/app_state?on_conflict=key', {
+        fetch(SUPABASE_URL + '/rest/v1/app_state?on_conflict=user_id,key', {
           method: 'POST',
           headers: {
             'apikey': SUPABASE_KEY,

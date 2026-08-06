@@ -6,7 +6,27 @@
 <title>My Dashboard</title>
 <link rel="icon" href="img/logo.ico" type="image/x-icon">
 <link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/narrative.css">
 <script src="js/theme.js"></script>
+<script>
+// Narrative Dashboard feature flag (Goal 4 — Narrative Dashboard, Founder
+// Preview) — resolved synchronously, before first paint, so there is never a
+// flash of the classic dashboard before narrative.css's `html.narrative-on`
+// rules apply. Off by default; nothing below changes existing behavior when
+// off. ?narrative=1/0 sets and persists the override; localStorage alone is
+// enough after that. Presentation-layer only — see js/narrative-dashboard.js.
+(function () {
+  try {
+    var params = new URLSearchParams(location.search);
+    if (params.has('narrative')) {
+      localStorage.setItem('aptron_narrative_dashboard', params.get('narrative') === '0' ? '0' : '1');
+    }
+    if (localStorage.getItem('aptron_narrative_dashboard') === '1') {
+      document.documentElement.classList.add('narrative-on');
+    }
+  } catch (e) {}
+})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js" defer></script>
 <script type="module" src="js/auth/main.js"></script>
@@ -37,8 +57,40 @@
      keeps the topbar above flush/full-bleed, as on Health/Fitness. -->
 <main class="dash-main">
 
+  <!-- NARRATIVE DASHBOARD — Goal 4.1 (Narrative Dashboard Refinement),
+       feature-flagged behind html.narrative-on (see the flag script in
+       <head>). Presentation layer only: js/narrative-dashboard.js reuses
+       generateDailyBrief()'s ranking (via the new synthesizeBrief() bridge)
+       and the ADR-019 signal-ranking functions verbatim — no new reasoning,
+       no new engine. Hidden and inert when the flag is off; the classic
+       dashboard below is completely untouched in that case.
+       Deliberately no section labels/eyebrows anywhere in this markup —
+       Goal 4.1's whole point is that this should read as one continuous
+       passage, not a layout of labeled widgets. #narrMoments is populated
+       with plain "label + value" blocks (e.g. "Later today" / a meeting)
+       separated only by a quiet rule, never a caps/tracked chrome label. -->
+  <section id="narrativeDash" class="narr-dash" aria-label="Today">
+    <p class="narr-story" id="narrStory" aria-live="polite">Reading your day…</p>
+    <div class="narr-actions" id="narrActions"></div>
+
+    <div class="narr-moments" id="narrMoments"></div>
+
+    <nav class="narr-else" aria-label="Looking for something specific">
+      <p class="narr-else-q">Looking for something specific?</p>
+      <div class="narr-else-links">
+        <button type="button" class="narr-else-link" data-reveal="cal">Calendar</button>
+        <a class="narr-else-link" href="gym.html">Gym</a>
+        <a class="narr-else-link" href="health.html">Health</a>
+        <a class="narr-else-link" href="wardrobe.html">Wardrobe</a>
+        <button type="button" class="narr-else-link" data-reveal="notes">Notes</button>
+        <button type="button" class="narr-else-link" data-reveal="chat">Ask Shenlong</button>
+        <button type="button" class="narr-else-link" id="narrSettingsBtn">Settings</button>
+      </div>
+    </nav>
+  </section>
+
   <!-- HEADER — greeting + slim ambient day-progress + account avatar -->
-  <header class="aios-head">
+  <header class="aios-head" id="classicHead">
     <div class="aios-greeting">
       <h1 class="aios-hello" id="aiosHello">Hello</h1>
       <div class="aios-date" id="aiosDate">—</div>
@@ -59,10 +111,10 @@
     </div>
   </header>
 
-  <div class="aios-grid">
+  <div class="aios-grid" id="classicGrid">
 
     <!-- CALENDAR CORE -->
-    <section class="card aios-cal" aria-label="Today's schedule">
+    <section class="card aios-cal" id="classicCal" aria-label="Today's schedule">
       <div class="aios-cal-head">
         <div>
           <div class="aios-eyebrow">Schedule</div>
@@ -176,7 +228,7 @@
   </div>
 
   <!-- QUICK NOTES — the one retained, shrunk-down inbox -->
-  <section class="card aios-notes" aria-label="Quick notes">
+  <section class="card aios-notes" id="classicNotes" aria-label="Quick notes">
     <div class="aios-notes-head">
       <span class="aios-eyebrow">Inbox</span>
       <span class="aios-notes-count" id="notesCount"></span>
@@ -195,10 +247,15 @@
      Loaded before js/index.js, which calls window.Shelron.Intent directly. -->
 <script src="js/shelron/intent-engine.js" defer></script>
 <script src="js/shelron/placeholders.js" defer></script>
+<script src="js/streak-engine.js" defer></script>
 <script src="js/index.js" defer></script>
 <script src="js/calendar-link.js" defer></script>
 <script src="js/account.js" defer></script>
 <script src="js/topbar.js" defer></script>
+<!-- Narrative Dashboard (Goal 4, Founder Preview) — presentation layer only,
+     loaded after index.js/account.js since it calls their window bridges.
+     Entirely inert when html.narrative-on is absent (the default). -->
+<script src="js/narrative-dashboard.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
