@@ -1279,7 +1279,10 @@ window.QuickNotes = (function () {
         return;
 
       case 'add_event': {
-        if (!intent.title) { addMsg('ai', 'What should I call that block?'); return; }
+        // Known Issue #23: a bare truthiness check let a malformed object/array
+        // title (both truthy) or a whitespace-only string through to storage.
+        if (typeof intent.title !== 'string' || !intent.title.trim()) { addMsg('ai', 'What should I call that block?'); return; }
+        intent.title = intent.title.trim();
         if (!time) { addMsg('ai', 'When should I schedule “' + intent.title + '”? Try “at 4pm”.'); return; }
         if (!(await ensureDate(intent.date))) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline), so I couldn't add “" + intent.title + '”.'); return; }
