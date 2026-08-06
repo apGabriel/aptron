@@ -23,6 +23,340 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Cross-module context readers (pre-Shelron stopgap, see Shelron.md § v0.2) ─
+// Top-level (not nested in any IIFE) so BOTH the calendar block's summarize()
+// and the assistant's askGemini() can call them — index.html never loads
+// js/health.js/gym/*.js/wardrobe.js (separate static pages), so localStorage
+// is the only channel into their state, read-only. A field left null means
+// "no data available"; callers must say so, never guess (Shenlong Intelligence
+// pass, 2026-08-03).
+function activeFoodDayKey() {
+  const now = new Date();
+  if (now.getHours() < 6) now.setDate(now.getDate() - 1);
+  return now.getFullYear() + '-' + padZ(now.getMonth() + 1) + '-' + padZ(now.getDate());
+}
+function todayHealthSummary() {
+  let waterMlToday = null, mealsLoggedToday = null;
+  try {
+    const w = JSON.parse(localStorage.getItem('po_water_v1') || 'null');
+    if (w && w.logs) waterMlToday = Number(w.logs[todayStr()]) || 0;
+  } catch (e) {}
+  try {
+    const f = JSON.parse(localStorage.getItem('po_food_v1') || 'null');
+    if (f) mealsLoggedToday = (f[activeFoodDayKey()] || []).length;
+  } catch (e) {}
+  if (waterMlToday === null && mealsLoggedToday === null) return null;
+  return { waterMlToday, mealsLoggedToday };
+}
+function todayGymSummary() {
+  let coach;
+  try { coach = JSON.parse(localStorage.getItem('po_coach_v1') || 'null'); } catch (e) { coach = null; }
+  if (!coach) return null;
+  let routines = [];
+  try { routines = JSON.parse(localStorage.getItem('rb_routines_v1') || '[]'); } catch (e) {}
+  const pinned = Array.isArray(routines) ? routines.find(r => r.id === coach.filterRoutine) : null;
+  const openSession = Array.isArray(coach.sessions) ? coach.sessions.find(s => !s.endedAt) : null;
+  return {
+    pinnedRoutineName: pinned ? pinned.name : null,
+    pinnedRoutineExerciseCount: pinned ? (pinned.exercises || []).length : null,
+    workoutInProgress: !!openSession,
+    setsLoggedInOpenSession: openSession ? (openSession.sets || []).length : 0,
+  };
+}
+// ── Scoped local memory (Shenlong Intelligence pass, 2026-08-03) ─────────────
+// Durable, user-scoped facts/preferences — deliberately NOT a vector store or
+// new database table (per [[Shelron]]'s engine-by-engine order, the real
+// Memory Engine is still future work). A capped, deduped localStorage list;
+// writes only ever go through rememberFact() (below), which the model can
+// request via the `remember_fact` intent but never writes directly — "AI
+// proposes, deterministic code disposes" applies here exactly like every
+// other intent. Distinguishes persistent facts (this) from session-only
+// chat history (never persisted at all, lives only in the DOM chat log) and
+// temporary context (calendar/gym/health/wardrobe snapshots, re-read fresh
+// every request, never stored here).
+const MEMORY_KEY = 'shenlong_memory_v1';
+const MEMORY_MAX = 15;
+const MEMORY_FACT_MAX_LEN = 140;
+function readMemory() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(MEMORY_KEY) || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function writeMemory(arr) {
+  try { localStorage.setItem(MEMORY_KEY, JSON.stringify(arr)); } catch (e) {}
+}
+// Deterministic validation: trim/cap length, skip near-duplicates (case-
+// insensitive substring match either direction), evict oldest past MEMORY_MAX.
+// Returns the stored fact string, or null if rejected (empty/duplicate).
+function rememberFact(text) {
+  const clean = String(text || '').trim().slice(0, MEMORY_FACT_MAX_LEN);
+  if (!clean) return null;
+  const facts = readMemory();
+  const norm = clean.toLowerCase();
+  // Exact match only (not substring containment) — substring matching was
+  // tried and rejected: "fact number 1" is a substring of "fact number 10"
+  // through "fact number 19", so it false-positived every one of them as a
+  // "duplicate" of the first. Found by the Shenlong Intelligence pass test
+  // suite (2026-08-03). Near-duplicate detection is inherently fuzzy; exact
+  // match is the boring, predictable choice — a truly repeated fact is
+  // common, a coincidental shared prefix is not worth the false-positive risk.
+  const isDup = facts.some((f) => String(f.text || '').toLowerCase() === norm);
+  if (isDup) return null;
+  facts.push({ text: clean, savedAt: Date.now() });
+  while (facts.length > MEMORY_MAX) facts.shift(); // evict oldest
+  writeMemory(facts);
+  return clean;
+}
+function memoryFactTexts() { return readMemory().map((f) => f.text); }
+
+// ── Deterministic intent-domain classification ───────────────────────────────
+// Step 1 of the reasoning pipeline (Shenlong Intelligence pass, 2026-08-03):
+// classify BEFORE gathering context, so context gathering (step 2) can be
+// selective instead of dumping every domain into every prompt. Pure keyword
+// matching — deterministic and instantly testable, no model call. Returns one
+// of 'calendar' | 'gym' | 'health' | 'wardrobe' | 'knowledge' | 'general' |
+// 'multi' | 'unknown'. 'knowledge' is defined for schema completeness (the
+// brief's category list) but has no real data source yet — no Knowledge
+// module exists (see [[Roadmap]] "Ideas") — so it never actually matches
+// today; left in so classification doesn't silently need a rewrite when that
+// module lands.
+// Deliberately NOT included here: bare "today"/"tomorrow"/"tonight"/
+// "weekend"/"this week" — they're generic time modifiers used across every
+// domain ("my workout today", "water today", "outfit today"), not calendar-
+// specific signals. Including them originally caused "what's my workout
+// routine today" to misclassify as 'multi' (gym + calendar both "matching")
+// instead of 'gym' — found by the Shenlong Intelligence pass test suite
+// (2026-08-03) and removed.
+const DOMAIN_KEYWORDS = {
+  calendar: /\b(calendar|schedule|event|meeting|appointment|block|reschedule|agenda|free time|busy|plan(s|ned)?)\b/i,
+  gym: /\b(gym|workout|work out|train(ed|ing)?|exercise|routine|reps?|sets?|squat|bench|deadlift|cardio|lift(ing)?|\bpr\b|personal record)\b/i,
+  health: /\b(water|hydrat|meal|food|eat(en|ing)?|calorie|macro|protein|carbs?|fats?|stack|supplement|nutrition)\b/i,
+  // "top"/"tops" deliberately excluded — collides with this app's own gym
+  // terminology ("log today's top set"), which would misclassify a gym
+  // question as 'multi'. Caught during design, before it ever shipped.
+  wardrobe: /\b(outfit|wear|wearing|clothes|clothing|wardrobe|closet|dress(ed)?|jackets?|shirts?|pants|shoes?|sweaters?|coats?|bottoms?|outerwear|footwear|accessor(?:y|ies))\b/i,
+};
+const GENERAL_PATTERN = /\b(what should i do|what('?s| is) (on|up|going on)|how('?s| is) my day|good morning|good afternoon|good evening|\bhi\b|\bhey\b|hello|free hour|catch me up|summary|recap)\b/i;
+function classifyIntentDomain(message) {
+  const t = String(message || '');
+  const matched = Object.keys(DOMAIN_KEYWORDS).filter((d) => DOMAIN_KEYWORDS[d].test(t));
+  if (matched.length >= 2) return 'multi';
+  if (matched.length === 1) return matched[0];
+  if (GENERAL_PATTERN.test(t)) return 'general';
+  return 'unknown';
+}
+
+// ── Deterministic proactive nudge (Shenlong Intelligence pass, 2026-08-03) ───
+// Zero LLM calls, zero background jobs/timers — this only ever runs inside
+// summarize() (below), i.e. only when the user already asked "what's on
+// today"/greeted, never unprompted. Reuses the exact same gym/health readers
+// askGemini() uses; no new data, no invented judgment. At most ONE nudge,
+// picked by priority, and only when the underlying fact is unambiguously
+// true — "never interrupt, never spam, only high-value insights."
+function proactiveNudge() {
+  const gym = todayGymSummary();
+  if (gym && gym.workoutInProgress) {
+    return 'You have an open ' + (gym.pinnedRoutineName || 'workout') + ' session'
+      + (gym.setsLoggedInOpenSession ? ' — ' + gym.setsLoggedInOpenSession + ' set' + (gym.setsLoggedInOpenSession === 1 ? '' : 's') + ' logged' : '')
+      + '. Resume when ready.';
+  }
+  const hour = new Date().getHours();
+  if (hour < 14) return null; // too early in the day for a "nothing logged yet" nudge to be useful, not just true
+  const health = todayHealthSummary();
+  if (health && health.waterMlToday === 0) return "You haven't logged any water today.";
+  if (health && health.mealsLoggedToday === 0) return "No meals logged today yet.";
+  return null;
+}
+
+// ── Unified Daily Brief (Product Constitution / Unified Intelligence Strategy,
+// implemented 2026-08-04) — deterministic signal gathering + ranking. This is
+// the reasoning layer in front of the proactive greeting: it decides WHICH
+// facts are worth mentioning today and in what priority, before any model
+// call happens. "AI proposes, deterministic code disposes" applies here in
+// its purest form yet — the model never sees raw module state, only the
+// short list of facts this code already selected; it may only phrase them,
+// never add to them. See generateDailyBrief() below (assistant IIFE) for the
+// orchestration and js/../proxy/server.js's `mode: 'daily_brief'` branch for
+// the synthesis prompt.
+function fmtClock(d) { return padZ(d.getHours()) + ':' + padZ(d.getMinutes()); }
+function dateOnly(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+// Most recent COMPLETED gym session (any day, not just today) — reads the
+// same `po_coach_v1.sessions` array todayGymSummary() reads, just the
+// endedAt/label fields that reader doesn't need. `label` is the routine name
+// captured at log time (gym-storage.js's currentSessionLabel()), so no
+// separate routine lookup/join is required.
+function recentGymSession() {
+  let coach;
+  try { coach = JSON.parse(localStorage.getItem('po_coach_v1') || 'null'); } catch (e) { coach = null; }
+  if (!coach || !Array.isArray(coach.sessions)) return null;
+  const ended = coach.sessions.filter((s) => s.endedAt).sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt));
+  if (!ended.length) return null;
+  const last = ended[0];
+  const daysAgo = Math.round((dateOnly(new Date()) - dateOnly(new Date(last.endedAt))) / 86400000);
+  return { label: last.label || 'a workout', daysAgo };
+}
+
+// Priority tier 1 ("urgent calendar conflicts") — pure deterministic math
+// over today's events (window.AptCal.getEvents()). No new table, no new API:
+// this is free/busy arithmetic, the kind of thing that has a right answer
+// and must never be left to a model (Product Constitution, Part II/III).
+// At most one conflict fact and one busy-day fact are ever produced (the
+// caller picks one calendar fact overall — see selectTopSignals) — this
+// function may return more than one candidate so the caller has a choice.
+function computeCalendarSignals(events, now) {
+  const sigs = [];
+  const timed = (events || []).filter((e) => !e.allDay)
+    .map((e) => ({ title: e.title, s: new Date(e.start), e: new Date(e.end) }))
+    .sort((a, b) => a.s - b.s);
+  // Deliberately no early return for an empty `timed` — a fully open day must
+  // still reach the free-block check below (an empty calendar IS a free
+  // block), otherwise the "empty afternoon, good day to batch errands" case
+  // could never fire. The conflict loop and busy-day check below are already
+  // no-ops on 0-1 events, so nothing needs to guard against that separately.
+  for (let i = 1; i < timed.length; i++) {
+    if (timed[i].s < timed[i - 1].e) {
+      sigs.push({
+        tier: 1, domain: 'calendar', key: 'conflict',
+        fact: '"' + timed[i - 1].title + '" (' + fmtClock(timed[i - 1].s) + '–' + fmtClock(timed[i - 1].e) +
+          ') overlaps "' + timed[i].title + '" (' + fmtClock(timed[i].s) + '–' + fmtClock(timed[i].e) + ').',
+      });
+      break; // one conflict fact is enough — the brief states one conclusion, not a list
+    }
+  }
+
+  const totalMin = timed.reduce((sum, ev) => sum + (ev.e - ev.s) / 60000, 0);
+  if (timed.length >= 5 || totalMin >= 300) {
+    sigs.push({
+      tier: 1, domain: 'calendar', key: 'busy',
+      fact: timed.length + ' blocks scheduled today, about ' + (Math.round(totalMin / 6) / 10) + 'h total.',
+    });
+  }
+
+  // Largest free gap between now and a 22:00 cutoff — deliberately not
+  // suggesting anything start later than that (protects the evening/rest,
+  // Product Constitution Law III/Part III "silence vs helpfulness").
+  const windowEnd = new Date(now); windowEnd.setHours(22, 0, 0, 0);
+  if (now < windowEnd) {
+    let cursor = new Date(now);
+    let bestStart = null, bestEnd = null, bestMs = 0;
+    timed.filter((ev) => ev.e > now).forEach((ev) => {
+      const capped = ev.s < windowEnd ? ev.s : windowEnd;
+      if (capped > cursor) {
+        const gapMs = capped - cursor;
+        if (gapMs > bestMs) { bestMs = gapMs; bestStart = cursor; bestEnd = capped; }
+      }
+      if (ev.e > cursor) cursor = ev.e;
+    });
+    if (windowEnd > cursor) {
+      const gapMs = windowEnd - cursor;
+      if (gapMs > bestMs) { bestMs = gapMs; bestStart = cursor; bestEnd = windowEnd; }
+    }
+    if (bestMs >= 120 * 60000) {
+      const openEnded = bestEnd.getTime() === windowEnd.getTime();
+      sigs.push({
+        tier: 1, domain: 'calendar', key: 'free_block',
+        fact: openEnded
+          ? 'Free from ' + fmtClock(bestStart) + ' onward.'
+          : 'Free from ' + fmtClock(bestStart) + ' to ' + fmtClock(bestEnd) + '.',
+      });
+    }
+  }
+  return sigs;
+}
+
+// Priority tiers 2 ("health conditions affecting today") and 4 ("meal
+// consistency"). Aptron has no illness/symptom tracking and no sleep
+// tracking today (Health's real surfaces are hydration + the food diary,
+// see [[Health]]) — "health conditions" is deliberately interpreted as
+// today's hydration/nutrition state, not fabricated, per ADR-017's grounding
+// rule. Gated to hour >= 14 so a normal morning with nothing logged yet
+// doesn't read as a problem (same guard proactiveNudge() already uses).
+function computeHealthSignals(health, hour) {
+  const sigs = [];
+  if (!health) return sigs; // not fetched / nothing logged anywhere — say nothing, never invent
+  if (hour >= 14 && health.waterMlToday != null && health.waterMlToday < 500) {
+    sigs.push({ tier: 2, domain: 'health', key: 'low_water', fact: 'Only ' + health.waterMlToday + 'ml of water logged today.' });
+  }
+  if (hour >= 14 && health.mealsLoggedToday === 0) {
+    sigs.push({ tier: 4, domain: 'meal', key: 'no_meals', fact: 'No meals logged yet today.' });
+  }
+  return sigs;
+}
+
+// Priority tier 3 ("workout recovery"). No plateau/deload flag is exposed to
+// Shenlong yet (that's the prescription engine's own internal state,
+// [[Roadmap]] "Gym analytics") — this stays to what's already readable today:
+// how recently the user trained and what they trained.
+function computeGymSignals(recent) {
+  if (!recent || recent.daysAgo == null || recent.daysAgo < 0) return [];
+  if (recent.daysAgo === 0) return [{ tier: 3, domain: 'gym', key: 'trained_today', fact: 'Already trained "' + recent.label + '" today.' }];
+  if (recent.daysAgo === 1) return [{ tier: 3, domain: 'gym', key: 'trained_yesterday', fact: 'Trained "' + recent.label + '" yesterday.' }];
+  if (recent.daysAgo <= 3) return [{ tier: 3, domain: 'gym', key: 'trained_recently', fact: 'Last trained "' + recent.label + '" ' + recent.daysAgo + ' days ago.' }];
+  return [];
+}
+
+// One calendar fact + one body fact, max — "one conclusion, not three
+// summaries." Combining exactly one signal from each side is what lets the
+// brief connect domains ("free after 18:00" + "trained Push yesterday")
+// instead of just picking the two loudest facts regardless of where they
+// came from. Priority order within each side follows the brief exactly:
+// calendar conflicts > busy day > free block; health > gym recovery > meals.
+function selectTopSignals(calSigs, bodySigs) {
+  function pick(pool, order) {
+    for (const key of order) { const f = pool.find((s) => s.key === key); if (f) return f; }
+    return null;
+  }
+  const calPick = pick(calSigs, ['conflict', 'busy', 'free_block']);
+  const bodyPick = pick(bodySigs, ['low_water', 'trained_yesterday', 'trained_today', 'trained_recently', 'no_meals']);
+  return [calPick, bodyPick].filter(Boolean);
+}
+
+// Fully deterministic phrasing, used when there's nothing to say, and as the
+// offline-first fallback when the model is unreachable/slow/misconfigured —
+// the greeting must never be blank or stuck (Offline First invariant). Never
+// calls a model; always ends with a concrete suggestion per spec.
+function deterministicBriefFallback(selected, hasEvents) {
+  if (!selected.length) {
+    return hasEvents
+      ? "Today looks steady — no conflicts, nothing urgent flagged. You're clear to focus on what matters most."
+      : 'Nothing on the calendar today — an open day. Good time to catch up on training, errands, or rest.';
+  }
+  const suggestion = {
+    conflict: " I'd resolve that clash before the day gets away from you.",
+    busy: " Keep today's plan tight — not the day to add anything extra.",
+    free_block: ' Worth protecting that window for whatever matters most today.',
+    low_water: ' Worth catching up before the day gets busier.',
+    no_meals: ' Worth fitting in a real meal soon.',
+    trained_yesterday: ' Good day to prioritize recovery or train something different.',
+    trained_today: ' Recovery matters more than volume for the rest of today.',
+    trained_recently: " You're due for your next session when it fits.",
+  }[selected[0].key] || '';
+  return selected.map((s) => s.fact).join(' ') + suggestion;
+}
+
+// Item counts only — deliberately no outfit/weather-suitability judgment.
+// Wardrobe's own seasonality vector needs live weather, which is still a
+// scaffolded placeholder ([[Roadmap]] "Wardrobe weather input") — Shenlong
+// must not fabricate an opinion a real weather feed would be needed for.
+function todayWardrobeSummary() {
+  let items;
+  try { items = JSON.parse(localStorage.getItem('wardrobe:items') || 'null'); } catch (e) { items = null; }
+  if (!Array.isArray(items)) return null;
+  const byCategory = {};
+  items.forEach((it) => {
+    const cat = (it && it.category) || 'other';
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+  });
+  let savedOutfitCount = 0;
+  try {
+    const saved = JSON.parse(localStorage.getItem('wardrobe:saved_outfits') || 'null');
+    if (Array.isArray(saved)) savedOutfitCount = saved.length;
+  } catch (e) {}
+  return { totalItems: items.length, byCategory, savedOutfitCount };
+}
+
 // =============================================================================
 // DAY HEADER — greeting + slim awake-day progress (ambient, replaces the ring).
 // =============================================================================
@@ -875,15 +1209,20 @@ window.QuickNotes = (function () {
     } catch { return { ok: false, error: true }; }
   }
   function summarize() {
+    const isToday = selectedDate === todayStr();
+    // At most one deterministic nudge, and only about TODAY — browsing a past
+    // or future day shouldn't surface "you haven't logged water" nonsense.
+    const nudge = isToday ? proactiveNudge() : null;
+    const nudgeLine = nudge ? '\n\n' + nudge : '';
+
     if (!currentEvents.length) {
       const offline = document.getElementById('calOfflineMsg');
       if (offline && offline.style.display !== 'none') {
         return "I can't see your calendar right now — you look offline. Once you're back I'll read your blocks.";
       }
-      const where = selectedDate === todayStr() ? 'today' : 'on ' + fmtDateLabel(dateObj(selectedDate));
-      return 'Nothing on the calendar ' + where + ' — a clean slate. Want me to add something?';
+      const where = isToday ? 'today' : 'on ' + fmtDateLabel(dateObj(selectedDate));
+      return 'Nothing on the calendar ' + where + ' — a clean slate. Want me to add something?' + nudgeLine;
     }
-    const isToday = selectedDate === todayStr();
     const now = new Date();
     // "Upcoming" only filters by clock-time on today; on other days show all.
     const upcoming = isToday ? currentEvents.filter(ev => ev.allDay || new Date(ev.end) >= now) : currentEvents;
@@ -893,7 +1232,7 @@ window.QuickNotes = (function () {
     const when = isToday ? 'today' : fmtDateLabel(dateObj(selectedDate));
     const head = (window.__aiosGreeting ? window.__aiosGreeting() : 'Hi') +
       '! You have ' + n + ' block' + (n === 1 ? '' : 's') + ' scheduled ' + when + ':';
-    return head + '\n' + lines.join('\n');
+    return head + '\n' + lines.join('\n') + nudgeLine;
   }
 
   // ── wire up ───────────────────────────────────────────────────────────────
@@ -1086,12 +1425,30 @@ window.QuickNotes = (function () {
   // fallback, which resolves it to an absolute date server-side
   // (proxy/server.js, /api/gemini/assistant) the same way this used to work
   // in the now-retired js/shelron/parser.js.
+  const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   function resolveDate(raw) {
     const t = raw.toLowerCase();
     const iso = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
     if (iso) return iso[1];
     if (/\btomorrow\b/.test(t)) {
       const d = new Date(); d.setDate(d.getDate() + 1);
+      return d.getFullYear() + '-' + padZ(d.getMonth() + 1) + '-' + padZ(d.getDate());
+    }
+    // "next Friday" / "this Monday" / bare "Friday" — deterministic weekday
+    // resolution (Shenlong Intelligence pass, 2026-08-03). "next X" = the
+    // occurrence of X that is NOT today (1-7 days out); "this X" / a bare
+    // weekday name = the closest upcoming occurrence, including today if
+    // today IS X. The Gemini fallback (proxy/server.js) mirrors this exact
+    // rule for richer phrases this local parser doesn't attempt ("next
+    // Friday afternoon", "before gym").
+    const wd = t.match(/\b(next\s+|this\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+    if (wd) {
+      const isNext = /^next\s+/.test(wd[0]);
+      const targetDow = WEEKDAY_NAMES.indexOf(wd[2]);
+      const d = new Date();
+      let delta = (targetDow - d.getDay() + 7) % 7;
+      if (isNext && delta === 0) delta = 7; // "next Friday" said on a Friday → 7 days out
+      d.setDate(d.getDate() + delta);
       return d.getFullYear() + '-' + padZ(d.getMonth() + 1) + '-' + padZ(d.getDate());
     }
     return null;
@@ -1110,19 +1467,43 @@ window.QuickNotes = (function () {
         /^(good\s+(morning|afternoon|evening)|hi|hey|hello)\b/.test(t)) {
       return { action: 'summarize', date };
     }
+    // A question about water/food ("how much water have I had", "did I log
+    // lunch?") must NOT be misread as a command to log more of it — this
+    // pre-existing gap let a plain question like "how much water so far"
+    // silently log a phantom serving with no confirmation. Found by the
+    // Shenlong Intelligence pass test suite (2026-08-03); falls through to
+    // Gemini instead, which can answer accurately using the (now
+    // domain-scoped) health context rather than mutating state.
+    const isQuestion = /^(how|what|did|have|has|when|is|are|do|does)\b/.test(t) || /\?\s*$/.test(raw.trim());
     // water
-    if (/\b(water|hydrat)/.test(t) || /\b(drank|drink|had)\b.*\b(glass|bottle|cup)\b/.test(t) ||
-        /^log\s+(a\s+|one\s+)?(glass|bottle|cup)\b/.test(t)) {
+    if (!isQuestion && (/\b(water|hydrat)/.test(t) || /\b(drank|drink|had)\b.*\b(glass|bottle|cup)\b/.test(t) ||
+        /^log\s+(a\s+|one\s+)?(glass|bottle|cup)\b/.test(t))) {
       const n = (t.match(/\b(\d+)\b/) || [])[1];
       const unit = /bottle/.test(t) ? 'bottle' : /glass|cup/.test(t) ? 'glass' : null;
       return { action: 'log_water', servings: n ? +n : 1, unit };
     }
     // food
-    if (/\b(ate|eaten|eating)\b/.test(t) || (/\bfood|meal|kcal|calorie/.test(t) && /\b(log|add|track|had)\b/.test(t))) {
+    if (!isQuestion && (/\b(ate|eaten|eating)\b/.test(t) || (/\bfood|meal|kcal|calorie/.test(t) && /\b(log|add|track|had)\b/.test(t)))) {
       const cal = (t.match(/(\d+)\s*(kcal|cal|calorie)/) || [])[1];
       let name = raw.replace(/\b(log|add|track)\b/gi, '').replace(/\b(that\s+)?i\s+(just\s+)?(ate|had|eaten)\b/gi, '')
         .replace(/[~]?\d+\s*(kcal|cal|calories?)/gi, '').replace(/\bfor\b\s*$/i, '').trim();
       return { action: 'log_food', name: cleanTitle(name) || 'Meal', calories: cal ? +cal : null };
+    }
+    // Durable fact/preference for Shenlong to remember long-term — distinct
+    // from "remember to X" (a task/reminder, handled by the note branch right
+    // below, unchanged). "remember that/I'm/my X", "keep in mind that X",
+    // "don't forget that X" (Shenlong Intelligence pass, 2026-08-03).
+    // Local-first: no round-trip to Gemini needed just to store a fact.
+    if (/\bremember\s+(that\b|i'?m\b|i\s+am\b|my\b)/i.test(t) || /\b(keep in mind|don'?t forget)\s+that\b/i.test(t)) {
+      let text = raw
+        .replace(/\bremember\s+that\s+/i, '')
+        .replace(/\bremember\s+(?=i'?m\b|i\s+am\b|my\b)/i, '')
+        .replace(/\b(keep in mind|don'?t forget)\s+that\s+/i, '')
+        .trim();
+      if (text) {
+        text = text.charAt(0).toUpperCase() + text.slice(1);
+        return { action: 'remember_fact', text };
+      }
     }
     // explicit note
     if (/^note[:\-]/i.test(raw) || /\b(jot|remember to|note that|add a note)\b/.test(t)) {
@@ -1476,6 +1857,14 @@ window.QuickNotes = (function () {
         addMsg('ai', '✓ Noted: “' + intent.text + '”.');
         return;
       }
+      case 'remember_fact': {
+        // rememberFact() is the deterministic validator (length cap, dedup,
+        // oldest-eviction) — the model (or local parser) only ever proposes
+        // text, this is what actually decides whether it's stored.
+        const saved = rememberFact(intent.text);
+        addMsg('ai', saved ? '✓ Got it — I\'ll remember that.' : 'I already know that — no need to repeat it.');
+        return;
+      }
       case 'chat':
       default:
         addMsg('ai', intent.reply || "I'm not sure how to act on that yet.");
@@ -1483,66 +1872,32 @@ window.QuickNotes = (function () {
     }
   }
 
-  // ── Cross-module context (pre-Shelron stopgap, see Shelron.md § v0.2) ────────
-  // index.html never loads js/health.js or js/gym/*.js — they're separate
-  // static pages sharing only localStorage, not a live JS object. So Shenlong
-  // reads the same storage those modules own directly, read-only, and reports
-  // only facts it can state with certainty (raw logged totals/state) — never a
-  // derived judgment those modules would compute themselves (e.g. no
-  // personalized water-goal %, which needs health.js's substance-adjusted
-  // formula). A field left null means "no data available"; the assistant must
-  // say so rather than guess. This is intentionally NOT a shared module — it's
-  // a wider ad hoc context slice inside the existing stopgap, not the real
-  // Context Builder engine Shelron.md designs.
-  function activeFoodDayKey() {
-    const now = new Date();
-    if (now.getHours() < 6) now.setDate(now.getDate() - 1);
-    return now.getFullYear() + '-' + padZ(now.getMonth() + 1) + '-' + padZ(now.getDate());
-  }
-  function todayHealthSummary() {
-    let waterMlToday = null, mealsLoggedToday = null;
-    try {
-      const w = JSON.parse(localStorage.getItem('po_water_v1') || 'null');
-      if (w && w.logs) waterMlToday = Number(w.logs[todayStr()]) || 0;
-    } catch (e) {}
-    try {
-      const f = JSON.parse(localStorage.getItem('po_food_v1') || 'null');
-      if (f) mealsLoggedToday = (f[activeFoodDayKey()] || []).length;
-    } catch (e) {}
-    if (waterMlToday === null && mealsLoggedToday === null) return null;
-    return { waterMlToday, mealsLoggedToday };
-  }
-  function todayGymSummary() {
-    let coach;
-    try { coach = JSON.parse(localStorage.getItem('po_coach_v1') || 'null'); } catch (e) { coach = null; }
-    if (!coach) return null;
-    let routines = [];
-    try { routines = JSON.parse(localStorage.getItem('rb_routines_v1') || '[]'); } catch (e) {}
-    const pinned = Array.isArray(routines) ? routines.find(r => r.id === coach.filterRoutine) : null;
-    const openSession = Array.isArray(coach.sessions) ? coach.sessions.find(s => !s.endedAt) : null;
-    return {
-      pinnedRoutineName: pinned ? pinned.name : null,
-      pinnedRoutineExerciseCount: pinned ? (pinned.exercises || []).length : null,
-      workoutInProgress: !!openSession,
-      setsLoggedInOpenSession: openSession ? (openSession.sets || []).length : 0,
-    };
-  }
-
   // ── Gemini fallback ──────────────────────────────────────────────────────────
+  // Step 2 of the reasoning pipeline: contextual retrieval. classifyIntentDomain()
+  // (step 1, already run) decides which domain summaries are worth the tokens —
+  // a pure gym question doesn't need the calendar dumped in, and vice versa.
+  // 'general'/'multi'/'unknown' stay maximal (safe default for cross-domain or
+  // ambiguous asks). Memory (durable facts) rides along on every request —
+  // it's small and capped, and a stored preference can matter regardless of
+  // domain (e.g. a dietary note affecting gym nutrition advice).
   async function askGemini(message) {
+    const domain = classifyIntentDomain(message);
+    const wantsAll = domain === 'general' || domain === 'multi' || domain === 'unknown';
+    const context = {
+      date: todayStr(),
+      domain,
+      memory: memoryFactTexts(),
+    };
+    if (wantsAll || domain === 'calendar') context.events = window.AptCal.getEvents();
+    if (wantsAll || domain === 'gym') context.gym = todayGymSummary();
+    if (wantsAll || domain === 'health') context.health = todayHealthSummary();
+    if (wantsAll || domain === 'wardrobe') context.wardrobe = todayWardrobeSummary();
+
     const res = await fetch(GEMINI_ENDPOINT, {
       method: 'POST',
       headers: Object.assign({ 'Content-Type': 'application/json' },
         window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
-      body: JSON.stringify({
-        message,
-        context: {
-          date: todayStr(),
-          events: window.AptCal.getEvents(),
-          gym: todayGymSummary(),
-          health: todayHealthSummary(),
-        },
-      }),
+      body: JSON.stringify({ message, context }),
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1589,6 +1944,13 @@ window.QuickNotes = (function () {
     try {
       const intent = await askGemini(msg);
       thinking.remove();
+      // Confidence is deliberately not surfaced as a UI badge (Shenlong stays
+      // conversational, not clinical — low/medium confidence is voiced in
+      // "reply" itself per the server prompt) — logged only, for local
+      // inspection during testing (Shenlong Intelligence pass, 2026-08-03).
+      if (intent && intent.confidence && intent.confidence !== 'high') {
+        console.debug('[Shenlong] confidence:', intent.confidence, '· reply:', intent.reply);
+      }
       // Gemini may return a compound plan in "steps" (restore-before-delete, etc.).
       if (intent && Array.isArray(intent.steps) && intent.steps.length) {
         for (const step of intent.steps) { try { await applyIntent(step); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); } }
@@ -1617,11 +1979,89 @@ window.QuickNotes = (function () {
 
   form.addEventListener('submit', e => { e.preventDefault(); const v = input.value; input.value = ''; handle(v); });
 
+  // ── Unified Daily Brief — the proactive greeting ─────────────────────────────
+  // Replaces the old "list today's events + maybe one nudge" greeting with ONE
+  // synthesized recommendation across calendar/gym/health. The ranking
+  // (selectTopSignals) is fully deterministic and already ran before this is
+  // called; a model call only happens when there's genuine cross-domain
+  // synthesis to do (2 signals) or single-domain phrasing to produce (1
+  // signal) — it is never allowed to introduce a fact that isn't in the
+  // pre-selected list. An open gym session is handled as its own immediate,
+  // fully deterministic case (identical wording to the retired
+  // proactiveNudge(), which this supersedes as the greeting's source) since
+  // there's nothing to synthesize — it's the single most actionable fact
+  // available and reusing proven wording beats reinventing it.
+  // Extracted from generateDailyBrief() (Goal 4.1 — Narrative Dashboard
+  // Refinement) so the narrative dashboard can synthesize a richer paragraph
+  // (up to 3 pre-ranked facts, e.g. adding a "trained yesterday" fact
+  // alongside the usual one calendar + one body signal) through the exact
+  // same network/timeout/fallback path, instead of stitching sentences
+  // together client-side. The ranking that produces `selected` is unchanged
+  // and untouched — this only changes how many pre-ranked facts a caller may
+  // hand to the model in one request; the model still never adds a fact.
+  async function synthesizeBrief(selected, hasEvents) {
+    if (!selected.length) return deterministicBriefFallback(selected, hasEvents);
+    try {
+      const res = await fetch(GEMINI_ENDPOINT, {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' },
+          window.__appAccessToken ? { 'Authorization': 'Bearer ' + window.__appAccessToken } : {}),
+        body: JSON.stringify({
+          message: "Generate today's unified daily brief.",
+          context: { mode: 'daily_brief', date: todayStr(), signals: selected },
+        }),
+        signal: AbortSignal.timeout(8000), // shorter than the 15s command timeout — this is proactive, not a typed request, and has a good fallback
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const intent = await res.json();
+      if (intent && intent.reply) return intent.reply;
+      throw new Error('empty reply');
+    } catch (e) {
+      return deterministicBriefFallback(selected, hasEvents); // Gemini unreachable/misconfigured/slow — never leave the greeting blank
+    }
+  }
+
+  async function generateDailyBrief() {
+    const gym = todayGymSummary();
+    if (gym && gym.workoutInProgress) {
+      return 'You have an open ' + (gym.pinnedRoutineName || 'workout') + ' session'
+        + (gym.setsLoggedInOpenSession ? ' — ' + gym.setsLoggedInOpenSession + ' set' + (gym.setsLoggedInOpenSession === 1 ? '' : 's') + ' logged' : '')
+        + '. Resume when ready.';
+    }
+    const now = new Date();
+    const events = window.AptCal.getEvents();
+    const health = todayHealthSummary();
+    const calSigs = computeCalendarSignals(events, now);
+    const bodySigs = computeHealthSignals(health, now.getHours()).concat(computeGymSignals(recentGymSession()));
+    const selected = selectTopSignals(calSigs, bodySigs);
+    return synthesizeBrief(selected, events.length > 0);
+  }
+  // Bridges for js/narrative-dashboard.js (Goal 4/4.1) — the only consumer
+  // outside this closure. Internal-ish, hence the `__` prefix per Module
+  // Communication's convention; not part of the stable public API.
+  window.__generateDailyBrief = generateDailyBrief;
+  window.__synthesizeBrief = synthesizeBrief;
+
   // ── opening greeting — once the first calendar load resolves ─────────────────
   let greeted = false;
-  function greet() {
+  async function greet() {
     if (greeted) return; greeted = true;
-    addMsg('ai', window.AptCal.summarize());
+    // Under the Narrative Dashboard (Goal 4, feature-flagged), this chat log
+    // is hidden until the user explicitly reveals it via "Ask Shenlong" —
+    // js/narrative-dashboard.js already renders the same brief into the
+    // narrative story. Skip the duplicate network call here (it would fire
+    // an identical, redundant /api/gemini/assistant request purely into a
+    // hidden panel); the tip line still renders so a revealed chat isn't
+    // empty, and typed commands work exactly as before either way.
+    var narrativeOn = document.documentElement.classList.contains('narrative-on');
+    if (!narrativeOn) {
+      const thinking = addThinking();
+      let brief;
+      try { brief = await generateDailyBrief(); }
+      catch (e) { brief = deterministicBriefFallback([], (window.AptCal.getEvents() || []).length > 0); }
+      thinking.remove();
+      addMsg('ai', brief).classList.add('aios-brief');
+    }
     addMsg('ai', 'Tell me what to change — e.g. “move my workout to 4pm”, “add a reminder to drink water at 6pm”, or “log that I finished my plank”.');
   }
   window.addEventListener('apt:calendar-loaded', greet, { once: true });

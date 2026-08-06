@@ -280,39 +280,121 @@ app.post('/api/gemini/meal-scan', expensiveLimiter, async (req, res) => {
 // commands locally (instant/offline); anything free-form is forwarded here and
 // Gemini returns ONE structured intent the frontend applies to the calendar /
 // modules. Same server-side key as meal-scan — never reaches the browser.
-// Body: { message: string, context?: { date, events:[{title,start,end,done}],
-//         gym: {...}|null, health: {...}|null } }
-// gym/health are read-only summaries js/index.js assembles straight from
-// localStorage (index.html never loads health.js/gym/*.js — see the comment
-// above todayGymSummary()/todayHealthSummary() there); null means "no data
-// logged yet", not "omit this domain" — the prompt below must say so, not guess.
+// Body: { message: string, context?: { date, domain, memory: string[],
+//         events?:[...], gym?: {...}|null, health?: {...}|null,
+//         wardrobe?: {...}|null } }
+// `domain` is js/index.js's deterministic classifyIntentDomain() result — it
+// decides WHICH of events/gym/health/wardrobe were even fetched (contextual
+// retrieval, Shenlong Intelligence pass, 2026-08-03): a field being ABSENT
+// means "not relevant to this question, wasn't looked up" (say nothing about
+// it); a field being present but `null` means "looked up, nothing logged"
+// (say so explicitly). The prompt below must keep that distinction — it must
+// never claim "nothing logged" for a domain it was never even given.
 // Returns the intent object (see responseSchema below).
 app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
   if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server' });
   const { message, context } = req.body || {};
   if (!message) return res.status(400).json({ error: 'message is required' });
 
-  const events = (context && Array.isArray(context.events)) ? context.events : [];
-  const gymStatus = (context && context.gym) || null;
-  const healthStatus = (context && context.health) || null;
-  const sys =
-    'You are the orchestrator AI for a personal day-planner dashboard. ' +
+  const domain = (context && context.domain) || 'unknown';
+  const memory = (context && Array.isArray(context.memory)) ? context.memory : [];
+  // Each domain block is only present when js/index.js's classifier decided
+  // it was relevant — "fetched" (undefined check) is a different fact than
+  // "fetched but empty" (null), and the prompt text below must say so per
+  // domain rather than collapsing both into one generic sentence.
+  const hasEvents = context && Object.prototype.hasOwnProperty.call(context, 'events');
+  const hasGym = context && Object.prototype.hasOwnProperty.call(context, 'gym');
+  const hasHealth = context && Object.prototype.hasOwnProperty.call(context, 'health');
+  const hasWardrobe = context && Object.prototype.hasOwnProperty.call(context, 'wardrobe');
+  const events = hasEvents && Array.isArray(context.events) ? context.events : [];
+  const domainLine = (label, has, val, cap) => has
+    ? label + ' (JSON, null means nothing logged): ' + JSON.stringify(val === undefined ? null : val).slice(0, cap) + '. '
+    : label + ': not fetched for this question — it was classified as unrelated; do not claim it is empty or missing, simply don\'t mention it. ';
+
+  // ── Unified Daily Brief mode (Product Constitution / Unified Intelligence
+  // Strategy, 2026-08-04; widened to up to 3 facts for the Narrative
+  // Dashboard, Goal 4.1, still 2026-08-04) — a distinct, much narrower prompt
+  // for the dashboard's proactive greeting. The frontend's deterministic
+  // ranking (js/index.js's selectTopSignals, plus the narrative dashboard's
+  // own single optional "yesterday" addition) has already decided the ONLY
+  // facts worth mentioning today, in priority order (urgent calendar
+  // conflicts > health conditions > workout recovery > meal consistency);
+  // this prompt's one job is weaving 1-3 pre-verified facts into ONE
+  // genuinely flowing paragraph, never adding a fact of its own and never
+  // opening with its own greeting (the caller prepends a deterministic one —
+  // Goal 4.1's explicit call: a greeting is a function of the clock, not
+  // something worth a model call to get right). Reuses the same
+  // schema/auth/error-handling below unchanged — only `sys` differs.
+  const isBrief = context && context.mode === 'daily_brief';
+  let sys;
+  if (isBrief) {
+    const signals = Array.isArray(context.signals) ? context.signals.slice(0, 3) : [];
+    const signalLines = signals.length
+      ? signals.map((s, i) => (i + 1) + '. [' + String((s && s.domain) || '?').slice(0, 20) + '] ' + String((s && s.fact) || '').slice(0, 240)).join(' ')
+      : 'No notable signals were found for today — the day looks steady.';
+    sys =
+      'You are Shenlong, the orchestrator AI for a personal day-planner dashboard — wise, calm, protective, confident. ' +
+      'Today is ' + ((context && context.date) || new Date().toISOString().slice(0, 10)) + '. ' +
+      'A deterministic system already scanned the user\'s calendar, gym, and health data and selected the ONLY facts ' +
+      'worth mentioning today, already ranked by priority (urgent calendar conflicts, then health conditions ' +
+      'affecting today, then workout recovery, then meal consistency): ' + signalLines + ' ' +
+      'These are the ONLY facts you may reference. Do not add, invent, or infer any other fact about the user\'s ' +
+      'day, their history, or their habits — not sleep, not mood, not anything not explicitly listed above. ' +
+      'TASK: write ONE unified recommendation for today, as a single genuinely flowing paragraph — not separate ' +
+      'sentences bolted together, not a list, never section headers like "Calendar:"/"Health:", never more than ' +
+      'one recommendation. When multiple facts are given, connect them causally or contextually ("You trained X ' +
+      'yesterday and today Y — I\'d Z") so the paragraph reads as one thought, not several tips in a row. Do NOT ' +
+      'open with a greeting or salutation of any kind ("Good morning", "Hi", etc.) — the caller prepends its own ' +
+      'deterministic greeting before this text; starting with one yourself would duplicate it. Length scales with ' +
+      'how much there is to connect: 2-4 sentences for one fact, up to 6 for three — never more than 6. Always end ' +
+      'with one concrete, actionable suggestion — never end on a bare observation with nothing to do about it. ' +
+      'CONFIDENCE: "high" only if the recommendation follows directly from the facts given with no assumption; ' +
+      '"medium" if you filled a small, clearly-stated gap; "low" if the facts are thin or ambiguous — when medium ' +
+      'or low, say so plainly inside the recommendation itself, not as a separate caveat. ' +
+      'TONE: chief of staff — short, warm, concrete, never a bullet list, never restating a raw number you weren\'t ' +
+      'explicitly given above. Set "action" to "chat" and put the recommendation in "reply".';
+  } else {
+  sys =
+    'You are Shenlong, the orchestrator AI for a personal day-planner dashboard — wise, calm, protective, ' +
+    'confident. Never theatrical, never roleplay, never a generic chatbot voice. ' +
     'Convert the user message into EXACTLY ONE structured action. ' +
     'Today is ' + ((context && context.date) || new Date().toISOString().slice(0, 10)) + '. ' +
-    "The user's current calendar events (JSON): " + JSON.stringify(events).slice(0, 4000) + '. ' +
-    "Today's gym status (JSON, null means no gym data logged yet): " + JSON.stringify(gymStatus).slice(0, 1000) + '. ' +
-    "Today's health/nutrition status (JSON, null means no data logged yet): " + JSON.stringify(healthStatus).slice(0, 1000) + '. ' +
-    'GROUNDING (more important than being helpful-sounding): only state facts present in the JSON above. ' +
-    'If a field is null or a value is missing, say plainly that you don\'t have that data or nothing is logged yet — ' +
-    'never invent a number, event, workout, or meal, and never assume something didn\'t happen just because it\'s ' +
-    'not in the data. When the user asks about their day, prioritize this local data over generic knowledge. ' +
+    'This request was classified as domain "' + domain + '" (calendar/gym/health/wardrobe/general/multi/unknown) ' +
+    'by a deterministic classifier — "general"/"multi"/"unknown" mean multiple domains may be relevant, so reason ' +
+    'across whatever context is present below. ' +
+    domainLine("The user's calendar events", hasEvents, events, 4000) +
+    domainLine("Today's gym status", hasGym, context && context.gym, 1000) +
+    domainLine("Today's health/nutrition status", hasHealth, context && context.health, 1000) +
+    domainLine("The user's wardrobe status (item counts only — no live weather feed exists yet, so NEVER judge an outfit as too warm/cold/appropriate)", hasWardrobe, context && context.wardrobe, 1000) +
+    'Remembered long-term facts/preferences about the user (JSON array, may be empty): ' + JSON.stringify(memory).slice(0, 1500) + '. ' +
+    'REASONING STEPS (internal — never narrate these, only output the final JSON): ' +
+    '(1) Use the domain classification above to decide what this request is really about. ' +
+    '(2) Read only the context actually provided — never assume a not-fetched domain is empty. ' +
+    '(3) Discard anything contradictory or clearly stale before reasoning over it. ' +
+    '(4) Form the single best action + a short reply. ' +
+    '(5) SELF-CHECK before finalizing: does every factual claim in "reply" trace to the JSON above, to a remembered ' +
+    'fact, or to general knowledge of how to use this app? If any claim does not, remove it or state the uncertainty ' +
+    'instead of asserting it. ' +
+    'GROUNDING (more important than being helpful-sounding): only state facts present in the context above. ' +
+    'If a fetched field is null or a value is missing, say plainly that you don\'t have that data or nothing is ' +
+    'logged yet — never invent a number, event, workout, or meal, and never assume something didn\'t happen just ' +
+    'because it\'s not in the data. When the user asks about their day, prioritize this local data over generic ' +
+    'knowledge. ' +
+    'CONFIDENCE: set "confidence" to "high" only when your answer is fully backed by the provided context/memory ' +
+    'and normal app rules with no assumptions; "medium" when you filled a small, clearly-stated gap (e.g. no time ' +
+    'given, so you asked); "low" whenever the request is ambiguous, the needed domain wasn\'t fetched, or you are ' +
+    'uncertain — and when confidence is "low" or "medium", say so plainly in "reply" (e.g. "I don\'t have your ' +
+    'workout data for that" or "Not sure which one you mean — the 3pm or the 5pm block?") rather than guessing ' +
+    'silently. ' +
     'TONE: behave like a personal chief of staff, not a generic chatbot — short, concrete, actionable sentences ' +
     '(e.g. "You have two meetings before lunch. Train after 18:00. You still need water today.") rather than ' +
-    'long or hedging paragraphs. ' +
+    'long or hedging paragraphs. Never explain obvious things. Never overuse metaphors. ' +
     'Rules: all times are 24-hour "HH:MM". Dates are ALWAYS absolute "YYYY-MM-DD" — if the user names a day ' +
-    '("tomorrow", "next Friday", a specific date), resolve it against today\'s date above and set "date"; ' +
-    'leave "date" absent when the user does not mention a day (it then applies to whatever day is already ' +
-    'selected). For move_event / complete_event / delete_event / rename_event, ' +
+    '("tomorrow", "next Friday", "this Monday", a specific date), resolve it against today\'s date above: "next X" ' +
+    'means the occurrence of weekday X that is NOT today (1-7 days out); "this X" means the closest upcoming ' +
+    'occurrence of X, including today if today IS X. If the day reference is genuinely ambiguous, ask rather than ' +
+    'guess — never fabricate a date. Leave "date" absent when the user does not mention a day (it then applies to ' +
+    'whatever day is already selected). For move_event / complete_event / delete_event / rename_event, ' +
     '"match" MUST be a distinctive keyword taken from the target event\'s title. ' +
     'For rename_event (the user wants to change/correct an event\'s NAME or TITLE, e.g. ' +
     '"rename X to Y", "change the name of X to Y", "call X Y") set "match" to the existing block and ' +
@@ -322,6 +404,9 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
     'add "endTime" for a range, "durationMin" to set an absolute length, or "deltaMin" to grow (+) / shrink (-) it. ' +
     'For log_water set "servings" (default 1) and "unit" ("glass" or "bottle"). ' +
     'For log_food set "name" and "calories" if stated. For a quick reminder/idea with no time, use "note" with "text". ' +
+    'For remember_fact (the user wants YOU to remember something about them long-term, e.g. "remember that I\'m ' +
+    'vegetarian", "keep in mind I train in the mornings" — NOT "remember to [do something]", which is a reminder: ' +
+    'use "note" for that instead) set "text" to the fact, written in third person as a short standalone statement. ' +
     'CORRECTIONS & UNDO: If the user expresses regret or reversal — "sorry", "my mistake", ' +
     '"cancel that", "undo", "recover [X]", "bring back [X]", "restore [X]" — do NOT blindly parse ' +
     'any following negative keywords as a NEW delete. Instead use action "restore_event" to reverse ' +
@@ -333,6 +418,7 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
     'Use a single top-level action only when there is exactly one instruction. ' +
     'If the message is purely conversational with no concrete action, use action "chat". ' +
     'ALWAYS set "reply" to a brief, warm one-line confirmation or a single clarifying question.';
+  }
 
   const body = {
     contents: [{ parts: [{ text: sys + '\n\nUser: ' + message }] }],
@@ -345,7 +431,7 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
           action: {
             type: 'STRING',
             enum: ['add_event', 'move_event', 'retime_event', 'rename_event', 'complete_event', 'uncheck_event',
-              'delete_event', 'restore_event', 'summarize', 'log_water', 'log_food', 'note', 'chat'],
+              'delete_event', 'restore_event', 'summarize', 'log_water', 'log_food', 'note', 'remember_fact', 'chat'],
           },
           title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
           date: { type: 'STRING' },
@@ -354,6 +440,12 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
           servings: { type: 'NUMBER' }, unit: { type: 'STRING' },
           name: { type: 'STRING' }, calories: { type: 'NUMBER' },
           text: { type: 'STRING' }, reply: { type: 'STRING' },
+          // Self-assessed per the SELF-CHECK/CONFIDENCE reasoning steps above —
+          // not shown to the user as a badge (Shenlong stays conversational,
+          // not clinical); "low"/"medium" must instead be voiced in "reply"
+          // itself. Kept structured for testing/telemetry (Shenlong
+          // Intelligence pass, 2026-08-03).
+          confidence: { type: 'STRING', enum: ['high', 'medium', 'low'] },
           // Ordered intents for a compound message; healing/restore comes first.
           steps: {
             type: 'ARRAY',
@@ -363,7 +455,7 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
                 action: {
                   type: 'STRING',
                   enum: ['add_event', 'move_event', 'retime_event', 'rename_event', 'complete_event', 'uncheck_event',
-                    'delete_event', 'restore_event', 'log_water', 'log_food', 'note'],
+                    'delete_event', 'restore_event', 'log_water', 'log_food', 'note', 'remember_fact'],
                 },
                 title: { type: 'STRING' }, match: { type: 'STRING' }, time: { type: 'STRING' },
                 date: { type: 'STRING' },
@@ -375,7 +467,7 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
             },
           },
         },
-        required: ['action', 'reply'],
+        required: ['action', 'reply', 'confidence'],
       },
     },
   };
