@@ -269,7 +269,8 @@ app.post('/api/gemini/meal-scan', expensiveLimiter, async (req, res) => {
       carbs: num(parsed.carbs), fats: num(parsed.fats),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[gemini] meal-scan failed:', err && err.message);
+    res.status(500).json({ error: 'Could not analyze the meal photo' });
   }
 });
 
@@ -393,7 +394,8 @@ app.post('/api/gemini/assistant', expensiveLimiter, async (req, res) => {
     try { parsed = JSON.parse(text); } catch (e) { return res.status(502).json({ error: 'Could not read the AI response' }); }
     res.json(parsed);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[gemini] assistant failed:', err && err.message);
+    res.status(500).json({ error: 'Could not reach the assistant' });
   }
 });
 
@@ -962,6 +964,22 @@ app.post('/api/calendar/sync/trigger', expensiveLimiter, async (req, res) => {
   }
 });
 
+
+// ── Crash visibility ───────────────────────────────────────────────────────────
+// Every route above already catches its own errors and answers with a normal
+// HTTP response — these two only fire for a bug that slipped past all of them.
+// Node kills the process for both cases either way; the only thing missing
+// before this was a log line explaining why. The platform (Render / pm2)
+// restarts the process — log loudly, then let it die, rather than leaving the
+// owner staring at a proxy that's mysteriously stopped answering.
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaught exception:', (err && err.stack) || err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[fatal] unhandled rejection:', (err && err.stack) || err);
+  process.exit(1);
+});
 
 // ── Start server (local dev only) ─────────────────────────────────────────────
 if (require.main === module) {
