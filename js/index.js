@@ -677,6 +677,17 @@ window.QuickNotes = (function () {
     if (hit === tokens.length) return 50 + hit;   // every word present
     return hit;                                    // partial (weak)
   }
+  // Known Issue #24: two events can tie on match score ("Dentist AM checkup" /
+  // "Dentist PM follow-up" both match "dentist") — findEvent silently picks
+  // one via the prefer tie-break below and the caller has no way to know a
+  // second candidate existed. This flag is a best-effort side channel (set by
+  // every findEvent call, read once by applyIntent right after) so a mutating
+  // action can disclose the ambiguity in its own success message instead of
+  // reporting plain, unqualified success. It does not change WHICH event gets
+  // picked, only whether the user is told there was a choice — actually
+  // asking for clarification instead of guessing is the fuller fix, tracked
+  // separately under Roadmap v2's E8b (already deferred).
+  let lastMatchWasAmbiguous = false;
   // Pick the event that best matches a keyword. `prefer` biases ties: 'done' for
   // unchecking (target the completed slot), 'undone' for completing, else the
   // upcoming/active one so "move my workout" hits the right block.
@@ -688,6 +699,14 @@ window.QuickNotes = (function () {
     scored.sort((a, b) => b.s - a.s);
     const best = scored[0].s;
     const top = scored.filter(x => x.s === best).map(x => x.ev);
+    // Only ever SET this true, never reset false here — the local parser
+    // pre-resolves via resolve()/matchTitle() (an earlier, genuinely-ambiguous
+    // findEvent call) before applyIntent calls the mutating action, which
+    // triggers a SECOND findEvent call against the now-specific resolved
+    // title (no longer ambiguous). Resetting on every call let that later,
+    // already-disambiguated call silently clobber the real signal from the
+    // first one. wasLastMatchAmbiguous() below is the one place this clears.
+    if (top.length > 1) lastMatchWasAmbiguous = true;
     const now = new Date(), doneSet = getDoneSet();
     if (prefer === 'done')   return top.find(ev => doneSet.has(ev.id))  || top[0];
     if (prefer === 'undone') return top.find(ev => !doneSet.has(ev.id)) || top[0];
@@ -865,6 +884,7 @@ window.QuickNotes = (function () {
     completeEvent: apiCompleteEvent, uncheckEvent: apiUncheckEvent, deleteEvent: apiDeleteEvent,
     renameEvent: apiRenameEvent,
     restoreEvent: apiRestoreEvent,
+    wasLastMatchAmbiguous: () => { const v = lastMatchWasAmbiguous; lastMatchWasAmbiguous = false; return v; },
     matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
 })();
@@ -1319,10 +1339,12 @@ window.QuickNotes = (function () {
         if (!(await ensureDate(intent.date))) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to re-time that."); return; }
         const r = await A.retimeEvent(intent.match, opts);
+        const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok
           ? '✓ Updated “' + r.title + '” → ' + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        if (r.ok && ambiguous) addMsg('ai', 'More than one event matched that -- I used the most likely one.');
         return;
       }
       case 'rename_event':
@@ -1340,28 +1362,34 @@ window.QuickNotes = (function () {
       case 'complete_event': {
         if (!(await ensureDate(intent.date))) return;
         const r = A.completeEvent(intent.match);
+        const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? '✓ Awesome — marked “' + r.title + '” as completed.'
           : (A.isOffline() ? "I can't see your events (proxy offline) to check that off."
             : "I couldn't find an event matching “" + (intent.match || '') + '”.'));
+        if (r.ok && ambiguous) addMsg('ai', 'More than one event matched that -- I used the most likely one.');
         return;
       }
       case 'uncheck_event': {
         if (!(await ensureDate(intent.date))) return;
         const r = A.uncheckEvent(intent.match);
+        const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
         addMsg('ai', r.ok ? "✓ I've unchecked “" + r.title + '” — back on your list.'
           : (A.isOffline() ? "I can't see your events (proxy offline) to uncheck that."
             : "I couldn't find an event matching “" + (intent.match || '') + '”.'));
+        if (r.ok && ambiguous) addMsg('ai', 'More than one event matched that -- I used the most likely one.');
         return;
       }
       case 'delete_event': {
         if (!(await ensureDate(intent.date))) return;
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to delete that."); return; }
         const r = await A.deleteEvent(intent.match);
+        const ambiguous = A.wasLastMatchAmbiguous();
         addMsg('ai', r.ok ? '✓ Deleted “' + r.title + '”.'
           : r.error ? 'Deleting that failed — is the proxy running?'
             : "I couldn't find an event matching “" + (intent.match || '') + '”.');
+        if (r.ok && ambiguous) addMsg('ai', 'More than one event matched that -- I used the most likely one.');
         return;
       }
       case 'restore_event':
