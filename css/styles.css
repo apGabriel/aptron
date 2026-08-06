@@ -844,6 +844,29 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.is-re
   box-shadow: inset 2px 0 0 0 rgba(255,159,67,0.6);
 }
 
+/* Unified Daily Brief — today's headline, not another chat bubble (Unified
+   Daily Brief Phase 1). Three chained classes deliberately: the light-theme
+   override two blocks up targets `.aios-msg-ai` alone at (0,2,1) specificity,
+   so a two-class `.aios-msg-ai.aios-brief` rule would lose to it regardless
+   of source order. Three classes clears that without !important. */
+.aios-msg.aios-msg-ai.aios-brief {
+  font-size: 15px; font-weight: 600; line-height: 1.5;
+  background: color-mix(in srgb, var(--accent) 12%, rgba(255,255,255,0.06));
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-left: 3px solid var(--accent);
+  padding: 12px 14px 12px 12px;
+  max-width: 96%;
+}
+.aios-msg.aios-msg-ai.aios-brief::before {
+  content: 'Today';
+  display: block; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px;
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .aios-msg.aios-msg-ai.aios-brief {
+  background: color-mix(in srgb, var(--accent) 10%, rgba(29,33,41,0.04));
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
 /* Kame House watermark — a minimalist architectural silhouette resting at the
    bottom of the chat. Purely decorative: `.aios-chat > *` lifts every real
    child to z-index 1, so this z-index:0 layer is always under the bubbles, and
