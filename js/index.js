@@ -635,6 +635,19 @@ window.QuickNotes = (function () {
   }
 
   // ── assistant-facing helpers ──────────────────────────────────────────────
+  // Casual words that mean the same calendar block but share no substring with
+  // its title ("workout" vs "Gym") — token-overlap alone can't find these.
+  // Keep every group to a PROVEN miss (Known Issues #1 / roadmap E8a: a user
+  // said "move my workout to 5pm" against an event literally titled "Gym" and
+  // got "I couldn't find an event matching workout", even though Shenlong's
+  // own replies use that exact word). The next *different* word reported
+  // missing is the signal to give events a real category/tag, not to keep
+  // growing this table — see the roadmap note next to this fix.
+  const TITLE_SYNONYMS = [['workout', 'workouts', 'gym']];
+  function synonymsOf(word) {
+    const g = TITLE_SYNONYMS.find(group => group.includes(word));
+    return g || [word];
+  }
   // Score how well a query matches an event title. A contiguous substring wins;
   // otherwise we accept a token-subset match so filler-stripped phrases like
   // "read book" still find "Read a book". Returns 0 when there's no real match.
@@ -643,7 +656,8 @@ window.QuickNotes = (function () {
     if (tl.includes(q)) return 100 + q.length;
     const tokens = q.split(/\s+/).filter(Boolean);
     if (!tokens.length) return 0;
-    const hit = tokens.filter(w => w.length > 1 && tl.includes(w)).length;
+    const tokenHits = (w) => synonymsOf(w).some(s => tl.includes(s));
+    const hit = tokens.filter(w => w.length > 1 && tokenHits(w)).length;
     if (hit === tokens.length) return 50 + hit;   // every word present
     return hit;                                    // partial (weak)
   }
