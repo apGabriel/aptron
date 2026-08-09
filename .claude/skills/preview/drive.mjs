@@ -21,6 +21,19 @@
               things directly, e.g. window.GymRestTimer.start(15,'x').
    --script   a module exporting `default async (page, ctx) => {}`
               for multi-step flows; ctx = { shot(name), log(...) }.
+   --init     path to a plain (non-module) browser-JS file injected via
+              page.addInitScript() BEFORE navigation — for replacing a
+              window API (e.g. SpeechRecognition) before the page's own
+              scripts run and check for it at load time.
+   --chromium-args   space-separated Chromium launch flag NAMES, WITHOUT
+              their leading "--" (the shared tiny arg() parser above treats
+              any value starting with "--" as another flag, not a value —
+              a pre-existing limitation, not worked around by changing that
+              shared parser). drive.mjs re-adds "--" to each. E.g.
+              --chromium-args "use-fake-ui-for-media-stream use-fake-device-for-media-stream"
+              auto-grants mic/camera permission with a synthetic device
+              instead of the real (denied-by-default, headless) prompt.
+              Generic — not specific to any one feature's testing needs.
    ============================================================ */
 import { chromium } from 'playwright-core';
 import { readdirSync, mkdirSync, existsSync } from 'node:fs';
@@ -40,6 +53,8 @@ const wait   = Number(arg('wait', 600));
 const desktop = !!arg('desktop', false);
 const evalJs = arg('eval', null);
 const script = arg('script', null);
+const initScript = arg('init', null);
+const chromiumArgs = arg('chromium-args', null);   // e.g. "--use-fake-ui-for-media-stream --use-fake-device-for-media-stream"
 
 const SHOTS = join(import.meta.dirname, '_shots');
 const log = (...a) => console.log('[preview]', ...a);
@@ -76,7 +91,10 @@ const exe = resolveChrome();
 log('chromium:', exe || '(default)');
 mkdirSync(SHOTS, { recursive: true });
 
-const browser = await chromium.launch({ executablePath: exe, headless: true });
+const browser = await chromium.launch({
+  executablePath: exe, headless: true,
+  args: chromiumArgs ? String(chromiumArgs).split(/\s+/).filter(Boolean).map((f) => '--' + f) : [],
+});
 const ctxPage = await browser.newPage({
   viewport: desktop ? { width: 1280, height: 900 } : { width: 430, height: 900 }
 });
@@ -84,6 +102,14 @@ const ctxPage = await browser.newPage({
 const errors = [];
 ctxPage.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 ctxPage.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
+
+// Inject BEFORE navigation so a replaced window API (e.g. SpeechRecognition)
+// is in place before the page's own scripts evaluate at load time.
+if (initScript) {
+  const initPath = isAbsolute(String(initScript)) ? String(initScript) : join(process.cwd(), String(initScript));
+  await ctxPage.addInitScript({ path: initPath });
+  log('init script:', initPath);
+}
 
 const url = pageUrl(page);
 await ctxPage.goto(url, { waitUntil: 'networkidle' });

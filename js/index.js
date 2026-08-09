@@ -1284,6 +1284,7 @@ window.QuickNotes = (function () {
   const form = document.getElementById('aiForm');
   const input = document.getElementById('aiInput');
   const chipsWrap = document.getElementById('aiChips');
+  const aiSub = document.getElementById('aiSub');
   if (!log || !form) return;
 
   // ── message UI ─────────────────────────────────────────────────────────────
@@ -1296,7 +1297,14 @@ window.QuickNotes = (function () {
   // at least MIN_SPIN_MS so the rotation is always actually visible.
   const MIN_SPIN_MS = 900;
   let processingSince = 0, hideTimer = 0;
+  // Reassigned by the voice-input block below (only when SpeechRecognition is
+  // available) — starts as a no-op so setSummoning can call it unconditionally
+  // regardless of load order, tying the mic's DISABLED visual state to the
+  // exact same busy lifecycle every other "Shenlong is working" state already
+  // uses, instead of a second, independently-tracked flag.
+  let setMicDisabled = () => {};
   function setSummoning(on) {
+    setMicDisabled(on);
     if (!chatEl) return;
     if (on) {
       clearTimeout(hideTimer);
@@ -1964,6 +1972,109 @@ window.QuickNotes = (function () {
         + '“move workout to 4pm”, “log water”, or “what’s on today?”.');
     }
     busy = false; setSummoning(false);
+  }
+
+  // ── voice input — Voice Chat, auto-send (ADR-021; supersedes ADR-020 only on
+  // the send-behavior question — the client-side Web Speech API decision below
+  // is unchanged) ───────────────────────────────────────────────────────────
+  // Audio never leaves the browser; a finished utterance is handed straight to
+  // handle() below, the SAME entry point typed messages and quick chips already
+  // use — handle()/parseLocal()/askGemini()/applyIntent()/classifyIntentDomain()
+  // never learn a message originated as speech. Feature-detected; browsers
+  // without support (e.g. Firefox) simply never see the mic button.
+  const micBtn = document.getElementById('aiMic');
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (micBtn && !SpeechRec) {
+    micBtn.hidden = true;
+  } else if (micBtn) {
+    let recognition = null;
+    let voiceState = 'idle';   // idle | recording | processing
+    let hadError = false;
+    let wasCancelled = false;
+    const subDefault = aiSub ? aiSub.textContent : '';
+
+    function friendlyMicError(code) {
+      if (code === 'not-allowed' || code === 'permission-denied' || code === 'service-not-allowed')
+        return "Microphone access is blocked — allow it in your browser's site settings to use voice input.";
+      if (code === 'no-speech') return "I didn't catch that — try again.";
+      if (code === 'audio-capture') return 'No microphone was found.';
+      if (code === 'network') return 'Voice recognition needs an internet connection.';
+      return "Voice input didn't work — try typing instead.";
+    }
+    function setVoiceState(next) {
+      voiceState = next;
+      micBtn.classList.toggle('is-recording', next === 'recording');
+      micBtn.classList.toggle('is-processing-voice', next === 'processing');
+      micBtn.setAttribute('aria-pressed', String(next === 'recording'));
+      if (aiSub) {
+        aiSub.textContent = next === 'recording' ? 'Listening… (Esc to cancel)'
+          : next === 'processing' ? 'Understanding…' : subDefault;
+      }
+    }
+    // A fresh instance per recording (not reused) sidesteps known cross-browser
+    // quirks restarting a single SpeechRecognition object, notably in Safari.
+    function startRecording() {
+      if (busy || voiceState !== 'idle') return;
+      hadError = false; wasCancelled = false;
+      recognition = new SpeechRec();
+      recognition.lang = navigator.language || 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognition.__lastTranscript = '';
+      recognition.onstart = () => setVoiceState('recording');
+      recognition.onresult = (e) => {
+        let t = '';
+        for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+        recognition.__lastTranscript = t;
+      };
+      recognition.onerror = (e) => {
+        // 'aborted' fires from our own cancelRecording() call — not a real error.
+        if (e.error === 'aborted') return;
+        hadError = true;
+        addMsg('ai', friendlyMicError(e.error));
+      };
+      recognition.onend = () => {
+        const transcript = (recognition && recognition.__lastTranscript || '').trim();
+        recognition = null;
+        setVoiceState('idle');
+        // Cancellation/error win no matter what onend delivers — checked FIRST,
+        // before the transcript is even considered, so an abort() that still
+        // yields a transcript (a real browser behavior in some engines) can
+        // never be sent. Known Issue-worthy trap if this order were reversed.
+        if (wasCancelled || hadError) return;
+        if (transcript) handle(transcript);   // SAME pipeline as typed text/chips
+      };
+      try { recognition.start(); } catch (e) { setVoiceState('idle'); }
+    }
+    // Click while RECORDING = "I'm done" → finalize and send (stop() lets the
+    // engine deliver whatever it already captured). Escape = "never mind" →
+    // cancel (abort() + wasCancelled, which onend checks before anything else).
+    // Two distinct gestures, never conflated.
+    function finishRecording() {
+      if (voiceState !== 'recording' || !recognition) return;
+      setVoiceState('processing');
+      recognition.stop();
+    }
+    function cancelRecording() {
+      if (voiceState === 'idle' || !recognition) return;
+      wasCancelled = true;   // set BEFORE abort() — onend reads this first, always
+      recognition.abort();
+    }
+    micBtn.addEventListener('click', () => {
+      if (voiceState === 'idle') startRecording();
+      else if (voiceState === 'recording') finishRecording();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && voiceState !== 'idle') cancelRecording();
+    });
+    // DISABLED state — reassigns the no-op declared near setSummoning() above,
+    // so the mic's busy-visual tracks the exact same lifecycle every other
+    // "Shenlong is working" indicator already uses, instead of a second,
+    // independently-tracked flag.
+    setMicDisabled = (disabled) => {
+      micBtn.classList.toggle('is-mic-disabled', disabled);
+      micBtn.setAttribute('aria-disabled', String(disabled));
+    };
   }
 
   // ── quick chips ──────────────────────────────────────────────────────────────

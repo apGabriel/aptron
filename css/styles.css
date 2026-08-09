@@ -723,6 +723,45 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.is-re
   fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
 }
 
+/* Mic button starts visible; js/index.js hides it via [hidden] when the
+   browser has no SpeechRecognition support (e.g. Firefox) — must win over
+   the button's own `display:flex` above, which otherwise outranks the UA
+   [hidden] rule. */
+.aios-chat-input button[hidden] { display: none; }
+
+.aios-chat-input button.aios-mic-btn.is-recording {
+  color: #fff;
+  background: color-mix(in srgb, #e74c3c 55%, transparent);
+  border-color: color-mix(in srgb, #e74c3c 65%, transparent);
+  animation: micPulse 1.4s ease-in-out infinite;
+}
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0.45); }
+  50%      { box-shadow: 0 0 0 8px rgba(231,76,60,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aios-chat-input button.aios-mic-btn.is-recording { animation: none; }
+}
+
+/* PROCESSING — the brief gap between "stopped talking" and onend delivering
+   the final transcript. Swaps the mic glyph for a spinner (reuses the
+   existing cal-spin rotation, css/styles.css line ~238, rather than a new
+   keyframe) so the user sees why nothing happened yet, however briefly. */
+.aios-chat-input button.aios-mic-btn.is-processing-voice svg {
+  animation: cal-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .aios-chat-input button.aios-mic-btn.is-processing-voice svg { animation: none; }
+}
+
+/* DISABLED — mirrors setSummoning()'s busy lifecycle (js/index.js) so the mic
+   visibly goes inert whenever Shenlong is already handling a message, voice
+   or text. Pointer events stay on so a click is a distinguishable no-op
+   rather than looking identical to "broken". */
+.aios-chat-input button.aios-mic-btn.is-mic-disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
+
 /* Quick-notes inbox — deliberately small */
 .aios-notes { margin-top: 14px; }
 .aios-notes-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
