@@ -78,7 +78,38 @@ npm install --prefix .claude/skills/preview
    node .claude/skills/preview/drive.mjs --page gym --script .claude/skills/preview/_flow.mjs
    ```
 
-5. **Always look at the screenshots** (Read them). A blank/garbled frame is a
+5. **Replace a window API before the page loads** with `--init <path>` — for
+   cases where the page checks for a browser API (e.g.
+   `window.SpeechRecognition`) at load time, so a `--script`/`--eval`
+   (which only run *after* `goto()`) would be too late. The file is plain
+   browser JS (no `import`/`export` — it's injected as raw script content,
+   not loaded as a module), injected via Playwright's `addInitScript()`:
+
+   ```bash
+   node .claude/skills/preview/drive.mjs --page index \
+     --init .claude/skills/preview/_mock-speech-recognition.js \
+     --script .claude/skills/preview/_flow-voice-state-machine.mjs
+   ```
+
+6. **Auto-grant a real permission prompt** (mic/camera) with `--chromium-args`
+   — passed verbatim to `chromium.launch({ args })`. Chromium's fake-device
+   flags grant the permission instantly and provide a synthetic media
+   stream, so real (not mocked) browser APIs like `SpeechRecognition` can be
+   exercised past the permission gate — though a synthetic device produces
+   no real speech/image content, so this proves the permission/start path,
+   not real recognition/transcription accuracy:
+
+   ```bash
+   node .claude/skills/preview/drive.mjs --page index \
+     --chromium-args "use-fake-ui-for-media-stream use-fake-device-for-media-stream" \
+     --script .claude/skills/preview/_flow-voice-permission-granted.mjs
+   ```
+   Note: flag names go **without** their leading `--` — the existing tiny
+   `arg()` parser in `drive.mjs` treats any value starting with `--` as
+   another flag rather than this flag's value, so `--chromium-args` adds the
+   `--` back itself rather than changing that shared parser.
+
+7. **Always look at the screenshots** (Read them). A blank/garbled frame is a
    launch failure, not a pass. Report what you saw + any console errors.
 
 ## Clean up
@@ -90,7 +121,12 @@ rm -f .claude/skills/preview/_flow.mjs                         # drop temp flows
 
 `_shots/` and `node_modules/` are gitignored — leave them; they make the next
 run faster. Do not commit anything under this skill folder except the tracked
-`SKILL.md`, `drive.mjs`, `package.json`, `.gitignore`.
+`SKILL.md`, `drive.mjs`, `package.json`, `package-lock.json`, `.gitignore` —
+**plus one deliberate exception**: the `_flow-voice-*.mjs` files and
+`_mock-speech-recognition.js` are re-run regression tests (Shenlong's
+`VOICE-*` suite, `docs/testing/SHENLONG_TEST_SUITE.md`), not one-off
+exploration — keep them tracked, don't `rm` them after use like a throwaway
+`_flow.mjs`.
 
 ## What this can't show
 
