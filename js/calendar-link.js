@@ -44,11 +44,18 @@
     s.id = 'callink-styles';
     s.textContent = `
 .callink {
+  /* Local aliases onto the page's theme tokens (css/styles.css :root, or
+     each page's own theme block), same pattern as js/account.js's
+     --acct-accent. Fallbacks match the historic gold so appearance is
+     unchanged if --accent/--warning are ever absent. */
+  --cl-accent: var(--accent, #d2bc8a);
+  --cl-accent-dark: var(--accent-dark, #956534);
+  --cl-warning: var(--warning, #e6b25a);
   position: relative; overflow: hidden;
   margin: 2px 0 12px; padding: 16px 18px;
-  border: 1px solid rgba(210,188,138,0.20); border-radius: 15px;
+  border: 1px solid color-mix(in srgb, var(--cl-accent) 20%, transparent); border-radius: 15px;
   background:
-    radial-gradient(90% 130% at 6% -20%, rgba(149,101,52,0.22) 0%, transparent 46%),
+    radial-gradient(90% 130% at 6% -20%, color-mix(in srgb, var(--cl-accent-dark) 22%, transparent) 0%, transparent 46%),
     linear-gradient(180deg, rgba(58,56,52,0.60), rgba(31,30,28,0.62));
   box-shadow: 0 8px 26px rgba(0,0,0,0.35);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
@@ -56,13 +63,13 @@
 }
 .callink[hidden] { display: none; }
 .callink:hover {
-  border-color: rgba(210,188,138,0.42);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.40), 0 0 24px rgba(149,101,52,0.14);
+  border-color: color-mix(in srgb, var(--cl-accent) 42%, transparent);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.40), 0 0 24px color-mix(in srgb, var(--cl-accent-dark) 14%, transparent);
 }
-/* faint gold hairline along the top edge */
+/* faint accent hairline along the top edge */
 .callink::before {
   content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(230,207,156,0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--cl-accent) 55%, transparent), transparent);
 }
 
 /* flex-wrap:wrap: the not-linked state puts a long CTA ("Start Calendar
@@ -74,31 +81,34 @@
    body only, nothing else to wrap) is unaffected. */
 .callink-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
-/* Gold-ringed Shenlong medallion */
+/* Accent-ringed Shenlong medallion */
 .callink-medallion {
   flex: 0 0 auto; position: relative; width: 46px; height: 46px; border-radius: 50%;
   display: grid; place-items: center;
   background:
-    radial-gradient(circle at 50% 34%, rgba(230,207,156,0.16), transparent 70%),
-    linear-gradient(180deg, rgba(230,207,156,0.10), rgba(149,101,52,0.05));
-  box-shadow: 0 0 0 1px rgba(210,188,138,0.55) inset, 0 0 18px rgba(149,101,52,0.30);
+    radial-gradient(circle at 50% 34%, color-mix(in srgb, var(--cl-accent) 16%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--cl-accent) 10%, transparent), color-mix(in srgb, var(--cl-accent-dark) 5%, transparent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cl-accent) 55%, transparent) inset, 0 0 18px color-mix(in srgb, var(--cl-accent-dark) 30%, transparent);
   transition: box-shadow .18s ease;
 }
-/* A gold calendar glyph — NOT the Shenlong mark. Signals an external calendar
-   integration and keeps it visually distinct from the native assistant orb,
-   which carries the dragon. Inline SVG so it stays crisp at any viewport. */
+/* An accent-colored calendar glyph — NOT the Shenlong mark. Signals an
+   external calendar integration and keeps it visually distinct from the
+   native assistant orb, which carries the dragon. Inline SVG so it stays
+   crisp at any viewport. */
 .callink-medallion svg {
-  width: 25px; height: 25px; display: block; color: #e6cf9c;
+  width: 25px; height: 25px; display: block; color: color-mix(in srgb, var(--cl-accent) 78%, white);
   fill: none; stroke: currentColor; stroke-width: 1.7;
   stroke-linecap: round; stroke-linejoin: round;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
 }
 .callink-medallion svg .fillday { fill: currentColor; stroke: none; }
-/* amber-tinted medallion when the connection needs attention */
+/* amber-tinted medallion when the connection needs attention — --cl-warning,
+   deliberately NOT --cl-accent: a "needs attention" signal should read the
+   same regardless of the active brand theme. */
 .callink.is-warn .callink-medallion {
-  box-shadow: 0 0 0 1px rgba(230,178,90,0.55) inset, 0 0 18px rgba(230,178,90,0.28);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cl-warning) 55%, transparent) inset, 0 0 18px color-mix(in srgb, var(--cl-warning) 28%, transparent);
 }
-.callink.is-warn .callink-medallion svg { color: #f0cf8f; }
+.callink.is-warn .callink-medallion svg { color: color-mix(in srgb, var(--cl-warning) 80%, white); }
 
 .callink-body { flex: 1 1 auto; min-width: 0; }
 .callink-titlerow { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -109,9 +119,9 @@
   display: inline-flex; align-items: center; gap: 5px;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-  color: #e6cf9c; padding: 3px 9px 3px 8px; border-radius: 999px;
-  border: 1px solid rgba(210,188,138,0.38);
-  background: linear-gradient(180deg, rgba(210,188,138,0.16), rgba(210,188,138,0.06));
+  color: color-mix(in srgb, var(--cl-accent) 78%, white); padding: 3px 9px 3px 8px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cl-accent) 38%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--cl-accent) 16%, transparent), color-mix(in srgb, var(--cl-accent) 6%, transparent));
 }
 .callink-pill .swap { font-size: 11px; line-height: 1; }
 
@@ -122,18 +132,18 @@
 }
 .callink-sub .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: rgba(255,255,255,0.35); }
 .callink-sub.is-ok    .dot { background: #6fcf97; box-shadow: 0 0 7px rgba(111,207,151,0.7); }
-.callink-sub.is-warn  .dot { background: #e6b25a; box-shadow: 0 0 7px rgba(230,178,90,0.7); }
+.callink-sub.is-warn  .dot { background: var(--cl-warning); box-shadow: 0 0 7px color-mix(in srgb, var(--cl-warning) 70%, transparent); }
 .callink-sub.is-error .dot { background: #e98b7f; }
 .callink-sub .sep { color: rgba(255,255,255,0.30); }
 .callink-sub .state { font-weight: 550; }
 .callink-sub.is-ok   .state { color: #6fcf97; }
-.callink-sub.is-warn .state { color: #e6b25a; }
+.callink-sub.is-warn .state { color: var(--cl-warning); }
 
-/* gold hairline divider — margin tightened from 14/12 (26px total for a 1px
+/* accent hairline divider — margin tightened from 14/12 (26px total for a 1px
    line) to 10/10; still a clear section break without the dead space. */
 .callink-rule {
   height: 1px; margin: 10px 0;
-  background: linear-gradient(90deg, transparent, rgba(210,188,138,0.22) 20%, rgba(210,188,138,0.22) 80%, transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--cl-accent) 22%, transparent) 20%, color-mix(in srgb, var(--cl-accent) 22%, transparent) 80%, transparent);
 }
 
 .callink-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
@@ -144,7 +154,7 @@
    row width on its own line — no fixed cap needed. */
 .callink-caption { font-size: 12px; line-height: 1.45; color: rgba(255,255,255,0.38); margin: 0; }
 .callink-caption b { color: rgba(255,255,255,0.6); font-weight: 600; }
-.callink.is-warn .callink-caption b { color: #e6b25a; }
+.callink.is-warn .callink-caption b { color: var(--cl-warning); }
 
 /* flex:none (shrink:0) was blocking this row from ever being width-
    constrained by its own wrapped line, so its own flex-wrap never actually
@@ -155,13 +165,13 @@
 .callink-actions { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; flex-wrap: wrap; }
 .callink-link {
   display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
-  font-family: inherit; font-size: 12px; font-weight: 550; color: #d2bc8a; cursor: pointer;
-  padding: 7px 11px; border-radius: 9px; border: 1px solid rgba(210,188,138,0.22);
-  background: rgba(210,188,138,0.04);
+  font-family: inherit; font-size: 12px; font-weight: 550; color: var(--cl-accent); cursor: pointer;
+  padding: 7px 11px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--cl-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--cl-accent) 4%, transparent);
   transition: background .15s, border-color .15s, color .15s, transform .12s;
 }
 .callink-link svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.callink-link:hover { background: rgba(210,188,138,0.10); border-color: rgba(210,188,138,0.45); color: #e6cf9c; transform: translateY(-1px); }
+.callink-link:hover { background: color-mix(in srgb, var(--cl-accent) 10%, transparent); border-color: color-mix(in srgb, var(--cl-accent) 45%, transparent); color: color-mix(in srgb, var(--cl-accent) 82%, white); transform: translateY(-1px); }
 .callink-link.ghost { color: rgba(255,255,255,0.55); border-color: rgba(255,255,255,0.08); background: transparent; }
 .callink-link.ghost:hover { color: #e98b7f; border-color: rgba(233,139,127,0.40); background: rgba(233,139,127,0.06); }
 
@@ -173,37 +183,46 @@
 }
 .callink-link.is-reconnect:hover { color: #1a1408; filter: brightness(1.05); transform: translateY(-1px); }
 
-/* primary connect CTA (not-linked state) */
+/* primary connect CTA (not-linked state) — was hardcoded gold with no
+   per-theme override anywhere (unlike .callink-link, .is-reconnect etc.),
+   so it stayed gold even under Aptron Light/Nordic Snow, not just the
+   non-gold dark themes. Token-driven now, one rule covers all 7 themes. */
 .callink-cta {
   flex: none; padding: 10px 16px; font-size: 13px; font-weight: 700; font-family: inherit;
   color: #1a1408; cursor: pointer; border: none; border-radius: 11px; white-space: nowrap;
-  background: linear-gradient(180deg, #e6cf9c 0%, #d2bc8a 48%, #b8a06e 100%);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px rgba(149,101,52,0.28);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--cl-accent) 70%, white) 0%,
+    var(--cl-accent) 48%,
+    color-mix(in srgb, var(--cl-accent) 70%, black) 100%);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px color-mix(in srgb, var(--cl-accent-dark) 28%, transparent);
   transition: transform .14s, filter .14s;
 }
 .callink-cta:hover { transform: translateY(-1px); filter: brightness(1.05); }
 .callink-cta:active { transform: translateY(0) scale(0.985); }
 
 /* ── Shenlong "wish granted" overlay ─────────────────────────────────────── */
+/* Matches the main dashboard chat orb (.aios-chat-orb, css/styles.css),
+   which is already correctly accent-tokenized — this is the same dragon
+   glowing the same brand color, so it tracks the theme too. */
 .shenlong-wish {
   position: fixed; inset: 0; z-index: 100001;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 14px; text-align: center; pointer-events: none;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
-  background: radial-gradient(ellipse 60% 50% at 50% 45%, rgba(149,101,52,0.42) 0%, rgba(13,13,14,0.86) 60%, rgba(13,13,14,0.94) 100%);
+  background: radial-gradient(ellipse 60% 50% at 50% 45%, color-mix(in srgb, var(--cl-accent-dark) 42%, transparent) 0%, rgba(13,13,14,0.86) 60%, rgba(13,13,14,0.94) 100%);
   opacity: 0; animation: swFade 2.7s ease forwards;
 }
 .shenlong-wish .sw-dragon {
-  width: 168px; height: 168px; color: #f0d79c; background: currentColor;
+  width: 168px; height: 168px; color: color-mix(in srgb, var(--cl-accent) 85%, white); background: currentColor;
   -webkit-mask: url("img/shenlong.png") center / contain no-repeat;
           mask: url("img/shenlong.png") center / contain no-repeat;
-  filter: drop-shadow(0 0 22px rgba(240,215,156,0.65));
+  filter: drop-shadow(0 0 22px color-mix(in srgb, var(--cl-accent) 65%, transparent));
   transform: translateY(24px) scale(0.82); opacity: 0;
   animation: swRise 2.7s cubic-bezier(0.22,1,0.36,1) forwards;
 }
 .shenlong-wish .sw-title {
   font-size: 26px; font-weight: 800; letter-spacing: -0.01em;
-  background: linear-gradient(180deg, #fff, #e6cf9c 130%);
+  background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--cl-accent) 85%, white) 130%);
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
   transform: translateY(10px); opacity: 0; animation: swText 2.7s ease forwards; animation-delay: 0.25s;
 }

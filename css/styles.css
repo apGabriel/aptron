@@ -14,9 +14,15 @@
   --accent:      #d2bc8a;
   --accent-dark: #956534;
 
-  /* Semantic aliases */
+  /* Semantic aliases. --warning is deliberately its own amber, not accent —
+     a "needs attention" signal should read the same regardless of the
+     active brand theme (Emerald/Neon/Nordic included), the same way
+     --danger already doesn't track --accent. Previously this equaled
+     --accent's gold by coincidence, which made warning/success genuinely
+     indistinguishable in the default theme once anything actually
+     consumed var(--warning) — fixed as part of the theme-consistency pass. */
   --success:  #d2bc8a;
-  --warning:  #d2bc8a;
+  --warning:  #fbbf24;
   --danger:   #e05545;
   --card-bg:  var(--bg-surface);
 
@@ -218,7 +224,7 @@ body > * { position: relative; z-index: 1; }
   transform: rotate(45deg) scale(1);
 }
 .cal-offline {
-  font-size: 12px; color: #fbbf24; padding: 6px 2px 2px;
+  font-size: 12px; color: var(--warning); padding: 6px 2px 2px;
 }
 .cal-offline code {
   background: rgba(255,255,255,0.08); border-radius: 4px;
@@ -377,6 +383,12 @@ body > * { position: relative; z-index: 1; }
   font-size: 14px; font-weight: 700; letter-spacing: 0.02em; color: var(--accent);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
 }
+/* Top-left placement inside the sticky .topbar (js/topbar.js's shared CSS,
+   base rule `justify-content: flex-end`, unchanged so gym/health/wardrobe's
+   topbar — which never has this button — keeps its existing right-aligned
+   layout). margin-right:auto pushes #acctBtn to the opposite edge from the
+   water/wardrobe group, which then still clusters at flex-end as before. */
+#topbar > .aios-acct { margin-right: auto; }
 @media (max-width: 560px) {
   /* Keep the greeting + avatar on one line; the progress bar can shrink.
      max-width (not just min-width) is required here: .aios-dayprog is a
@@ -652,8 +664,8 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .callink-link.is-re
           mask: url("../img/shenlong.png") center / contain no-repeat;
 }
 @keyframes aiOrbPulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(210,188,138,0.18); }
-  50%      { box-shadow: 0 0 24px rgba(210,188,138,0.42); }
+  0%, 100% { box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 18%, transparent); }
+  50%      { box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 42%, transparent); }
 }
 .aios-chat-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .aios-chat-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }

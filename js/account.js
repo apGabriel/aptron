@@ -187,6 +187,9 @@
   --acct-line: color-mix(in srgb, var(--acct-accent) 18%, transparent);
   --acct-line-soft: color-mix(in srgb, var(--acct-accent) 14%, transparent);
   --acct-bar: color-mix(in srgb, var(--acct-accent) 48%, transparent);
+  /* "Needs attention" signal — deliberately its own amber, not --acct-accent,
+     so it reads the same regardless of the active brand theme. */
+  --acct-warning: var(--warning, #e6b25a);
   /* Surface + ink scale. Dark glass by default; the light-theme block at the
      bottom re-declares these for frosted-white glass with slate ink. */
   --acct-glass-a: rgba(62,62,62,0.88);
@@ -323,11 +326,17 @@
 .acct-input[readonly] { color: var(--acct-ink-soft); background: var(--acct-chip); cursor: default; }
 .acct-input:-webkit-autofill { -webkit-text-fill-color: var(--acct-ink); -webkit-box-shadow: 0 0 0 40px var(--acct-autofill) inset; caret-color: var(--acct-ink); }
 
+/* Every primary CTA in this modal (Save, Change Password, Update Email, …).
+   Was hardcoded gold with no override for ANY theme, including Light/Nordic
+   — token-driven now, one rule correctly covers all 7. */
 .acct-btn {
   padding: 11px 15px; font-size: 13.5px; font-weight: 700; font-family: inherit; color: #1a1408; cursor: pointer;
   border: none; border-radius: 11px; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px;
-  background: linear-gradient(180deg, #e6cf9c 0%, #d2bc8a 48%, #b8a06e 100%);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px rgba(149,101,52,0.28);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--acct-accent) 70%, white) 0%,
+    var(--acct-accent) 48%,
+    color-mix(in srgb, var(--acct-accent) 70%, black) 100%);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px color-mix(in srgb, var(--acct-accent) 28%, black);
   -webkit-tap-highlight-color: transparent; transition: transform .14s, filter .14s, opacity .14s;
 }
 .acct-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
@@ -362,7 +371,7 @@
 }
 .acct-badge svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .acct-badge.ok { color: #7fdca4; background: rgba(111,207,151,0.12); border: 1px solid rgba(111,207,151,0.3); }
-.acct-badge.warn { color: #e6b25a; background: rgba(230,178,90,0.12); border: 1px solid rgba(230,178,90,0.32); }
+.acct-badge.warn { color: var(--acct-warning); background: color-mix(in srgb, var(--acct-warning) 12%, transparent); border: 1px solid color-mix(in srgb, var(--acct-warning) 32%, transparent); }
 .acct-badge.muted { color: var(--acct-ink-soft); background: var(--acct-chip); border: 1px solid var(--acct-chip-line); }
 .acct-emailrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .acct-emailrow .acct-input { flex: 1 1 200px; }
@@ -373,12 +382,12 @@
 .acct-meter-seg { height: 5px; flex: 1 1 0; border-radius: 99px; background: var(--acct-chip-line); transition: background .2s; }
 .acct-meter-label { font-size: 11.5px; font-weight: 600; min-width: 58px; text-align: right; color: var(--acct-ink-faint); }
 .acct-meter[data-score="1"] .acct-meter-seg.on { background: #e05545; }
-.acct-meter[data-score="2"] .acct-meter-seg.on { background: #e6b25a; }
-.acct-meter[data-score="3"] .acct-meter-seg.on { background: #d2bc8a; }
+.acct-meter[data-score="2"] .acct-meter-seg.on { background: var(--acct-warning); }
+.acct-meter[data-score="3"] .acct-meter-seg.on { background: var(--acct-accent); }
 .acct-meter[data-score="4"] .acct-meter-seg.on { background: #6fcf97; }
 .acct-meter[data-score="1"] .acct-meter-label { color: #e05545; }
-.acct-meter[data-score="2"] .acct-meter-label { color: #e6b25a; }
-.acct-meter[data-score="3"] .acct-meter-label { color: #d2bc8a; }
+.acct-meter[data-score="2"] .acct-meter-label { color: var(--acct-warning); }
+.acct-meter[data-score="3"] .acct-meter-label { color: var(--acct-accent); }
 .acct-meter[data-score="4"] .acct-meter-label { color: #6fcf97; }
 
 /* theme cards */
@@ -429,7 +438,7 @@
 .acct-stat { display: flex; align-items: center; gap: 9px; padding: 10px 11px; border-radius: 11px; background: var(--acct-chip); border: 1px solid var(--acct-chip-line); }
 .acct-stat .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--acct-ink-ghost); }
 .acct-stat .dot.ok { background: #6fcf97; box-shadow: 0 0 7px rgba(111,207,151,0.7); }
-.acct-stat .dot.warn { background: #e6b25a; box-shadow: 0 0 7px rgba(230,178,90,0.7); }
+.acct-stat .dot.warn { background: var(--acct-warning); box-shadow: 0 0 7px color-mix(in srgb, var(--acct-warning) 70%, transparent); }
 .acct-stat .dot.off { background: #e98b7f; }
 .acct-stat-txt { min-width: 0; }
 .acct-stat-txt b { display: block; font-size: 12.5px; color: var(--acct-ink-hi); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -493,8 +502,6 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-badge.ok { co
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-badge.warn { color: #9a6b00; background: rgba(154,107,0,0.10); border-color: rgba(154,107,0,0.35); }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="2"] :is(.acct-meter-seg.on, .acct-meter-label) { color: #9a6b00; }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="2"] .acct-meter-seg.on { background: #c98f0a; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="3"] .acct-meter-seg.on { background: var(--acct-accent); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="3"] .acct-meter-label { color: var(--acct-accent); }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="4"] .acct-meter-seg.on { background: #1d8a4e; }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="4"] .acct-meter-label { color: #1d8a4e; }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout { color: #c2372a; border-color: rgba(194,55,42,0.38); }
