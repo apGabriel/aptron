@@ -98,6 +98,18 @@
     if (!t || t === 'dark') el.removeAttribute('data-apt-theme');
     else el.setAttribute('data-apt-theme', t);
   }
+  // Re-reads the stored profile and applies it, for the two call sites that
+  // apply whatever is CURRENTLY SAVED (boot, and the storage-event handler)
+  // rather than an explicit id a user just picked. For theme:"custom" this
+  // must route through js/theme.js's window.AptTheme.apply() -- the one
+  // authoritative validate/classify/apply pipeline -- instead of writing the
+  // raw "custom" string via applyTheme(), which matches no CSS selector and
+  // was clobbering theme.js's already-correct custom-dark/custom-light
+  // classification on every boot and every 'storage' event (Phase 2.1 fix).
+  function applyStoredTheme() {
+    if (window.AptTheme) window.AptTheme.apply();
+    else applyTheme(loadProfile().theme || 'dark');
+  }
 
   // ── image downscale (cover-crop to a square, JPEG) ───────────────────────────
   function downscale(file, size, cb) {
@@ -319,9 +331,9 @@
 }
 .acct-input::placeholder { color: var(--acct-ink-ghost); }
 .acct-input:focus {
-  border-color: color-mix(in srgb, var(--acct-accent) 50%, transparent);
+  border-color: color-mix(in srgb, var(--focus-ring) 50%, transparent);
   background: var(--acct-input-bg-focus);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acct-accent) 12%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 12%, transparent);
 }
 .acct-input[readonly] { color: var(--acct-ink-soft); background: var(--acct-chip); cursor: default; }
 .acct-input:-webkit-autofill { -webkit-text-fill-color: var(--acct-ink); -webkit-box-shadow: 0 0 0 40px var(--acct-autofill) inset; caret-color: var(--acct-ink); }
@@ -346,6 +358,12 @@
 .acct-btn.small { padding: 8px 12px; font-size: 12.5px; }
 .acct-btn.ghost { color: var(--acct-ink-soft); background: transparent; border: 1px solid var(--acct-chip-line); box-shadow: none; }
 .acct-btn.ghost:hover:not(:disabled) { color: var(--acct-ink); border-color: var(--acct-ink-faint); filter: none; }
+/* Author CSS always wins over the UA [hidden] stylesheet regardless of
+   specificity -- without this, the unconditional display:inline-flex above
+   keeps a "hidden" button visually rendered despite .hidden = true. Same
+   pattern already established in css/gym.css (.rb-card-menu-pop[hidden],
+   .po-combo-pop[hidden], etc.) -- Known Issue #45. */
+.acct-btn[hidden] { display: none; }
 
 .acct-msg { font-size: 12px; min-height: 15px; margin: 0; line-height: 1.35; }
 .acct-msg.ok { color: #6fcf97; }
@@ -410,6 +428,42 @@
 .acct-themecard.is-active .tick { opacity: 1; }
 .acct-themename .tick svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .acct-themehint { font-size: 10.5px; color: var(--acct-ink-ghost); line-height: 1.35; }
+
+/* Custom Theme — expands inline below the grid, inside the same Preferences
+   pane (Phase 2, Custom Theme engine). Reuses .acct-field/.acct-label/
+   .acct-input/.acct-btn/.acct-msg/.acct-hint verbatim; only the pieces with
+   no existing equivalent (color swatches, contrast readout, advanced
+   disclosure) get new rules here. */
+.acct-custom-panel { display: none; flex-direction: column; gap: 14px; margin-top: 2px; }
+.acct-custom-panel.is-open { display: flex; }
+.acct-custom-row { display: flex; gap: 12px; }
+.acct-custom-row .acct-field { flex: 1 1 0; min-width: 0; }
+.acct-colorinput {
+  width: 100%; height: 40px; padding: 3px; border-radius: 9px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--focus-ring) 18%, transparent);
+  background: var(--acct-input-bg); -webkit-appearance: none;
+}
+.acct-colorinput::-webkit-color-swatch-wrapper { padding: 0; }
+.acct-colorinput::-webkit-color-swatch { border: none; border-radius: 6px; }
+.acct-colorinput:focus { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 12%, transparent); }
+.acct-contrast { font-size: 11px; font-weight: 600; }
+.acct-contrast.ok { color: #7fdca4; }
+.acct-contrast.bad { color: #e98b7f; }
+.acct-custom-adv { border-top: 1px solid var(--acct-chip-line); padding-top: 12px; }
+.acct-custom-adv > summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--acct-ink-soft);
+  list-style: none; display: flex; align-items: center; gap: 6px;
+}
+.acct-custom-adv > summary::-webkit-details-marker { display: none; }
+.acct-custom-adv[open] > summary { color: var(--acct-ink); }
+.acct-custom-adv-body { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.acct-custom-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.acct-custom-actions { display: flex; gap: 8px; }
+.acct-custom-notice {
+  font-size: 11.5px; color: var(--acct-warning); line-height: 1.4; margin: 0;
+  padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, var(--acct-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--acct-warning) 28%, transparent);
+}
 
 /* cloud pane */
 .acct-cloudcard {
@@ -477,10 +531,10 @@
    Everything structural above reads from the --acct-* tokens, so flipping the
    modal is a token re-declaration plus the few semantic colors (ok/err/warn
    greens & salmons) that need darker light-mode equivalents for contrast. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-bg {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-bg {
   background: rgba(24,28,36,0.35);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-modal {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-modal {
   --acct-glass-a: rgba(255,255,255,0.85);
   --acct-glass-b: rgba(255,255,255,0.95);
   --acct-ink: #14181F;
@@ -496,16 +550,21 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-modal {
   --acct-autofill: #f2f0ea;
   box-shadow: 0 24px 70px rgba(23,28,38,0.20), inset 0 1px 0 rgba(255,255,255,0.75);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-msg.ok { color: #1d8a4e; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-msg.err { color: #c2372a; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-badge.ok { color: #1d8a4e; background: rgba(29,138,78,0.10); border-color: rgba(29,138,78,0.35); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-badge.warn { color: #9a6b00; background: rgba(154,107,0,0.10); border-color: rgba(154,107,0,0.35); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="2"] :is(.acct-meter-seg.on, .acct-meter-label) { color: #9a6b00; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="2"] .acct-meter-seg.on { background: #c98f0a; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="4"] .acct-meter-seg.on { background: #1d8a4e; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-meter[data-score="4"] .acct-meter-label { color: #1d8a4e; }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout { color: #c2372a; border-color: rgba(194,55,42,0.38); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover { color: #fff; background: #c2372a; border-color: #c2372a; }`;
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-msg.ok { color: #1d8a4e; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-msg.err { color: #c2372a; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-badge.ok { color: #1d8a4e; background: rgba(29,138,78,0.10); border-color: rgba(29,138,78,0.35); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-badge.warn { color: #9a6b00; background: rgba(154,107,0,0.10); border-color: rgba(154,107,0,0.35); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-meter[data-score="2"] :is(.acct-meter-seg.on, .acct-meter-label) { color: #9a6b00; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-meter[data-score="2"] .acct-meter-seg.on { background: #c98f0a; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-meter[data-score="4"] .acct-meter-seg.on { background: #1d8a4e; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-meter[data-score="4"] .acct-meter-label { color: #1d8a4e; }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-logout { color: #c2372a; border-color: rgba(194,55,42,0.38); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-logout:hover { color: #fff; background: #c2372a; border-color: #c2372a; }
+/* .acct-btn's fixed dark ink (#1a1408) fails WCAG AA against Light's and
+   Nordic's --accent (3.65:1 / 3.23:1, both under the 4.5:1 minimum) — white
+   ink passes both (5.01:1 / 5.67:1). .ghost variant is untouched: it never
+   used the dark ink to begin with. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .acct-btn:not(.ghost) { color: #ffffff; }`;
     document.head.appendChild(s);
   }
 
@@ -589,7 +648,50 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover 
 
       <section class="acct-pane" data-pane="prefs" role="tabpanel">
         <span class="acct-eyebrow">Appearance</span>
+        <p class="acct-custom-notice" id="acctThemeNotice" hidden></p>
         <div class="acct-themegrid" id="acctThemeGrid"></div>
+        <div class="acct-custom-panel" id="acctCustomPanel">
+          <div class="acct-custom-row">
+            <div class="acct-field">
+              <label class="acct-label" for="acctCtAccent">Accent</label>
+              <input class="acct-colorinput" type="color" id="acctCtAccent" value="#d2bc8a">
+              <span class="acct-contrast" id="acctCtAccentContrast"></span>
+              <button class="acct-btn ghost small" id="acctCtAccentAdjust" type="button" aria-label="Ajustar automáticamente — Accent" hidden>Ajustar automáticamente</button>
+            </div>
+            <div class="acct-field">
+              <label class="acct-label" for="acctCtAccent2">Accent 2</label>
+              <input class="acct-colorinput" type="color" id="acctCtAccent2" value="#956534">
+              <span class="acct-contrast" id="acctCtAccent2Contrast"></span>
+              <button class="acct-btn ghost small" id="acctCtAccent2Adjust" type="button" aria-label="Ajustar automáticamente — Accent 2" hidden>Ajustar automáticamente</button>
+            </div>
+          </div>
+          <details class="acct-custom-adv" id="acctCtAdvanced">
+            <summary>Advanced (background colors)</summary>
+            <div class="acct-custom-adv-body">
+              <label class="acct-hint" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <input type="checkbox" id="acctCtBgEnable"> Customize background colors
+              </label>
+              <div class="acct-custom-row">
+                <div class="acct-field">
+                  <label class="acct-label" for="acctCtBgPage">Background (page)</label>
+                  <input class="acct-colorinput" type="color" id="acctCtBgPage" value="#101010" disabled>
+                </div>
+                <div class="acct-field">
+                  <label class="acct-label" for="acctCtBgSurface">Background (surface)</label>
+                  <input class="acct-colorinput" type="color" id="acctCtBgSurface" value="#3e3e3e" disabled>
+                </div>
+              </div>
+            </div>
+          </details>
+          <p class="acct-msg" id="acctCtMsg"></p>
+          <div class="acct-custom-foot">
+            <button class="acct-btn ghost small" id="acctCtReset" type="button">Reset to Aptron Dark</button>
+            <div class="acct-custom-actions">
+              <button class="acct-btn ghost small" id="acctCtCancel" type="button">Cancel</button>
+              <button class="acct-btn small" id="acctCtSave" type="button" disabled>Save custom theme</button>
+            </div>
+          </div>
+        </div>
         <p class="acct-hint">Applies instantly on your dashboard and is saved to your synced profile.</p>
       </section>
 
@@ -725,25 +827,226 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover 
       const lm = q('#acctLogoutM'); if (lm) lm.addEventListener('click', doLogout);
     }
 
-    // theme cards
+    // theme cards (7 built-in + Personalizado, the Custom Theme entry point)
     const grid = q('#acctThemeGrid');
-    grid.innerHTML = THEMES.map((t) =>
-      '<button class="acct-themecard" data-theme="' + t.id + '" type="button">' +
-        '<span class="acct-swatch" aria-hidden="true">' + t.sw.map((c) => '<span style="background:' + c + '"></span>').join('') + '</span>' +
-        '<span class="acct-themename">' + t.name + '<span class="tick">' + ICON.check + '</span></span>' +
-        '<span class="acct-themehint">' + t.hint + '</span>' +
-      '</button>'
-    ).join('');
+    function customSwatchColors() {
+      const p = loadProfile();
+      const ct = (p.theme === 'custom' && p.customTheme) ? p.customTheme : null;
+      return ct ? [ct.bgPage || '#101010', ct.bgSurface || '#3e3e3e', ct.accent] : ['#101010', '#3e3e3e', '#d2bc8a'];
+    }
+    function renderGrid() {
+      const sw = customSwatchColors();
+      grid.innerHTML = THEMES.map((t) =>
+        '<button class="acct-themecard" data-theme="' + t.id + '" type="button">' +
+          '<span class="acct-swatch" aria-hidden="true">' + t.sw.map((c) => '<span style="background:' + c + '"></span>').join('') + '</span>' +
+          '<span class="acct-themename">' + t.name + '<span class="tick">' + ICON.check + '</span></span>' +
+          '<span class="acct-themehint">' + t.hint + '</span>' +
+        '</button>'
+      ).join('') +
+      '<button class="acct-themecard" data-theme="custom" type="button">' +
+        '<span class="acct-swatch" aria-hidden="true">' + sw.map((c) => '<span style="background:' + c + '"></span>').join('') + '</span>' +
+        '<span class="acct-themename">Personalizado<span class="tick">' + ICON.check + '</span></span>' +
+        '<span class="acct-themehint">Choose your own accent colors.</span>' +
+      '</button>';
+    }
+    renderGrid();
     function markTheme(id) {
       grid.querySelectorAll('.acct-themecard').forEach((c) => c.classList.toggle('is-active', c.getAttribute('data-theme') === id));
     }
     bg._markTheme = markTheme;
+
+    // ── Custom Theme customizer (Phase 2) ───────────────────────────────────
+    // Reuses window.AptTheme (js/theme.js) for normalization/contrast/
+    // classification -- the exact same code path a fresh page load runs, so
+    // Save never trusts anything the preview state alone established.
+    const ctPanel = q('#acctCustomPanel');
+    const ctAccent = q('#acctCtAccent'), ctAccent2 = q('#acctCtAccent2');
+    const ctBgPage = q('#acctCtBgPage'), ctBgSurface = q('#acctCtBgSurface'), ctBgEnable = q('#acctCtBgEnable');
+    const ctMsg = q('#acctCtMsg'), ctSave = q('#acctCtSave'), ctCancel = q('#acctCtCancel'), ctReset = q('#acctCtReset');
+    const ctAccentC = q('#acctCtAccentContrast'), ctAccent2C = q('#acctCtAccent2Contrast');
+    const ctAccentAdjust = q('#acctCtAccentAdjust'), ctAccent2Adjust = q('#acctCtAccent2Adjust');
+    let ctSnapshot = null;
+
+    // Captured once, at the moment the customizer opens -- Cancel always
+    // restores THIS snapshot, never the previous preview step.
+    function captureCurrentInlineTokens() {
+      const el = document.documentElement;
+      return {
+        theme: loadProfile().theme || 'dark',
+        dataAptTheme: el.getAttribute('data-apt-theme'),
+        accent: el.style.getPropertyValue('--accent') || null,
+        accentDark: el.style.getPropertyValue('--accent-dark') || null,
+        bgPage: el.style.getPropertyValue('--bg-page') || null,
+        bgSurface: el.style.getPropertyValue('--bg-surface') || null,
+      };
+    }
+    function restoreInlineTokens(snap) {
+      const el = document.documentElement;
+      const map = { accent: '--accent', accentDark: '--accent-dark', bgPage: '--bg-page', bgSurface: '--bg-surface' };
+      Object.keys(map).forEach((k) => {
+        if (snap[k]) el.style.setProperty(map[k], snap[k]); else el.style.removeProperty(map[k]);
+      });
+      if (snap.dataAptTheme) el.setAttribute('data-apt-theme', snap.dataAptTheme);
+      else el.removeAttribute('data-apt-theme');
+    }
+
+    function fmtRatio(r) { return Math.round(r * 10) / 10; }
+    // Numerical feedback only -- does not block Preview (the user should be
+    // able to SEE a bad combination), but does gate the Save button.
+    function updateContrast() {
+      const AT = window.AptTheme; if (!AT) return false;
+      const min = AT.MIN_CONTRAST;
+      const accent = AT.normalizeHex(ctAccent.value);
+      const accent2 = AT.normalizeHex(ctAccent2.value);
+      const bgPage = ctBgEnable.checked ? AT.normalizeHex(ctBgPage.value) : null;
+      const bgSurface = ctBgEnable.checked ? AT.normalizeHex(ctBgSurface.value) : null;
+      const effBg = bgPage || AT.DEFAULT_BG_PAGE;
+      const effSurface = bgSurface || effBg;
+      let ok = !!(accent && accent2);
+      if (accent) {
+        const r = Math.min(AT.contrastRatio(accent, effBg), AT.contrastRatio(accent, effSurface));
+        const pass = r >= min; ok = ok && pass;
+        ctAccentC.textContent = 'Accent contrast: ' + fmtRatio(r) + ':1' + (pass ? ' — valid' : ' — requires at least ' + min + ':1');
+        ctAccentC.className = 'acct-contrast ' + (pass ? 'ok' : 'bad');
+        ctAccentAdjust.hidden = pass;
+      }
+      if (accent2) {
+        const r = Math.min(AT.contrastRatio(accent2, effBg), AT.contrastRatio(accent2, effSurface));
+        const pass = r >= min; ok = ok && pass;
+        ctAccent2C.textContent = 'Accent 2 contrast: ' + fmtRatio(r) + ':1' + (pass ? ' — valid' : ' — requires at least ' + min + ':1');
+        ctAccent2C.className = 'acct-contrast ' + (pass ? 'ok' : 'bad');
+        ctAccent2Adjust.hidden = pass;
+      }
+      ctSave.disabled = !ok;
+      return ok;
+    }
+    // Shared by both "Ajustar automáticamente" buttons -- opt-in only (never
+    // called except from a click), preview-only (only ever reaches the
+    // field via the SAME 'input' event previewApply() already listens for;
+    // never writes localStorage/the persisted profile itself).
+    function adjustField(input, label) {
+      const AT = window.AptTheme; if (!AT) return;
+      const bgPage = ctBgEnable.checked ? AT.normalizeHex(ctBgPage.value) : null;
+      const bgSurface = ctBgEnable.checked ? AT.normalizeHex(ctBgSurface.value) : null;
+      const effBg = bgPage || AT.DEFAULT_BG_PAGE;
+      const effSurface = bgSurface || effBg;
+      const suggestion = AT.suggestAccessible(input.value, [effBg, effSurface]);
+      if (!suggestion) {
+        ctMsg.textContent = 'Couldn’t find an accessible ' + label + ' near that color — try a different starting point.';
+        ctMsg.className = 'acct-msg err';
+        return;
+      }
+      input.value = suggestion;
+      input.dispatchEvent(new Event('input'));
+      ctMsg.textContent = ''; ctMsg.className = 'acct-msg';
+    }
+    ctAccentAdjust.addEventListener('click', () => adjustField(ctAccent, 'Accent'));
+    ctAccent2Adjust.addEventListener('click', () => adjustField(ctAccent2, 'Accent 2'));
+    // Live DOM update only -- never touches localStorage/the persisted
+    // profile. Re-normalizes on every change and reclassifies custom-light
+    // vs custom-dark so the rest of the page (nav, modal chrome) previews
+    // exactly as it will render once saved.
+    function previewApply() {
+      const AT = window.AptTheme; if (!AT) return;
+      const el = document.documentElement;
+      const accent = AT.normalizeHex(ctAccent.value);
+      const accent2 = AT.normalizeHex(ctAccent2.value);
+      const bgPage = ctBgEnable.checked ? AT.normalizeHex(ctBgPage.value) : null;
+      const bgSurface = ctBgEnable.checked ? AT.normalizeHex(ctBgSurface.value) : null;
+      if (accent) el.style.setProperty('--accent', accent);
+      if (accent2) el.style.setProperty('--accent-dark', accent2);
+      if (bgPage) el.style.setProperty('--bg-page', bgPage); else el.style.removeProperty('--bg-page');
+      if (bgSurface) el.style.setProperty('--bg-surface', bgSurface); else el.style.removeProperty('--bg-surface');
+      el.setAttribute('data-apt-theme', AT.classify({ bgPage: bgPage || undefined }));
+      updateContrast();
+    }
+
+    function openCustomizer() {
+      ctSnapshot = captureCurrentInlineTokens();
+      const p = loadProfile();
+      const ct = (p.theme === 'custom' && p.customTheme) ? p.customTheme : null;
+      ctAccent.value = (ct && ct.accent) || '#d2bc8a';
+      ctAccent2.value = (ct && ct.accent2) || '#956534';
+      const hasBg = !!(ct && (ct.bgPage || ct.bgSurface));
+      ctBgEnable.checked = hasBg;
+      ctBgPage.value = (ct && ct.bgPage) || '#101010';
+      ctBgSurface.value = (ct && ct.bgSurface) || '#3e3e3e';
+      ctBgPage.disabled = !hasBg; ctBgSurface.disabled = !hasBg;
+      q('#acctCtAdvanced').open = hasBg;
+      ctMsg.textContent = ''; ctMsg.className = 'acct-msg';
+      ctPanel.classList.add('is-open');
+      previewApply();
+    }
+    function closeCustomizer() { ctPanel.classList.remove('is-open'); }
+
+    [ctAccent, ctAccent2, ctBgPage, ctBgSurface].forEach((inp) => inp.addEventListener('input', previewApply));
+    ctBgEnable.addEventListener('change', () => {
+      ctBgPage.disabled = !ctBgEnable.checked; ctBgSurface.disabled = !ctBgEnable.checked;
+      previewApply();
+    });
+
+    // Cancel restores the exact pre-open snapshot -- never the previous
+    // preview step, no reload, nothing persisted.
+    ctCancel.addEventListener('click', () => {
+      if (ctSnapshot) restoreInlineTokens(ctSnapshot);
+      closeCustomizer();
+      markTheme(loadProfile().theme || 'dark');
+    });
+
+    // Save never trusts preview state -- it re-runs the full validation
+    // pipeline (schema/version/required fields/color format/normalization/
+    // contrast) via window.AptTheme.validateCustomTheme, the same function
+    // theme.js itself uses on every page load.
+    ctSave.addEventListener('click', () => {
+      const AT = window.AptTheme; if (!AT) return;
+      const ctInput = { v: 1, accent: ctAccent.value, accent2: ctAccent2.value };
+      if (ctBgEnable.checked) { ctInput.bgPage = ctBgPage.value; ctInput.bgSurface = ctBgSurface.value; }
+      const valid = AT.validateCustomTheme(ctInput);
+      if (!valid) {
+        ctMsg.textContent = 'These colors don’t meet the minimum contrast requirement — adjust them and try again.';
+        ctMsg.className = 'acct-msg err';
+        return;
+      }
+      const p = loadProfile();
+      p.theme = 'custom';
+      p.customTheme = valid;
+      saveProfile(p);
+      AT.apply();
+      renderGrid(); markTheme('custom');
+      closeCustomizer();
+    });
+
+    // Reset is a separate, always-available escape mechanism -- it does not
+    // depend on the customizer's current field values being valid, or even
+    // on the customizer being open.
+    ctReset.addEventListener('click', () => {
+      const p = loadProfile();
+      delete p.customTheme;
+      p.theme = 'dark';
+      saveProfile(p);
+      if (window.AptTheme) window.AptTheme.apply();
+      applyTheme('dark');
+      renderGrid(); markTheme('dark');
+      closeCustomizer();
+    });
+
     grid.addEventListener('click', (e) => {
       const card = e.target.closest('[data-theme]'); if (!card) return;
       const id = card.getAttribute('data-theme');
+      if (id === 'custom') { openCustomizer(); return; }
+      closeCustomizer();
       const p = loadProfile(); p.theme = id; saveProfile(p);
       applyTheme(id); markTheme(id);
     });
+
+    // theme.js runs synchronously pre-paint, before this script -- if it had
+    // to correct an invalid customTheme this load, surface a one-line,
+    // non-blocking notice rather than a modal (Section 14).
+    if (window.__aptThemeRecovered) {
+      const notice = q('#acctThemeNotice');
+      notice.textContent = "Your custom theme couldn't be applied and was reset.";
+      notice.hidden = false;
+    }
 
     // nav switching
     bg.querySelectorAll('.acct-navitem').forEach((it) => {
@@ -863,7 +1166,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover 
   btn.addEventListener('click', open);
 
   // ── boot ──────────────────────────────────────────────────────────────────
-  applyTheme(loadProfile().theme || 'dark');   // apply saved theme immediately
+  applyStoredTheme();   // apply saved theme immediately
   renderTrigger();
   (async function () {
     if (!supa) return;
@@ -885,7 +1188,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .acct-logout:hover 
 
   // Re-apply theme + repaint the trigger when a sync applies a remote profile.
   window.addEventListener('storage', function (e) {
-    if (!e || !e.key || e.key === PKEY) { applyTheme(loadProfile().theme || 'dark'); renderTrigger(); }
+    if (!e || !e.key || e.key === PKEY) { applyStoredTheme(); renderTrigger(); }
   });
 
   window.AptAccount = { open, close, renderTrigger, showPane: function (p) { if (modal) showPane(p); } };

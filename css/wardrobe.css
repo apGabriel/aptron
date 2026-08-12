@@ -21,9 +21,17 @@
   --text-quaternary: #4D4B47;
   --border: rgba(255, 255, 255, 0.07);
   --border-soft: rgba(255, 255, 255, 0.05);
-  --accent: #C1734F;          /* muted copper — premium editorial */
-  --accent-2: #C9A27E;        /* camel / tan */
-  --accent-ink: #1a120e;
+  /* Namespaced (--wr- prefix) so a future global inline --accent override
+     (Custom Theme system) can never leak into Wardrobe's own terracotta
+     identity, which is deliberately independent of the global theme. */
+  --wr-accent: #C1734F;       /* muted copper — premium editorial */
+  --wr-accent-2: #C9A27E;     /* camel / tan */
+  --wr-accent-ink: #1a120e;
+  /* Protected focus indicator — never tied to --wr-accent, so a future
+     accent change (built-in or custom) can never make focus invisible.
+     Same value as --wr-accent today (zero visual change), but an
+     independent token going forward. */
+  --focus-ring: rgba(193, 115, 79, 0.5);
   --success: #6BE3A4;
   --warning: #F2C063;
   --danger: #FF6B6B;
@@ -53,8 +61,8 @@ body::before {
   inset: -10%;
   z-index: -2;
   background:
-    radial-gradient(58% 42% at 84% 10%, rgba(193, 115, 79, 0.16) 0%, transparent 56%),
-    radial-gradient(52% 44% at 14% 92%, rgba(201, 162, 126, 0.10) 0%, transparent 56%),
+    radial-gradient(58% 42% at 84% 10%, color-mix(in srgb, var(--wr-accent) 16%, transparent) 0%, transparent 56%),
+    radial-gradient(52% 44% at 14% 92%, color-mix(in srgb, var(--wr-accent-2) 10%, transparent) 0%, transparent 56%),
     var(--bg-deep);
 }
 
@@ -93,7 +101,7 @@ body::before {
   transition: background 0.15s, color 0.15s;
 }
 .wr-season-toggle button.active {
-  background: rgba(193, 115, 79, 0.18); color: var(--text-primary);
+  background: color-mix(in srgb, var(--wr-accent) 18%, transparent); color: var(--text-primary);
 }
 
 /* ---------- Live weather (Open-Meteo) ---------- */
@@ -113,7 +121,7 @@ body::before {
 .wr-weather-chip {
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   font-size: 12px; font-weight: 700; color: var(--text-primary);
-  background: rgba(193, 115, 79, 0.14); border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--wr-accent) 14%, transparent); border: 1px solid var(--border-soft);
   padding: 6px 11px; border-radius: 999px; font-variant-numeric: tabular-nums;
 }
 .wr-weather-chip[hidden] { display: none; }
@@ -161,8 +169,8 @@ body::before {
 }
 .wr-btn:active { transform: scale(0.97); }
 .wr-btn-primary {
-  background: linear-gradient(180deg, var(--accent), #A85A3B);
-  color: #fff; box-shadow: 0 6px 18px rgba(193, 115, 79, 0.28);
+  background: linear-gradient(180deg, var(--wr-accent), #A85A3B);
+  color: #fff; box-shadow: 0 6px 18px color-mix(in srgb, var(--wr-accent) 28%, transparent);
 }
 .wr-btn-ghost {
   background: var(--bg-secondary); border-color: var(--border);
@@ -188,10 +196,10 @@ body::before {
   font-size: 11px;
 }
 .wr-cat-chip.active {
-  background: rgba(193, 115, 79, 0.16);
-  border-color: rgba(193, 115, 79, 0.4); color: var(--text-primary);
+  background: color-mix(in srgb, var(--wr-accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--wr-accent) 40%, transparent); color: var(--text-primary);
 }
-.wr-cat-chip.active .wr-cat-count { color: var(--accent-2); }
+.wr-cat-chip.active .wr-cat-count { color: var(--wr-accent-2); }
 
 /* ---------- Closet item grid ---------- */
 .wr-closet-grid {
@@ -250,7 +258,7 @@ body::before {
 .wr-item-include .wr-item-lock,
 .wr-item-exclude .wr-item-lock { opacity: 1; }
 .wr-item-include { outline: 2px solid var(--success); outline-offset: -2px; }
-.wr-item-include .wr-item-lock { background: rgba(107, 227, 164, 0.85); color: var(--accent-ink); }
+.wr-item-include .wr-item-lock { background: rgba(107, 227, 164, 0.85); color: var(--wr-accent-ink); }
 .wr-item-exclude { outline: 2px solid var(--danger); outline-offset: -2px; }
 .wr-item-exclude img { filter: grayscale(0.85) brightness(0.7); }
 .wr-item-exclude .wr-item-lock { background: rgba(255, 107, 107, 0.85); }
@@ -263,8 +271,8 @@ body::before {
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .wr-item-add:hover {
-  border-color: rgba(193, 115, 79, 0.5); color: var(--accent-2);
-  background: rgba(193, 115, 79, 0.05);
+  border-color: color-mix(in srgb, var(--wr-accent) 50%, transparent); color: var(--wr-accent-2);
+  background: color-mix(in srgb, var(--wr-accent) 5%, transparent);
 }
 .wr-item-add-icon { font-size: 26px; line-height: 1; }
 .wr-item-add-label { font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
@@ -298,7 +306,7 @@ body::before {
 .wr-harmony-tag {
   font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
   text-transform: uppercase; padding: 3px 8px; border-radius: 999px;
-  background: rgba(201, 162, 126, 0.14); color: var(--accent-2);
+  background: color-mix(in srgb, var(--wr-accent-2) 14%, transparent); color: var(--wr-accent-2);
 }
 .wr-outfit-pal { display: flex; gap: 4px; margin-top: 9px; }
 .wr-outfit-pal span {
@@ -322,13 +330,13 @@ body::before {
 .wr-rec {
   display: flex; gap: 11px; align-items: flex-start;
   padding: 11px 12px; border-radius: var(--radius-md);
-  background: linear-gradient(180deg, rgba(193, 115, 79, 0.07), rgba(193, 115, 79, 0.02));
-  border: 1px solid rgba(193, 115, 79, 0.18);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--wr-accent) 7%, transparent), color-mix(in srgb, var(--wr-accent) 2%, transparent));
+  border: 1px solid color-mix(in srgb, var(--wr-accent) 18%, transparent);
 }
 .wr-rec-ic {
   width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(193, 115, 79, 0.16); font-size: 17px;
+  background: color-mix(in srgb, var(--wr-accent) 16%, transparent); font-size: 17px;
 }
 .wr-rec-body { min-width: 0; }
 .wr-rec-title { font-size: 13px; font-weight: 700; }
@@ -365,9 +373,9 @@ body::before {
   transition: background 0.15s, color 0.15s;
 }
 .wr-seg button.active { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
-.wr-seg button[data-undertone="warm"].active  { background: rgba(242, 192, 99, 0.22); }
+.wr-seg button[data-undertone="warm"].active  { background: color-mix(in srgb, var(--warning) 22%, transparent); }
 .wr-seg button[data-undertone="cool"].active  { background: rgba(125, 211, 252, 0.22); }
-.wr-seg button[data-undertone="neutral"].active { background: rgba(201, 162, 126, 0.22); }
+.wr-seg button[data-undertone="neutral"].active { background: color-mix(in srgb, var(--wr-accent-2) 22%, transparent); }
 
 /* ---------- Modal (item detail / editor) ---------- */
 .wr-modal-bg {
@@ -394,7 +402,7 @@ body::before {
   color: var(--text-primary); font-family: inherit; font-size: 14px;
   outline: none; transition: border-color 0.15s;
 }
-.wr-input:focus, .wr-select:focus { border-color: rgba(193, 115, 79, 0.5); }
+.wr-input:focus, .wr-select:focus { border-color: var(--focus-ring); }
 .wr-modal-label {
   display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--text-tertiary); margin: 12px 0 6px;
@@ -404,7 +412,7 @@ body::before {
 
 /* Upload modal — auto-detect note + category chip row */
 .wr-detect-note {
-  font-size: 12px; font-weight: 600; color: var(--accent-2);
+  font-size: 12px; font-weight: 600; color: var(--wr-accent-2);
   margin-bottom: 4px; min-height: 16px;
 }
 .wr-chip-row { display: flex; gap: 7px; flex-wrap: wrap; }
@@ -443,7 +451,7 @@ html[data-apt-theme="gold"]    { --bg: #131110; --bg-deep: #121011; }
 html[data-apt-theme="neon"]    { --bg: #0A0A0E; --bg-deep: #08080A; }
 html[data-apt-theme="emerald"] { --bg: #0C1410; --bg-deep: #0A120E; }
 
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) {
   --bg-card: #FFFFFF;
   --bg-secondary: rgba(29,33,41,0.04);
   --glass-bg: rgba(255,255,255,0.88);
@@ -457,13 +465,22 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
   --text-quaternary: rgba(29,33,41,0.40);
   --border: rgba(29,33,41,0.10);
   --border-soft: rgba(29,33,41,0.07);
-  --accent: #9A4E30;            /* copper, deepened for white */
-  --accent-2: #8A6A4E;
-  --accent-ink: #FFFFFF;        /* text on the deepened accent */
+  --wr-accent: #9A4E30;         /* copper, deepened for white */
+  --wr-accent-2: #8A6A4E;
+  --wr-accent-ink: #FFFFFF;     /* text on the deepened accent */
+  --focus-ring: rgba(154, 78, 48, 0.5);
   --success: #157239;
   --warning: #9A6B00;
   --danger: #C2372A;
   color-scheme: light;
 }
+/* Modal has no light/nordic override elsewhere — without this it stays
+   near-black even under a light theme. */
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .wr-modal {
+  background: #FFFFFF;
+}
 html[data-apt-theme="light"] { --bg: #FAFAFA; --bg-deep: #F2F2F3; }
 html[data-apt-theme="nordic"] { --bg: #F1F3F5; --bg-deep: #E9EDF0; }
+/* custom-light: same reasoning as health.css -- fixed, safe canvas default,
+   not derived from the user's custom accent. */
+html[data-apt-theme="custom-light"] { --bg: #FAFAFA; --bg-deep: #F2F2F3; }
