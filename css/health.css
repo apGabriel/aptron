@@ -23,8 +23,22 @@
   --text-tertiary: #76746E;
   --text-quaternary: #4D4B47;
 
-  --accent: #1D9E75;
-  --accent-glow: rgba(29, 158, 117, 0.35);
+  /* Identity (decorative — hover/active/tag affordances) vs. semantic
+     "is-ok"/"done" status are deliberately separate tokens even though
+     they share the same visual value today. --health-success is what a
+     future Custom Theme system must NEVER touch (protected semantic
+     palette); --health-accent is Health's own namespaced identity color,
+     isolated from the global --accent so an inline global override can
+     never leak in. See ADR/theme-audit journal for the full rationale. */
+  --health-accent: #1D9E75;
+  --health-accent-glow: rgba(29, 158, 117, 0.35);
+  --health-success: #1D9E75;
+  --health-success-glow: rgba(29, 158, 117, 0.35);
+  /* Protected focus indicator — never tied to --health-accent, so a future
+     accent change (built-in or custom) can never make focus invisible.
+     Same value as --health-accent today (zero visual change), but an
+     independent token going forward. */
+  --focus-ring: #1D9E75;
   --warning: #FF8A4D;
   --warning-bg: rgba(163, 45, 45, 0.10);
   --tag-stack: #D8AB30;
@@ -166,7 +180,7 @@ main {
 }
 .stack-item.missed .stack-check { border-color: rgba(239, 68, 68, 0.55); }
 .stack-item.taken.missed { animation: none; border-color: transparent; }
-.stack-item.taken.missed .stack-check { border-color: var(--accent); }
+.stack-item.taken.missed .stack-check { border-color: var(--health-success); }
 
 .stack-check {
   width: 28px; height: 28px;
@@ -179,11 +193,11 @@ main {
   transition: all 0.2s;
   flex-shrink: 0; font-family: inherit; padding: 0;
 }
-.stack-check:hover { border-color: var(--accent); }
+.stack-check:hover { border-color: var(--health-accent); }
 .stack-check.checked {
-  background: var(--accent); border-color: var(--accent);
+  background: var(--health-success); border-color: var(--health-success);
   color: white;
-  box-shadow: 0 0 12px var(--accent-glow);
+  box-shadow: 0 0 12px var(--health-success-glow);
 }
 
 .stack-item-body { min-width: 0; }
@@ -964,11 +978,11 @@ main {
   transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.08s;
   -webkit-tap-highlight-color: transparent;
 }
-.food-mealtype-btn:hover { border-color: var(--accent); color: var(--text-secondary); }
+.food-mealtype-btn:hover { border-color: var(--health-accent); color: var(--text-secondary); }
 .food-mealtype-btn:active { transform: scale(0.96); }
 .food-mealtype-btn.active {
-  border-color: var(--accent); color: var(--accent);
-  background: rgba(29,158,117,0.10);
+  border-color: var(--health-accent); color: var(--health-accent);
+  background: color-mix(in srgb, var(--health-accent) 10%, transparent);
 }
 /* Drag-and-drop / file selector */
 .food-dropzone {
@@ -979,11 +993,11 @@ main {
   transition: border-color 0.18s, background 0.18s, transform 0.08s;
   -webkit-tap-highlight-color: transparent;
 }
-.food-dropzone:hover { border-color: var(--accent); background: rgba(29,158,117,0.06); }
+.food-dropzone:hover { border-color: var(--health-accent); background: color-mix(in srgb, var(--health-accent) 6%, transparent); }
 .food-dropzone:active { transform: scale(0.99); }
 .food-dropzone.is-drag {
-  border-color: var(--accent); background: rgba(29,158,117,0.10);
-  box-shadow: 0 0 0 4px var(--accent-glow);
+  border-color: var(--health-accent); background: color-mix(in srgb, var(--health-accent) 10%, transparent);
+  box-shadow: 0 0 0 4px var(--health-accent-glow);
 }
 .food-drop-icon { font-size: 26px; line-height: 1; }
 .food-drop-text { font-size: 14px; font-weight: 700; color: var(--text-primary); }
@@ -997,7 +1011,7 @@ main {
 }
 .food-status[hidden] { display: none; }
 .food-status.is-loading { color: var(--text-primary); }
-.food-status.is-ok { color: var(--accent); border-color: rgba(29,158,117,0.3); }
+.food-status.is-ok { color: var(--health-success); border-color: color-mix(in srgb, var(--health-success) 30%, transparent); }
 .food-status.is-err { color: var(--warning); border-color: rgba(255,138,77,0.3); background: var(--warning-bg); }
 /* Logged meals — compact timeline strip.
    A single thin accent rail threads circular photo "nodes"; rows are pure
@@ -1007,7 +1021,7 @@ main {
 /* Continuous rail, centered behind the 30px nodes (rail x = node center = 15px). */
 .food-log::before {
   content: ''; position: absolute; top: 8px; bottom: 8px; left: 15px;
-  width: 1.5px; background: rgba(29,158,117,0.28);
+  width: 1.5px; background: color-mix(in srgb, var(--health-accent) 28%, transparent);
 }
 .food-item {
   position: relative; display: flex; align-items: center; gap: 11px;
@@ -1039,8 +1053,8 @@ main {
   border-radius: 999px; font-family: var(--font-mono);
   font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--accent); background: rgba(29,158,117,0.10);
-  border: 1px solid rgba(29,158,117,0.22);
+  color: var(--health-accent); background: color-mix(in srgb, var(--health-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--health-accent) 22%, transparent);
 }
 /* Delete: hidden until row hover/focus (desktop); faintly present on touch. */
 .food-item-del {
@@ -1073,7 +1087,7 @@ main {
   display: flex; align-items: center; justify-content: center;
   transition: border-color 0.15s, color 0.15s; -webkit-tap-highlight-color: transparent;
 }
-.food-date-nav:hover { border-color: var(--accent); color: var(--accent); }
+.food-date-nav:hover { border-color: var(--health-accent); color: var(--health-accent); }
 .food-date-nav:active { transform: scale(0.96); }
 .food-date-input {
   flex: 1; min-width: 0; height: 38px; padding: 0 12px; border-radius: 10px;
@@ -1081,7 +1095,7 @@ main {
   color: var(--text-primary); font-family: var(--font-mono); font-size: 13px;
   text-align: center; color-scheme: dark;
 }
-.food-date-input:focus { outline: none; border-color: var(--accent); background: var(--bg-input-focus); }
+.food-date-input:focus { outline: none; border-color: var(--focus-ring); background: var(--bg-input-focus); }
 .food-date-input::-webkit-calendar-picker-indicator { filter: invert(0.65); cursor: pointer; }
 /* Meal visual — thumbnail with emoji badge, or emoji-only tile */
 
@@ -1094,7 +1108,7 @@ html[data-apt-theme="gold"]    { --bg: #121011; }
 html[data-apt-theme="neon"]    { --bg: #08080A; }
 html[data-apt-theme="emerald"] { --bg: #0A120E; }
 
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) {
   --bg-card: #FFFFFF;
   --bg-secondary: rgba(29,33,41,0.04);
   --bg-input: rgba(29,33,41,0.05);
@@ -1107,8 +1121,11 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
   --text-secondary: rgba(29,33,41,0.70);
   --text-tertiary: rgba(29,33,41,0.55);
   --text-quaternary: rgba(29,33,41,0.40);
-  --accent: #157A5B;            /* health green, deepened for white */
-  --accent-glow: rgba(21,122,91,0.22);
+  --health-accent: #157A5B;     /* health green, deepened for white */
+  --health-accent-glow: rgba(21,122,91,0.22);
+  --health-success: #157A5B;
+  --health-success-glow: rgba(21,122,91,0.22);
+  --focus-ring: #157A5B;
   --warning: #B54708;
   --warning-bg: rgba(181,71,8,0.10);
   --tag-stack: #8A6A0F;
@@ -1117,9 +1134,15 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
 }
 html[data-apt-theme="light"]  { --bg: #FAFAFA; }
 html[data-apt-theme="nordic"] { --bg: #F1F3F5; }
+/* custom-light has no hand-picked canvas of its own (its --bg is not part of
+   the customizable Custom Theme contract, which only touches --accent and
+   the global --bg-page in styles.css) -- reuses Aptron Light's canvas as a
+   fixed, safe default so cards/text (already flipped by the shared
+   :is(...) block above) sit on a matching light page background. */
+html[data-apt-theme="custom-light"] { --bg: #FAFAFA; }
 
 /* Water tracker panel — scoped tokens follow the same flip. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .wt-scope {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .wt-scope {
   --bg: #FAFAFA; --bg-card: #FFFFFF;
   --text-1: #1D2129;
   --text-2: rgba(29,33,41,0.70);
@@ -1129,6 +1152,6 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .wt-scope {
   --border-strong: rgba(29,33,41,0.22);
   --good: #157239; --warn: #9A6B00; --bad: #C2372A; --info: #0E7EA8;
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .wt-app {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .wt-app {
   background: #FFFFFF; color-scheme: light;
 }

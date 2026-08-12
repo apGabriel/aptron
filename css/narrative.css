@@ -51,7 +51,7 @@ html.narrative-on #narrativeDash { display: block; }
   line-height: 1.2;
 }
 .narr-action:hover { background: var(--accent-dark); }
-.narr-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.narr-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ── Moments — a quiet vertical flow, not a card grid or a chip row.
    Each is a plain "label, then value" pair; a hairline rule between
@@ -61,14 +61,14 @@ html.narrative-on #narrativeDash { display: block; }
   margin: 0 0 36px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .narr-moments {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .narr-moments {
   border-top-color: rgba(29, 33, 41, 0.10);
 }
 .narr-moment {
   padding: 16px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .narr-moment {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .narr-moment {
   border-bottom-color: rgba(29, 33, 41, 0.10);
 }
 .narr-moment-label {
@@ -105,7 +105,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .narr-moment {
   text-decoration: none;
 }
 .narr-else-link:hover { color: var(--text-primary); }
-.narr-else-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.narr-else-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ── Hiding (not deleting) the classic dashboard while narrative-on ──
    Every element below still exists, unmodified, in the DOM — this only

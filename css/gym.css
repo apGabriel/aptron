@@ -7,10 +7,15 @@
   --text-4: rgba(255,255,255,0.25);
   --border: rgba(255,255,255,0.06);
   --border-strong: rgba(255,255,255,0.14);
-  --accent: #ffffff;
-  /* Monochrome CTA language: light themes invert it (ink chip, white text). */
+  /* Gym's own monochrome CTA identity — namespaced so a future global
+     inline --accent override (Custom Theme system) can never leak in.
+     Light themes invert it (ink chip, white text). */
+  --gym-mono: #ffffff;
   --cta-grad: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
   --cta-ink: #0a0a0b;
+  /* Protected focus indicator — never tied to --gym-mono, so a future
+     accent change (built-in or custom) can never make focus invisible. */
+  --focus-ring: #ffffff;
   --good: #6ee7b7;
   --warn: #fbbf24;
   --bad: #ff8a8a;
@@ -445,7 +450,7 @@ img, video, canvas, svg { max-width: 100%; }
   border: 1px solid var(--border); border-radius: 12px;
 }
 .po-summary-rec-name { font-size: 13px; font-weight: 700; }
-.po-summary-rec-tag { font-size: 11px; font-weight: 700; color: var(--accent); margin-top: 4px; }
+.po-summary-rec-tag { font-size: 11px; font-weight: 700; color: var(--gym-mono); margin-top: 4px; }
 .po-summary-rec-reason { font-size: 12px; color: var(--text-3); margin-top: 3px; line-height: 1.4; }
 .po-summary-done { width: 100%; margin-top: 24px; }
 
@@ -1266,7 +1271,7 @@ img, video, canvas, svg { max-width: 100%; }
   font-family: var(--font-mono); font-size: 17px; font-weight: 700;
   font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
 }
-.rb-rest-input:focus { outline: none; border-color: var(--accent); }
+.rb-rest-input:focus { outline: none; border-color: var(--focus-ring); }
 .rb-rest-hint { font-size: 12px; color: var(--text-3); }
 .rb-rest-err { display: block; margin-top: 7px; font-size: 11.5px; color: var(--bad); }
 .rb-rest-err[hidden] { display: none; }
@@ -1448,7 +1453,7 @@ img, video, canvas, svg { max-width: 100%; }
 .po-hero-empty-icon { font-size: 30px; margin-bottom: 10px; opacity: 0.85; }
 .po-hero-empty-cta { margin-top: 14px; }
 
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-muscle-chip {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-muscle-chip {
   background: rgba(29,33,41,0.05);
 }
 
@@ -1698,7 +1703,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-muscle-chip {
   background: rgba(255,255,255,0.04); border: 1px solid var(--border);
   border-radius: 9px; color: var(--text-1); font-family: inherit; font-size: 13px;
 }
-.po-combo-search:focus { outline: none; border-color: var(--accent); }
+.po-combo-search:focus { outline: none; border-color: var(--focus-ring); }
 .po-combo-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
 .po-combo-opt {
   display: flex; align-items: center; gap: 8px;
@@ -1744,7 +1749,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-muscle-chip {
      text isn't white-on-white in Chromium/Windows. */
   color-scheme: dark;
 }
-.po-cal-filter:focus { outline: none; border-color: var(--accent); }
+.po-cal-filter:focus { outline: none; border-color: var(--focus-ring); }
 /* Explicit dark background + light text for the dropdown list items — some
    engines ignore color-scheme and paint options on a system-light surface. */
 .po-cal-filter option {
@@ -1819,7 +1824,7 @@ html[data-apt-theme="emerald"], html[data-apt-theme="emerald"] body {
   background: radial-gradient(ellipse 80% 60% at 50% 0%, #102017 0%, #0A120E 60%);
 }
 
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) {
   --bg-card: #FFFFFF;
   --text-1: #1D2129;
   --text-2: rgba(29,33,41,0.70);
@@ -1827,7 +1832,8 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
   --text-4: rgba(29,33,41,0.40);
   --border: rgba(29,33,41,0.10);
   --border-strong: rgba(29,33,41,0.22);
-  --accent: #1D2129;            /* gym's monochrome accent: white ⇄ ink */
+  --gym-mono: #1D2129;          /* gym's monochrome accent: white ⇄ ink */
+  --focus-ring: #1D2129;
   --good: #157239; --warn: #9A6B00; --bad: #C2372A;
   /* Muscle map on white: soft ink anchors the base silhouette. */
   --mm-outline: rgba(29,33,41,0.20);
@@ -1839,62 +1845,68 @@ html[data-apt-theme="light"] { --bg: #FAFAFA; --apt-accent: #956534; }
 html[data-apt-theme="light"], html[data-apt-theme="light"] body { background: #FAFAFA; }
 html[data-apt-theme="nordic"] { --bg: #F1F3F5; --apt-accent: #3B5BDB; }
 html[data-apt-theme="nordic"], html[data-apt-theme="nordic"] body { background: #F1F3F5; }
+/* custom-light: fixed, safe canvas + muscle-map identity default -- neither
+   is part of the customizable Custom Theme contract (--apt-accent is
+   protected, gym's own --bg is out of scope), so both stay hand-picked here
+   rather than derived from the user's custom accent. */
+html[data-apt-theme="custom-light"] { --bg: #FAFAFA; --apt-accent: #956534; }
+html[data-apt-theme="custom-light"], html[data-apt-theme="custom-light"] body { background: #FAFAFA; }
 
 /* Light: invert the monochrome CTA language (ink chips, white text), lighten
    the input fills, and frost gym's own bottom tabbar. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) {
   --cta-grad: linear-gradient(180deg, #2A303A 0%, #1D2129 100%);
   --cta-ink: #FFFFFF;
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-seg-btn:hover { background: rgba(29,33,41,0.05); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-seg-btn.active {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-seg-btn:hover { background: rgba(29,33,41,0.05); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-seg-btn.active {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 12px rgba(23,28,38,0.22);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-metric-seg { background: rgba(29,33,41,0.04); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-btn-primary {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-metric-seg { background: rgba(29,33,41,0.04); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-btn-primary {
   border-color: #1D2129;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 4px 14px rgba(23,28,38,0.24);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input[type="number"],
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input[type="text"] {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-field input[type="number"],
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-field input[type="text"] {
   background: rgba(29,33,41,0.05);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-field input:focus {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-field input:focus {
   border-color: rgba(29,33,41,0.45); box-shadow: 0 0 0 3px rgba(29,33,41,0.08);
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-w-btn { background: rgba(29,33,41,0.05); }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-w-btn:hover { background: rgba(29,33,41,0.10); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-w-btn { background: rgba(29,33,41,0.05); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-w-btn:hover { background: rgba(29,33,41,0.10); }
 
 /* Muscle map light-mode surfaces live as token re-declarations in the shared
    light block above (--mm-*), and hover/active bind to --apt-accent globally —
    no scoped selector overrides, so states can never be out-specificity'd. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .mm-toggle { background: rgba(29,33,41,0.06); }
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .mm-toggle { background: rgba(29,33,41,0.06); }
 
 /* RC-1 polish: a handful of controls hardcoded a dark rgba(0,0,0,…) fill
    instead of following --bg-card/--border like their siblings, so they
    stayed dark inside a light card. Same treatment as .po-field input above. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .rb-search,
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .rb-name-input {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .rb-search,
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .rb-name-input {
   background: rgba(29,33,41,0.05);
 }
 /* background-color only (not the `background` shorthand) — .po-ex-select also
    sets background-image (the chevron) and background-repeat/-position; the
    shorthand would reset those to their initial values and tile the icon. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-ex-select {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-ex-select {
   background-color: rgba(29,33,41,0.05);
 }
 /* Native <option> lists ignore --text-1 unless given their own explicit
    pairing — without this they stayed dark-on-dark (unreadable) in light
    themes even though the closed control itself now reads correctly. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-ex-select option,
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-hist-filter option {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-ex-select option,
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-hist-filter option {
   background-color: #FFFFFF; color: #1D2129;
 }
 /* The custom dropdown chevrons are inlined SVGs with a hardcoded stroke
    color — swap to a dark stroke so they stay visible on a light control. */
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-ex-select {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-ex-select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%231D2129' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
 }
-html:is([data-apt-theme="light"], [data-apt-theme="nordic"]) .po-hist-filter {
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .po-hist-filter {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%231D2129' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
 }
