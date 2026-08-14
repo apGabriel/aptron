@@ -2,10 +2,17 @@
 // Persistent dashboard top bar + bottom tab bar.
 // Drop this on any page with:
 //     <script src="js/topbar.js" defer></script>
+//     <script src="js/account.js" defer></script>   (optional, after topbar.js)
 // It self-injects HTML + CSS, reads progress from localStorage,
-// and renders the water +1 button plus a Smart Wardrobe shortcut
-// in the top bar, and the Health/Main/Gym bottom tabs. Skips
-// chrome inside iframes (so the water tracker can embed cleanly).
+// and renders the account/settings trigger, the water +1 button,
+// a Smart Wardrobe shortcut in the top bar, and the Health/Main/Gym
+// bottom tabs. Skips chrome inside iframes (so the water tracker can
+// embed cleanly).
+// The account trigger (#acctBtn) is inert markup on its own — js/account.js
+// finds it by id and wires the click handler. account.js's IIFE runs eagerly
+// (no DOMContentLoaded wait), so its <script> tag must come AFTER this one:
+// deferred scripts execute in document order, and this file's DOM injection
+// must complete before account.js looks for #acctBtn.
 // =============================================================
 (function () {
   'use strict';
@@ -92,6 +99,60 @@
   fill: none; stroke: currentColor; stroke-width: 1.75;
   stroke-linecap: round; stroke-linejoin: round;
 }
+/* Account & settings trigger (js/account.js wires #acctBtn on click; it's a
+   no-op script until this button exists). --focus-ring is already defined
+   per theme on every page (ADR-022 Fase 1 — page-local, protected, never
+   accent-chained), so :focus-visible below picks up each page's own value
+   for free. --accent is NOT page-local by design on gym/health/wardrobe
+   (they use their own namespaced --apt-accent/--health-accent/--wr-accent
+   instead, so a global accent can never leak into their brand identity) —
+   but the account trigger/modal is suite-wide chrome, not page identity, and
+   was always meant to track the dashboard's chosen theme everywhere (see
+   account.js's own --acct-accent comment). The per-built-in-theme table
+   below gives --accent a real value for these 3 pages so it does; Custom
+   Theme already works cross-page without help, since js/theme.js sets
+   --accent as an inline style on <html> directly, on every page. Bare
+   fallback (#d2bc8a) only ever fires pre-first-paint or if this block is
+   ever removed. margin-right:auto pushes the button to the opposite edge
+   from the water/wardrobe group without touching the shared .topbar
+   flex-end layout. */
+.aios-acct {
+  flex: none; width: 38px; height: 38px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer;
+  color: var(--accent, #d2bc8a); background: color-mix(in srgb, var(--accent, #d2bc8a) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #d2bc8a) 28%, transparent);
+  overflow: hidden; -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .12s ease, background .15s ease;
+}
+.aios-acct:hover { border-color: color-mix(in srgb, var(--accent, #d2bc8a) 55%, transparent); background: color-mix(in srgb, var(--accent, #d2bc8a) 12%, transparent); transform: translateY(-1px); }
+.aios-acct:active { transform: translateY(0) scale(0.96); }
+.aios-acct:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring, #d2bc8a) 30%, transparent); }
+.aios-acct-inner { width: 100%; height: 100%; display: grid; place-items: center; }
+.aios-acct-inner img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.aios-acct-inner svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.aios-acct-inner .aios-acct-initials {
+  font-size: 14px; font-weight: 700; letter-spacing: 0.02em; color: var(--accent, #d2bc8a);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+#topbar > .aios-acct { margin-right: auto; }
+/* --accent per built-in theme, for the account trigger/modal only (see the
+   comment above .aios-acct) — values copied from css/styles.css's own
+   html[data-apt-theme="…"] blocks, the single source of truth for what each
+   theme's accent actually is. Duplicated rather than shared because this
+   project has no cross-page stylesheet (ADR-001/ADR-022 — no bundler, each
+   page loads its own CSS). "dark" (the default) needs no rule: it matches
+   the #d2bc8a fallback already on every var(--accent, #d2bc8a) above.
+   custom-dark/custom-light need no rule either — js/theme.js sets --accent
+   as an inline style directly for those, which already outranks this. */
+html[data-apt-theme="obsidian"] { --accent: #c3ad7e; }
+html[data-apt-theme="gold"]     { --accent: #e8d3a2; }
+html[data-apt-theme="neon"]     { --accent: #00F0FF; }
+html[data-apt-theme="emerald"]  { --accent: #52D1A2; }
+html[data-apt-theme="light"]    { --accent: #956534; }
+html[data-apt-theme="nordic"]   { --accent: #3B5BDB; }
 .bottombar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
   display: flex; justify-content: space-around; align-items: stretch;
@@ -204,6 +265,12 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
 
   const topbarHtml = `
 <header class="topbar" id="topbar" role="navigation" aria-label="Quick actions">
+  <button class="aios-acct" id="acctBtn" type="button" aria-haspopup="dialog"
+          aria-label="Account and settings">
+    <span class="aios-acct-inner" id="acctAvatar" aria-hidden="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+    </span>
+  </button>
   <div class="topbar-water-wrap">
     <a href="health.html#water" class="topbar-water-pill" id="topbarWater" aria-label="Water progress">
       <span class="topbar-pill-dot"></span>

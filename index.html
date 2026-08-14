@@ -34,19 +34,18 @@
 </head>
 <body>
 
-<!-- QUICK-ACTION TOPBAR — same component as the Health/Fitness screens. Declared
-     statically here; js/topbar.js detects it, skips re-injecting, and still wires
-     the water pill + injects the shared CSS and bottom tab bar. The water pill's
-     "warn" class and "0/2.4" count are placeholders that topbar.js overwrites
-     from live data on boot. -->
+<!-- QUICK-ACTION TOPBAR — same component as the Health/Fitness/Wardrobe screens.
+     Declared statically here; js/topbar.js detects it, skips re-injecting, and
+     still wires the account trigger, water pill, and injects the shared CSS +
+     bottom tab bar. The water pill's "warn" class and "0/2.4" count are
+     placeholders that topbar.js overwrites from live data on boot. -->
 <header class="topbar" id="topbar" role="navigation" aria-label="Quick actions">
   <!-- Account & settings trigger — top-left. Avatar / initials / gear rendered
-       by js/account.js, which also builds the modal on demand. index.html-only
-       (gym/health/wardrobe never had this button), so it's placed here rather
-       than in js/topbar.js's shared cross-page markup. margin-right:auto (see
-       css/styles.css) pushes it to the opposite end from the water/wardrobe
-       group without needing to touch the shared .topbar layout rule those
-       other pages also use. -->
+       by js/account.js, which also builds the modal on demand. Markup +
+       CSS (.aios-acct*, margin-right:auto) now live in js/topbar.js's shared
+       template too, so gym/health/wardrobe get the same button — this static
+       copy just keeps index.html's markup in its own source, per topbar.js's
+       "declare it statically, topbar.js skips re-injecting" pattern. -->
   <button class="aios-acct" id="acctBtn" type="button" aria-haspopup="dialog"
           aria-label="Account and settings">
     <span class="aios-acct-inner" id="acctAvatar" aria-hidden="true">

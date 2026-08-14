@@ -374,34 +374,9 @@ body > * { position: relative; z-index: 1; }
 /* Right cluster: day-progress + account avatar sit together, aligned to the
    greeting baseline. Avatar last so it hugs the top-right corner. */
 .aios-head-right { display: flex; align-items: flex-end; gap: 14px; flex: none; }
-.aios-acct {
-  flex: none; width: 38px; height: 38px; padding: 0; border-radius: 50%;
-  display: grid; place-items: center; cursor: pointer;
-  color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  overflow: hidden; -webkit-tap-highlight-color: transparent;
-  transition: border-color .15s ease, box-shadow .15s ease, transform .12s ease, background .15s ease;
-}
-.aios-acct:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); transform: translateY(-1px); }
-.aios-acct:active { transform: translateY(0) scale(0.96); }
-.aios-acct:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 30%, transparent); }
-.aios-acct-inner { width: 100%; height: 100%; display: grid; place-items: center; }
-.aios-acct-inner img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
-.aios-acct-inner svg {
-  width: 18px; height: 18px; fill: none; stroke: currentColor;
-  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
-}
-/* Initials fallback (rendered as text by js/account.js). */
-.aios-acct-inner .aios-acct-initials {
-  font-size: 14px; font-weight: 700; letter-spacing: 0.02em; color: var(--accent);
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
-}
-/* Top-left placement inside the sticky .topbar (js/topbar.js's shared CSS,
-   base rule `justify-content: flex-end`, unchanged so gym/health/wardrobe's
-   topbar — which never has this button — keeps its existing right-aligned
-   layout). margin-right:auto pushes #acctBtn to the opposite edge from the
-   water/wardrobe group, which then still clusters at flex-end as before. */
-#topbar > .aios-acct { margin-right: auto; }
+/* .aios-acct* (account/settings trigger) moved to js/topbar.js — it's now
+   injected on every page that loads topbar.js + account.js, not just
+   index.html, so the CSS lives with the shared markup instead of here. */
 @media (max-width: 560px) {
   /* Keep the greeting + avatar on one line; the progress bar can shrink.
      max-width (not just min-width) is required here: .aios-dayprog is a
