@@ -169,6 +169,11 @@
 <!-- Supabase client + shared cloud-sync helper -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="module" src="js/auth/main.js"></script>
+<!-- account.js after auth/main.js: it reads window.APP_SUPABASE once,
+     synchronously, at boot — must not run before auth/main.js sets it
+     (see js/auth/main.js's ordering contract comment). Also after
+     topbar.js (head), which injects #acctBtn for this page. -->
+<script src="js/account.js" defer></script>
 <script src="sync.js" defer></script>
 <script src="js/wardrobe.js" defer></script>
 <script>
