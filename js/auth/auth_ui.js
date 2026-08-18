@@ -12,7 +12,9 @@
 // textContent.
 // =============================================================
 
-const GATE_CSS = `
+// Exported so confirm.js can paint the confirmation card in the same
+// Shenlong glass-card language without duplicating ~200 lines of CSS.
+export const GATE_CSS = `
 .auth-gate {
   position: fixed; inset: 0; z-index: 100000;
   display: flex; align-items: center; justify-content: center;
