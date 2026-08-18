@@ -115,7 +115,10 @@ export function promotePendingProfile() {
 }
 
 // → { ok, needsConfirmation? } | { ok:false, message }.
-export async function register(supa, { email, password, fullName, username, avatar }) {
+// `redirectTo` (caller-supplied — this module stays window-free) becomes the
+// confirmation email's landing URL. Without it Supabase falls back to the
+// Dashboard's static Site URL, which is wrong for every environment but one.
+export async function register(supa, { email, password, fullName, username, avatar, redirectTo }) {
   const meta = { display_name: fullName };
   if (username) meta.username = username;
   // Seed the base profile BEFORE the call: with auto-confirm the SIGNED_IN
@@ -126,7 +129,7 @@ export async function register(supa, { email, password, fullName, username, avat
   if (avatar) prof.avatar = avatar;
   stashPendingProfile(prof);
   const { data, error } = await supa.auth.signUp({
-    email, password, options: { data: meta },
+    email, password, options: { data: meta, emailRedirectTo: redirectTo },
   });
   if (error) {
     clearPendingProfile();

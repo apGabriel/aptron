@@ -34,6 +34,7 @@ import {
   AVATAR_PRESETS, normalizeFullName, normalizeUsername,
   validateRegistration, register, promotePendingProfile,
 } from './register_service.js';
+import { createAppSupabaseClient } from './supabase_client.js';
 
 const CFG_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
 const CFG_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
@@ -60,9 +61,7 @@ if (!window.supabase || !CFG_URL || !CFG_KEY ||
 }
 
 function boot() {
-  const supa = window.supabase.createClient(CFG_URL, CFG_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true, storageKey: 'aptron-auth' },
-  });
+  const supa = createAppSupabaseClient();
   window.APP_SUPABASE = supa;
 
   let readyResolved = false;
@@ -99,6 +98,22 @@ function boot() {
     onSubmit: handleSubmit,
   });
 
+  // GoTrue redirects a failed confirmation/magic link back here as a URL
+  // hash (#error=...&error_code=otp_expired&...), never as a JS exception —
+  // read it once on boot, scrub it from the URL, and surface it on the gate
+  // instead of silently showing a plain sign-in form with no explanation.
+  let authHashError = consumeAuthHashError();
+  function consumeAuthHashError() {
+    const hash = location.hash || '';
+    if (hash.indexOf('error=') === -1) return null;
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    const code = params.get('error_code');
+    history.replaceState(null, '', location.pathname + location.search);
+    if (code === 'otp_expired')
+      return 'That confirmation link expired or was already used. Sign up again to get a new one.';
+    return 'That link is invalid or has expired. Please try again.';
+  }
+
   async function handleSubmit(raw, mode) {
     if (busy || Date.now() < cooldownUntil) return;
     ui.setNote('');
@@ -118,7 +133,10 @@ function boot() {
     ui.setBusy(signup ? 'Creating account…' : 'Signing in…');
     try {
       if (signup) {
-        const res = await register(supa, { email, password, fullName, username, avatar: raw.avatar });
+        const res = await register(supa, {
+          email, password, fullName, username, avatar: raw.avatar,
+          redirectTo: window.location.origin,
+        });
         if (!res.ok) ui.setNote(res.message);
         else if (res.needsConfirmation)
           ui.showSigninNotice('Check your email to confirm registration.');
@@ -137,6 +155,7 @@ function boot() {
   function showGate() {
     if (embedded) return;              // parent frame owns the gate
     ui.show();
+    if (authHashError) { ui.setNote(authHashError); authHashError = null; }
   }
 
   // ── Session lifecycle ──────────────────────────────────────────────────────

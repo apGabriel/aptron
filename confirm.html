@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirm your email — Aptron</title>
+<link rel="icon" href="img/logo.ico" type="image/x-icon">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js" defer></script>
+<script type="module" src="js/auth/confirm.js"></script>
+</head>
+<body>
+
+<div class="auth-gate" id="confirmGate">
+  <div class="auth-card" id="confirmCard">
+    <div class="auth-orb" aria-hidden="true"><span class="auth-emblem"></span></div>
+    <h1 class="auth-title">Confirm your email</h1>
+    <p class="auth-sub" id="confirmSub">Tap below to finish setting up your Aptron account.</p>
+    <p class="auth-err" id="confirmErr" role="alert" aria-live="polite"></p>
+    <button class="auth-btn" id="confirmBtn" type="button" hidden>
+      <span class="auth-btn-label" id="confirmBtnLabel">Confirm email</span>
+    </button>
+    <p class="auth-toggle"><a href="index.html">Back to Aptron</a></p>
+  </div>
+</div>
+
+</body>
+</html>
