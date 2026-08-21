@@ -49,6 +49,11 @@
     } catch (e) {}
   };
 
+  // Exposed for js/auth/user_scope.js's user-boundary clear (ADR-024 F1
+  // fix) — same purpose/shape as sync.js's __aptSyncPause/Resume.
+  window.__aptGymSyncPause = function () { clearTimeout(pcPushTimer); pcSuppressSync = true; };
+  window.__aptGymSyncResume = function () { pcSuppressSync = false; };
+
   function pcCollectState() {
     const out = {};
     for (const k of PC_SYNCED_KEYS) {
@@ -134,6 +139,7 @@
 
   async function pcPushNow() {
     if (!pcSupa) return;
+    if (window.__aptLoggingOut) return;   // see ADR-024 F1, sync.js's pushNow() for the twin guard
     const snapshot = pcCollectState();
     const json = JSON.stringify(snapshot);
     if (json === pcLastSyncedJson) return;
@@ -158,6 +164,7 @@
   // the latest change before the debounced push fires.
   function pcFlushPushOnUnload() {
     if (!pcSupa) return;
+    if (window.__aptLoggingOut) return;   // see ADR-024 F1
     const snapshot = pcCollectState();
     const json = JSON.stringify(snapshot);
     if (json === pcLastSyncedJson) return;

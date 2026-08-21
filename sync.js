@@ -69,6 +69,15 @@
       origRemove(k);
       try { if (!suppressSync && matches(k)) schedulePush(); } catch (e) {}
     };
+    // Exposed for js/auth/user_scope.js's user-boundary clear (ADR-024 F1
+    // fix): lets it pause this page's push machinery for the exact window it
+    // removes keys in, so the clear itself is never mistaken for a real edit
+    // that needs syncing — cancels any already-armed timer (an edit made
+    // moments before the clear) and reuses the same suppressSync flag
+    // applyRemote() already uses for "this write isn't a real edit". No-op
+    // (nothing to pause) if this page never called initCloudSync.
+    window.__aptSyncPause = function () { clearTimeout(pushTimer); suppressSync = true; };
+    window.__aptSyncResume = function () { suppressSync = false; };
     function applyRemote(remote) {
       if (!remote || typeof remote !== 'object') return false;
       suppressSync = true;
@@ -115,6 +124,11 @@
     // same as before this return value existed.
     async function pushNow() {
       if (!supa) return false;
+      // Defense in depth alongside __aptSyncPause/Resume above: a logout
+      // clear (js/auth/user_scope.js) sets this flag for the rest of this
+      // page's lifetime (it always ends in location.reload() right after) —
+      // never true during normal operation. See ADR-024 F1.
+      if (window.__aptLoggingOut) return false;
       const state = collect();
       const json = JSON.stringify(state);
       // Every key collect() just captured is, by definition, about to be (or
@@ -178,6 +192,10 @@
       return flushPromise;
     };
     function flushOnUnload() {
+      // A logout clear is in progress (or just finished) — the state this
+      // would collect() is intentionally emptied user-boundary state, not a
+      // real edit to persist. See ADR-024 F1.
+      if (window.__aptLoggingOut) return;
       const state = collect();
       const json = JSON.stringify(state);
       if (json === lastSyncedJson) return;

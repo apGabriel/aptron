@@ -49,6 +49,10 @@ export const USER_SCOPED_KEYS = [
   'local_sync_queue',
   'stack:items', 'stack:version', 'stack:low',
   'po_water_v1', 'po_food_v1',
+  // Shenlong's persistent per-user memory (js/index.js MEMORY_KEY) — never
+  // synced to Supabase (local-only, so no sync-engine interaction/F1 risk),
+  // but genuinely user-owned and must not survive a user-boundary crossing.
+  'shenlong_memory_v1',
 ];
 export const USER_SCOPED_PREFIXES = [
   'cal_done:', 'cal_manual:',
@@ -66,10 +70,31 @@ function isUserScoped(k) {
   return false;
 }
 
+// Pauses this page's sync engine(s) — sync.js (System 1, app_state blob:
+// goals/health/wardrobe) and js/gym/gym-sync.js (System 2, po-coach) —
+// around the removal loop below, so the clear itself can never be read as a
+// real edit that needs pushing (ADR-024 F1). Both expose the same shape
+// (window.__apt{,Gym}SyncPause/Resume), installed only if that page actually
+// called initCloudSync / loaded gym-sync.js; no-op otherwise. Pause cancels
+// any already-armed debounce timer (an edit made moments before the clear)
+// AND reuses the existing suppressSync/pcSuppressSync flag each engine
+// already uses for "this write isn't a real edit" (applyRemote()'s own
+// purpose) — resumed immediately after, so normal writes elsewhere are
+// completely unaffected.
+function pauseSyncEngines() {
+  try { if (typeof window.__aptSyncPause === 'function') window.__aptSyncPause(); } catch (e) {}
+  try { if (typeof window.__aptGymSyncPause === 'function') window.__aptGymSyncPause(); } catch (e) {}
+}
+function resumeSyncEngines() {
+  try { if (typeof window.__aptSyncResume === 'function') window.__aptSyncResume(); } catch (e) {}
+  try { if (typeof window.__aptGymSyncResume === 'function') window.__aptGymSyncResume(); } catch (e) {}
+}
+
 // Removes every currently-present user-scoped key. Targeted, not
 // localStorage.clear() — never touches the auth session, the pending-
 // signup stash, or any non-Aptron key that might ever share this origin.
 export function clearUserScopedState() {
+  pauseSyncEngines();
   try {
     const toRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -77,7 +102,10 @@ export function clearUserScopedState() {
       if (isUserScoped(k)) toRemove.push(k);
     }
     toRemove.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
-  } catch (e) {}
+  } catch (e) {
+  } finally {
+    resumeSyncEngines();
+  }
 }
 
 // Reconciles the currently authenticated uid against the last uid known
@@ -112,6 +140,17 @@ export function reconcileUserScope(uid) {
 // suspenders for that case). Keeps LAST_UID_KEY itself — the next
 // login's reconcile still needs it to tell "same user back" from
 // "different user arrived" when logout never got a chance to run.
+//
+// Sets window.__aptLoggingOut = true FIRST, for the rest of this page's
+// lifetime (ADR-024 F1) — unlike pauseSyncEngines()'s pause/resume above
+// (which only brackets the synchronous removal loop), appSignOut() then
+// calls supa.auth.signOut() and reload()s, and beforeunload/pagehide fire
+// well after that loop has already resumed normal suppression state. Both
+// sync engines' flushOnUnload()/pushNow() check this flag so neither can
+// serialize the just-cleared (now empty) state during the reload. Never
+// reset: appSignOut() always ends in location.reload(), so a fresh module
+// instance — and a fresh, false, window.__aptLoggingOut — boots right after.
 export function clearOnLogout() {
+  window.__aptLoggingOut = true;
   clearUserScopedState();
 }

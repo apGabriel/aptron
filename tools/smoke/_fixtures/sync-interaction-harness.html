@@ -1,0 +1,70 @@
+<!doctype html>
+<!--
+  Test harness for tools/smoke/user-scope-sync-interaction-smoke.mjs (ADR-024
+  F1 regression coverage). Loads the REAL sync.js and js/gym/gym-sync.js
+  against a minimal, fully local, deterministic mock of window.supabase and
+  window.fetch — no real network call, no real Supabase project touched.
+  Does NOT load js/auth/main.js — this harness tests the interaction between
+  user_scope.js's clear and the two sync engines directly, not the full auth
+  boot sequence (already covered by user-scope-smoke.mjs / the live audit).
+-->
+<html>
+<head><meta charset="utf-8"><title>sync-interaction harness</title></head>
+<body>
+<script>
+  window.APP_CONFIG = { SUPABASE_URL: 'https://fake.test.local', SUPABASE_KEY: 'fake-anon-key' };
+
+  // Every supa.from('app_state').upsert() call, from either sync engine.
+  window.__testUpserts = [];
+  // Every fetch() call (the beforeunload/pagehide keepalive POST path).
+  window.__testFetches = [];
+  window.fetch = function (url, opts) {
+    try { window.__testFetches.push({ url: String(url), body: (opts && opts.body) || null }); } catch (e) {}
+    return Promise.resolve({ ok: true, json: function () { return Promise.resolve({}); } });
+  };
+
+  function makeQueryBuilder(table) {
+    var b = {
+      select: function () { return b; },
+      eq: function () { return b; },
+      // Always "no remote row yet" — irrelevant to what this harness tests
+      // (the clear/suppress interaction), never exercises the init()-time
+      // pull/backfill decision paths.
+      maybeSingle: function () { return Promise.resolve({ data: null, error: null }); },
+      upsert: function (payload) {
+        try { window.__testUpserts.push({ table: table, payload: payload }); } catch (e) {}
+        return Promise.resolve({ error: null });
+      },
+      order: function () { return b; },
+      "delete": function () { return b; },
+    };
+    return b;
+  }
+  window.supabase = {
+    createClient: function () {
+      return {
+        from: function (table) { return makeQueryBuilder(table); },
+        channel: function () { return { on: function () { return { subscribe: function () {} }; }, subscribe: function () {} }; },
+        auth: { getUser: function () { return Promise.resolve({ data: { user: { id: 'uid-test' } } } ); } },
+      };
+    }
+  };
+
+  // js/gym/gym-sync.js destructures window.GymApp at script-eval time.
+  window.GymApp = {
+    loadState: function () { return {}; },
+    saveState: function () {},
+    rebuildLogIndex: function () {},
+    logSetKey: function () { return ''; },
+  };
+
+  // Deferred: the test script resolves this explicitly, at whatever point
+  // each test case needs, to control ordering precisely (TEST 5).
+  window.__resolveAuthReady = null;
+  window.APP_AUTH_READY = new Promise(function (r) { window.__resolveAuthReady = r; });
+  window.APP_SUPABASE = window.supabase.createClient();
+</script>
+<script src="/sync.js"></script>
+<script src="/js/gym/gym-sync.js"></script>
+</body>
+</html>

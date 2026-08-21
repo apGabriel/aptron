@@ -80,6 +80,7 @@ try {
     'wardrobe:profile': '{}',
     'stack:items': '[]',
     quicknotes_v1: '[]',
+    shenlong_memory_v1: JSON.stringify([{ text: 'user A likes squats', savedAt: 1 }]),
     aptron_pending_profile_v1: JSON.stringify({ name: 'brand-new-signup' }),
     'aptron-auth': 'session-token-blob',
   });
@@ -88,7 +89,7 @@ try {
     return { changed: mod.reconcileUserScope('uidB'), lastUid: localStorage.getItem('aptron_last_uid') };
   });
   const r3 = await get(['aptron_profile_v1', 'rb_routines_v1', 'po_coach_v1', 'cal_done:2026-08-20',
-    'wardrobe:profile', 'stack:items', 'quicknotes_v1', 'aptron_pending_profile_v1', 'aptron-auth']);
+    'wardrobe:profile', 'stack:items', 'quicknotes_v1', 'shenlong_memory_v1', 'aptron_pending_profile_v1', 'aptron-auth']);
   ok('3a. different uid triggers a clear', r3ch.changed === true);
   ok('3b. last uid updated to the new one', r3ch.lastUid === 'uidB');
   ok('3c. stale profile (name/theme) removed — RC-6/RC-7 root data', r3.aptron_profile_v1 === null);
@@ -100,6 +101,7 @@ try {
   ok('3i. stale notes removed', r3.quicknotes_v1 === null);
   ok('3j. in-flight pending-signup stash is NOT touched (own-user race)', r3.aptron_pending_profile_v1 !== null);
   ok('3k. Supabase auth session key is NOT touched (owned by supabase-js)', r3['aptron-auth'] !== null);
+  ok('3l. stale Shenlong AI memory removed — F2', r3.shenlong_memory_v1 === null);
 
   // ── 4. Logout clears synced state immediately, independent of any uid ──
   await clearAll();
@@ -124,6 +126,7 @@ try {
       hasStackTakenPrefix: prefixes.indexOf('stack:taken:') !== -1,
       hasCalDonePrefix: prefixes.indexOf('cal_done:') !== -1,
       hasBackfillPrefix: prefixes.indexOf('po_cloud_backfilled_v1:') !== -1,
+      hasShenlongMemory: keys.indexOf('shenlong_memory_v1') !== -1,
     };
   });
   ok('5. audit-identified keys/prefixes are all covered', Object.values(r5).every(Boolean), JSON.stringify(r5));
