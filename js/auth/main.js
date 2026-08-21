@@ -35,6 +35,7 @@ import {
   validateRegistration, register, promotePendingProfile,
 } from './register_service.js';
 import { createAppSupabaseClient } from './supabase_client.js';
+import { reconcileUserScope, clearOnLogout } from './user_scope.js';
 
 const CFG_URL = (window.APP_CONFIG || {}).SUPABASE_URL || '';
 const CFG_KEY = (window.APP_CONFIG || {}).SUPABASE_KEY || '';
@@ -66,14 +67,30 @@ function boot() {
 
   let readyResolved = false;
   function markReady(session) {
-    // Promote any pending signup profile into aptron_profile_v1 before
-    // resolving APP_AUTH_READY, so sync.js's first push already carries it.
-    if (session) promotePendingProfile();
+    if (session) {
+      // Discard any previous user's local Aptron state BEFORE resolving
+      // APP_AUTH_READY — sync.js / gym-sync.js / gym-cloud.js all await
+      // that promise, so this guarantees they never see (and never push
+      // upstream) data left behind by a different account on this
+      // browser. Must run before promotePendingProfile(): a brand-new
+      // signup's own just-stashed pending profile is excluded from the
+      // clear for exactly this reason (see user_scope.js).
+      const uid = session.user && session.user.id;
+      reconcileUserScope(uid);
+      // Promote any pending signup profile into aptron_profile_v1 before
+      // resolving APP_AUTH_READY, so sync.js's first push already carries it.
+      promotePendingProfile();
+    }
     window.__appAccessToken = session ? session.access_token : null;
     if (!readyResolved) { readyResolved = true; resolveReady(); }
   }
 
   window.appSignOut = function () {
+    // Clear Aptron-owned local state BEFORE the Supabase session actually
+    // drops, so nothing from this account can be mistaken for "this
+    // browser's data" if the next sign-in's reconcile is ever skipped
+    // (e.g. a killed tab never reaching this handler at all).
+    try { clearOnLogout(); } catch (e) {}
     try { supa.auth.signOut().finally(() => location.reload()); }
     catch (e) { location.reload(); }
   };

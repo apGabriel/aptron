@@ -13,7 +13,13 @@
   const RB_KEY        = 'rb_routines_v1';
   const COACH_KEY     = 'po_coach_v1';
   const QUEUE_KEY     = 'local_sync_queue';        // pending ops, keyed for idempotency
-  const BACKFILL_FLAG = 'po_cloud_backfilled_v1';  // seed-cloud-once guard
+  // Seed-cloud-once guard — per authenticated uid (js/auth/user_scope.js
+  // treats the 'po_cloud_backfilled_v1:' prefix as user-scoped). A single
+  // browser-wide flag would let a second account's first login skip its
+  // own backfill because a PREVIOUS account already consumed the flag —
+  // or worse, on a pre-fix browser, cause a stale local backfill to be
+  // attributed to whichever uid happens to be signed in when it fires.
+  const BACKFILL_FLAG = 'po_cloud_backfilled_v1';
 
   const ready = !!(window.supabase && SUPABASE_URL && SUPABASE_KEY &&
                    SUPABASE_URL.indexOf('PASTE-') !== 0 && SUPABASE_KEY.indexOf('PASTE-') !== 0);
@@ -166,9 +172,22 @@
     } catch (e) {}
   }
 
-  // ── Backfill (first run only): seed the cloud from this device ──
-  function backfillOnce() {
-    if (localStorage.getItem(BACKFILL_FLAG)) return;
+  // ── Backfill (first run only per uid): seed the cloud from this device ──
+  function backfillOnce(uid) {
+    if (!uid) return;
+    const flag = BACKFILL_FLAG + ':' + uid;
+    if (localStorage.getItem(flag)) return;
+    // Grandfather the old, un-scoped one-time flag from before this fix: if
+    // this browser already completed a backfill for SOME account, don't
+    // silently re-run it for the currently authenticated one too (by the
+    // time this runs, js/auth/user_scope.js has already cleared any local
+    // leftovers from a different previous user, so there is nothing of
+    // theirs left to mis-push anyway — this only avoids a redundant retry).
+    if (localStorage.getItem(BACKFILL_FLAG)) {
+      try { localStorage.setItem(flag, '1'); } catch (e) {}
+      try { localStorage.removeItem(BACKFILL_FLAG); } catch (e) {}
+      return;
+    }
     try {
       const routines = JSON.parse(localStorage.getItem(RB_KEY) || '[]');
       if (Array.isArray(routines) && routines.length) pushRoutines(routines);
@@ -190,7 +209,7 @@
       });
       if (rows.length) attempt({ kind: 'logs', key: 'logs:backfill', payload: rows });
     } catch (e) {}
-    try { localStorage.setItem(BACKFILL_FLAG, '1'); } catch (e) {}
+    try { localStorage.setItem(flag, '1'); } catch (e) {}
   }
 
   async function init() {
@@ -199,7 +218,10 @@
     supa = window.APP_SUPABASE;
     if (!supa) return;      // signed out / local-only → ops stay queued
     await flushQueue();     // retry anything stranded from a past offline session
-    backfillOnce();         // one-time seed of existing local data
+    try {
+      const { data } = await supa.auth.getUser();
+      backfillOnce(data && data.user && data.user.id);   // one-time seed, per uid
+    } catch (e) {}
     await pullRoutines();   // bring in routines from other devices
     await pullLogs();       // hydrate logs missing locally (fills gaps, deduped)
   }
