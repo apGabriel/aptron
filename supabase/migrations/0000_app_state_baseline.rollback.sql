@@ -1,0 +1,23 @@
+-- Rollback for 0000_app_state_baseline.sql
+--
+-- DELIBERATELY NOT A DROP TABLE. app_state is a live application data table
+-- (12 rows as of 2026-08-23, verified via read-only introspection) — an
+-- automated drop would be catastrophic for negligible benefit, since 0000
+-- itself is a guarded no-op everywhere the table already exists, including
+-- production.
+--
+-- There is nothing to safely automate here:
+--   - On production (and any database where app_state already existed
+--     before 0000 ran), 0000 changed nothing — there is no state to revert.
+--   - On a genuinely fresh database where ONLY 0000 has run so far, the
+--     table 0000 created holds no real user data by definition — but this
+--     file still does not automate dropping it, to keep exactly one rule
+--     for this table everywhere: no script-driven DROP, ever.
+--
+-- If reverting is ever genuinely needed on a fresh, non-production database
+-- that has not progressed past 0000, do so by hand, reviewed and run
+-- manually, never as a script:
+--
+--   drop table if exists public.app_state;
+--
+-- Do not automate this. Do not add a guarded do-block that executes it.
