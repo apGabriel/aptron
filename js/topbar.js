@@ -235,7 +235,7 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="cu
 }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .bottombar-tab { color: rgba(29,33,41,0.64); }
 html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .bottombar-tab.active { color: #1D2129; }
-.modal-bg, .modal, .po-modal-bg, .po-modal, .wt-overlay, .wt-viewer {
+.modal-bg, .modal, .po-modal-bg, .po-modal, .wt-overlay, .wt-viewer, .wr-modal-bg, .wr-modal {
   overscroll-behavior: contain;
 }
 body.topbar-modal-open { overflow: hidden; touch-action: none; }
@@ -517,7 +517,7 @@ body.topbar-modal-open { overflow: hidden; touch-action: none; }
     }, { passive: false });
   }
   function startModalLock() {
-    const MODAL_SELECTORS = ['.modal-bg', '.po-modal-bg', '.wt-overlay', '.wt-viewer', '.wt-cam'];
+    const MODAL_SELECTORS = ['.modal-bg', '.po-modal-bg', '.wt-overlay', '.wt-viewer', '.wt-cam', '.wr-modal-bg'];
     function anyOpen() {
       for (const sel of MODAL_SELECTORS) {
         const els = document.querySelectorAll(sel);

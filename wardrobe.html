@@ -60,7 +60,7 @@
     <div>
 
       <!-- SECTION 2 — AI OUTFIT GENERATOR -->
-      <section class="wr-panel" aria-label="AI outfit generator" style="margin-bottom:16px">
+      <section class="wr-panel wr-panel-hero" aria-label="AI outfit generator" style="margin-bottom:16px">
         <div class="wr-panel-head">
           <div class="wr-panel-title">AI Outfit Generator<small>Local recommendation · Preview</small></div>
           <button class="wr-btn wr-btn-primary wr-btn-sm" id="wrGenBtn" type="button">✨ Generate</button>
@@ -81,7 +81,7 @@
       </section>
 
       <!-- Garment recommendations (gap analysis feed) -->
-      <section class="wr-panel" aria-label="Recommendations" style="margin-bottom:16px">
+      <section class="wr-panel wr-panel-quiet" aria-label="Recommendations" style="margin-bottom:16px">
         <div class="wr-panel-head">
           <div class="wr-panel-title">To Complete Your Closet<small>Gaps &amp; suggestions</small></div>
         </div>
@@ -91,7 +91,7 @@
       </section>
 
       <!-- Facial & Style analysis sub-section -->
-      <section class="wr-panel" aria-label="Style profile">
+      <section class="wr-panel wr-panel-quiet" aria-label="Style profile">
         <div class="wr-panel-head">
           <div class="wr-panel-title">Style Profile<small>Local analysis · Guides recommendations</small></div>
         </div>
@@ -136,9 +136,11 @@
 <div class="wr-modal-bg" id="wrItemModalBg">
   <div class="wr-modal" id="wrItemModal" role="dialog" aria-modal="true" aria-label="Edit item">
     <img class="wr-modal-img" id="wrItemImg" alt="Clothing item">
-    <h3>Item details
-      <span class="wr-item-swatch" id="wrItemSwatch" style="display:inline-block;vertical-align:middle;width:16px;height:16px;margin-left:6px"></span>
-    </h3>
+    <div class="wr-modal-title">
+      <h3>Item details</h3>
+      <span class="wr-item-swatch" id="wrItemSwatch"></span>
+      <span class="wr-modal-season" id="wrItemSeason" hidden></span>
+    </div>
     <label class="wr-modal-label" for="wrItemCat">Category</label>
     <select class="wr-select" id="wrItemCat"></select>
     <label class="wr-modal-label" for="wrItemTags">Tags (comma separated)</label>
