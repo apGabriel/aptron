@@ -1149,7 +1149,6 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="cu
     bg._populate();
     lastFocused = document.activeElement;
     requestAnimationFrame(() => bg.classList.add('is-open'));
-    try { document.body.style.overflow = 'hidden'; } catch (e) {}
     document.addEventListener('keydown', onKey);
     const first = bg.querySelector('.acct-navitem.is-active');
     if (first) setTimeout(() => first.focus(), 60);
@@ -1158,7 +1157,6 @@ html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="cu
     if (!modal) return;
     modal.classList.remove('is-open');
     document.removeEventListener('keydown', onKey);
-    try { document.body.style.overflow = ''; } catch (e) {}
     if (lastFocused && lastFocused.focus) { try { lastFocused.focus(); } catch (e) {} }
     else btn.focus();
   }

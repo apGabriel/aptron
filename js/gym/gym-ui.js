@@ -1168,11 +1168,9 @@
   $('wtProgressLink').addEventListener('click', () => {
     photosRender();
     $('wtOverlay').classList.add('is-open');
-    document.body.style.overflow = 'hidden';
   });
   $('wtBack').addEventListener('click', () => {
     $('wtOverlay').classList.remove('is-open');
-    document.body.style.overflow = '';
   });
 
   // Take Photo: try in-browser camera, fall back to file input
