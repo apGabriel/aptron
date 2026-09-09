@@ -63,6 +63,22 @@ function todayGymSummary() {
     setsLoggedInOpenSession: openSession ? (openSession.sets || []).length : 0,
   };
 }
+// Known Issue #53's companion finding: a direct "what workout do I have
+// today?" question used to be answered entirely by the Calendar summarizer
+// (which only knows about `events`), even when a real routine was scheduled
+// for today. Mirrors js/gym/gym-storage.js's own todaysScheduledRoutine() —
+// same WEEKDAY_CODES/trainingDays match — rather than inventing a second
+// selection algorithm; duplicated (not called) because index.html never
+// loads the Gym module suite (window.GymApp doesn't exist here). Read-only.
+function todaysScheduledRoutineName() {
+  let routines = [];
+  try { routines = JSON.parse(localStorage.getItem('rb_routines_v1') || '[]'); } catch (e) {}
+  if (!Array.isArray(routines) || !routines.length) return null;
+  const WEEKDAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const code = WEEKDAY_CODES[new Date().getDay()];
+  const scheduled = routines.find(r => Array.isArray(r.trainingDays) && r.trainingDays.includes(code));
+  return scheduled ? scheduled.name : null;
+}
 // ── Scoped local memory (Shenlong Intelligence pass, 2026-08-03) ─────────────
 // Durable, user-scoped facts/preferences — deliberately NOT a vector store or
 // new database table (per [[Shelron]]'s engine-by-engine order, the real
@@ -1037,17 +1053,23 @@ window.QuickNotes = (function () {
     if (hit === tokens.length) return 50 + hit;   // every word present
     return hit;                                    // partial (weak)
   }
-  // Known Issue #24: two events can tie on match score ("Dentist AM checkup" /
-  // "Dentist PM follow-up" both match "dentist") — findEvent silently picks
-  // one via the prefer tie-break below and the caller has no way to know a
-  // second candidate existed. This flag is a best-effort side channel (set by
-  // every findEvent call, read once by applyIntent right after) so a mutating
-  // action can disclose the ambiguity in its own success message instead of
-  // reporting plain, unqualified success. It does not change WHICH event gets
-  // picked, only whether the user is told there was a choice — actually
-  // asking for clarification instead of guessing is the fuller fix, tracked
-  // separately under Roadmap v2's E8b (already deferred).
+  // Known Issue #24 / E8b, CLOSED (extreme adversarial pass V): two events
+  // tying on match score ("Dentist AM checkup" / "Dentist PM follow-up" both
+  // matching "dentist") used to be silently resolved via the `prefer`
+  // tie-break below, with only a post-hoc "more than one event matched"
+  // disclosure — guess-then-disclose, not ask-then-act. `lastAmbiguousCandidates`
+  // (below) now lets `parseLocal`'s own resolve() call detect a genuine tie
+  // BEFORE any mutation happens and ask which one is meant instead — see the
+  // DELETE/RETIME/COMPLETE/UNCHECK/RENAME branches, each of which now reads
+  // this right after its own resolve() call and attaches `ambiguous`/
+  // `ambiguousCandidates` to the returned intent. This flag/array pairing is
+  // still also read a SECOND time, post-mutation, by each apply* case in
+  // applyIntent — that older mechanism is left in place unchanged as a safety
+  // net for intents that don't come through parseLocal's own resolve() (a
+  // Gemini-sourced intent, or a future caller), where the pre-emptive ask
+  // can't run.
   let lastMatchWasAmbiguous = false;
+  let lastAmbiguousCandidates = [];
   // Pick the event that best matches a keyword. `prefer` biases ties: 'done' for
   // unchecking (target the completed slot), 'undone' for completing, else the
   // upcoming/active one so "move my workout" hits the right block.
@@ -1072,7 +1094,7 @@ window.QuickNotes = (function () {
     // title (no longer ambiguous). Resetting on every call let that later,
     // already-disambiguated call silently clobber the real signal from the
     // first one. wasLastMatchAmbiguous() below is the one place this clears.
-    if (top.length > 1) lastMatchWasAmbiguous = true;
+    if (top.length > 1) { lastMatchWasAmbiguous = true; lastAmbiguousCandidates = top; }
     const now = new Date(), doneSet = getDoneSet();
     if (prefer === 'done')   return top.find(ev => doneSet.has(ev.id))  || top[0];
     if (prefer === 'undone') return top.find(ev => !doneSet.has(ev.id)) || top[0];
@@ -1108,6 +1130,19 @@ window.QuickNotes = (function () {
     const origMs = new Date(ev.end) - new Date(ev.start);
     let start = new Date(ev.start);
     if (opts.start) start.setHours(opts.start.h, opts.start.m, 0, 0);
+    // Cross-day move — relocate to a different calendar day, preserving the
+    // (possibly just-updated) time-of-day. Previously this function had NO
+    // way to change an event's day at all (only ever setHours() on the
+    // existing date), so "move it to Friday" silently failed to relocate
+    // anything even when the intent parsed correctly — the real root cause
+    // behind the pre-fix "Move it to Friday" bug, not Gemini availability.
+    // `opts.moveToDate` is always the DESTINATION (see the move_event/
+    // retime_event applyIntent case for why `date` never means "search this
+    // day" for this one action).
+    if (opts.moveToDate) {
+      const p = partsOf(opts.moveToDate);
+      start = new Date(p.y, p.m, p.d, start.getHours(), start.getMinutes(), 0, 0);
+    }
     let end = new Date(start.getTime() + origMs);
     if (opts.end) {
       end = new Date(start); end.setHours(opts.end.h, opts.end.m, 0, 0);
@@ -1117,14 +1152,28 @@ window.QuickNotes = (function () {
     if (opts.deltaMin != null) end = new Date(end.getTime() + opts.deltaMin * 60000);
     if (end <= start) end = new Date(start.getTime() + 5 * 60000);  // never zero/negative
     ev.start = toLocalISO(start); ev.end = toLocalISO(end);
-    // Only optimistically re-render the shared display when this IS the
-    // shared display's day — a different (concurrently-targeted) day isn't
-    // visible, so there's nothing to update; its cache self-corrects next
-    // time it's actually navigated to.
-    if (!dateStr || dateStr === selectedDate) { sortEvents(); renderEvents(currentEvents); }
     await patchEvent(ev, { startTime: ev.start, endTime: ev.end }, null);
+    // A same-day retime re-renders optimistically from the mutated in-memory
+    // object; a cross-day move needs a real refetch of the CURRENT day
+    // (Supabase is now authoritative), since the moved event must disappear
+    // from today's list, not just show a stale time under the wrong day.
+    const movedAway = opts.moveToDate && opts.moveToDate !== selectedDate;
+    if (movedAway) {
+      currentEvents = await fetchEventsForDate(selectedDate);
+      renderEvents(currentEvents);
+      markGridDot(selectedDate, currentEvents.length > 0);
+    } else if (!dateStr || dateStr === selectedDate) {
+      // Render the SAME array `ev` was mutated in (`events`, not necessarily
+      // `currentEvents` — a caller-supplied dateStr searches eventsByDate[dateStr],
+      // a separate array instance from currentEvents whenever it wasn't just
+      // populated by this exact renderEvents call). Rendering the wrong
+      // array would show the pre-mutation time until the next full reload.
+      events.sort((a, b) => new Date(a.start) - new Date(b.start));
+      renderEvents(events);
+    }
     return {
       ok: true, title: ev.title, when: fmtTime(ev.start), end: fmtTime(ev.end),
+      date: opts.moveToDate || null,
       durationMin: Math.round((end - start) / 60000),
     };
   }
@@ -1149,13 +1198,21 @@ window.QuickNotes = (function () {
   }
   // Rename a block in place via the proxy PATCH (same path the inline title edit
   // uses) — no delete+recreate dance, so id/time/notes are preserved untouched.
-  async function apiRenameEvent(match, newTitle) {
-    const ev = findEvent(match);
+  // `dateStr`, when given, targets a day other than whatever's currently
+  // selected — same request-scoped pattern apiCompleteEvent/apiUncheckEvent/
+  // apiDeleteEvent already use (Known Issue #22). Previously this function
+  // took no date at all and always searched `currentEvents`, so "rename my
+  // Friday meeting to X" silently failed to find anything whenever Friday
+  // wasn't the currently-viewed day — found during a Phase 3 adversarial
+  // pass, fixed at the root (the search scope) rather than special-cased.
+  async function apiRenameEvent(match, newTitle, dateStr) {
+    const events = (dateStr && eventsByDate[dateStr]) || currentEvents;
+    const ev = findEvent(match, undefined, events);
     if (!ev) return { ok: false };
     const title = String(newTitle || '').trim();
     if (!title) return { ok: false, noTitle: true };
     ev.title = title;
-    renderEvents(currentEvents);            // reflect instantly (display sentence-cases)
+    if (!dateStr || dateStr === selectedDate) renderEvents(currentEvents); // reflect instantly (display sentence-cases)
     await patchEvent(ev, { title }, null);  // reverts via loadEvents() on failure
     return { ok: true, title: ev.title };
   }
@@ -1269,6 +1326,7 @@ window.QuickNotes = (function () {
     renameEvent: apiRenameEvent,
     restoreEvent: apiRestoreEvent,
     wasLastMatchAmbiguous: () => { const v = lastMatchWasAmbiguous; lastMatchWasAmbiguous = false; return v; },
+    getAmbiguousCandidates: () => lastAmbiguousCandidates,
     fetchEventsForDate,
     matchTitle, fmtTime, fmtTitle: formatEventTitle,
   };
@@ -1438,8 +1496,21 @@ window.QuickNotes = (function () {
     const t = raw.toLowerCase();
     const iso = t.match(/\b(\d{4}-\d{2}-\d{2})\b/);
     if (iso) return iso[1];
-    if (/\btomorrow\b/.test(t)) {
+    // "tmrw"/"tmr" — common informal abbreviations. Without these, an
+    // unrecognized date word silently fell back to whatever day happened to
+    // be selected (not necessarily today) with the literal abbreviation left
+    // sitting in the stored title — a false-confidence risk (the "✓
+    // Scheduled" reply looks complete either way), not just a missed parse.
+    // Live-caught 2026-09-03 hardening pass.
+    if (/\b(tomorrow|tmrw|tmr)\b/.test(t)) {
       const d = new Date(); d.setDate(d.getDate() + 1);
+      return d.getFullYear() + '-' + padZ(d.getMonth() + 1) + '-' + padZ(d.getDate());
+    }
+    // "yesterday" — added for symmetry with "tomorrow" (Phase 3 adversarial
+    // pass found it entirely unhandled: "what did I train yesterday"/"what
+    // was on yesterday" had no way to resolve a date at all).
+    if (/\byesterday\b/.test(t)) {
+      const d = new Date(); d.setDate(d.getDate() - 1);
       return d.getFullYear() + '-' + padZ(d.getMonth() + 1) + '-' + padZ(d.getDate());
     }
     // "next Friday" / "this Monday" / bare "Friday" — deterministic weekday
@@ -1469,9 +1540,72 @@ window.QuickNotes = (function () {
     const t = raw.toLowerCase().trim();
     const date = resolveDate(raw);
 
+    // Gym-specific "what's my workout" question — must win over the generic
+    // Calendar summarize catch-all right below, which only knows about
+    // `events` and would otherwise answer "nothing on the calendar" even
+    // with a real routine scheduled for today (Known Issue #53's companion
+    // finding). Restricted to actual question phrasing (leading question
+    // word or a trailing "?", same shape as `isQuestion` below) so a real
+    // mutation like "move my workout to 4pm" is never misread as this.
+    // "show me my weekly routine" / "what's my routine this week" / "my
+    // routines" — reads the trainingDays schedule across every saved
+    // routine. Checked BEFORE gym_today (a live adversarial pass found
+    // "What's my routine this week?" answered as if asking about TODAY
+    // only — gym_today's broader "any question containing routine" trigger
+    // matched first and gym_week's own trigger required "week" to appear
+    // BEFORE "routine"/"schedule", which real phrasing doesn't reliably do).
+    // Order-independent now — but deliberately only "routine"/"split", NOT
+    // "schedule"/"plan": a second live pass caught the broadened trigger
+    // over-firing on "What's my schedule this week?" (a plainly calendar
+    // question) purely because "schedule" is domain-neutral, not a real
+    // gym signal the way "routine"/"split" are in this context.
+    if ((/\bweek(ly)?\b/i.test(t) && /\b(routine|split)s?\b/i.test(t)) || /\bmy routines\b/i.test(t)) {
+      return { action: 'gym_week' };
+    }
+    // Bare "training" (not just "training session") added after a Phase 4
+    // pass caught "What am I training today?" — a natural rephrasing of
+    // "what workout do I have today" — falling all the way through to
+    // Calendar's summarize and answering from unrelated events, silently
+    // ignoring the actual gym question. Still gated to real question
+    // phrasing, same as before, to keep the false-positive risk low.
+    if ((/^(what|which|how|is|are|do|does|did|have|has)\b/.test(t) || /\?\s*$/.test(raw.trim())) &&
+        /\b(workout|routine|training( session)?)s?\b/i.test(t)) {
+      return { action: 'gym_today', detail: /\bexercises?\b/i.test(t) };
+    }
+    // Gym routine AUTHORING/EDITING/DELETION — must win over Calendar's
+    // delete/retime verb regexes just below ("remove", "change", "move" are
+    // also gym vocabulary: "remove squats", "change bench press to 4
+    // sets") and over the generic add/create catch-all further down (Known
+    // Issue #53's original misrouting bug class). Restricted to phrasing
+    // with NO explicit clock time — "add gym at 5pm" / "move workout to
+    // 4pm" stay real calendar blocks (Known Issue #22), the same boundary
+    // the narrower guard this supersedes already enforced.
+    if (window.Shelron.Routines && !parseTime(t) && !parseTimeRange(raw)) {
+      const gymIntent = window.Shelron.Routines.parseIntent(raw, t, date);
+      if (gymIntent) return gymIntent;
+    }
     // summarize / greeting
     if (/^(summari[sz]e|recap|overview|brief)\b/.test(t) ||
-        /\b(what('?s| is)?|show|how('?s| is)?).*(today|tomorrow|tonight|schedule|day|plan|on|calendar|left)\b/.test(t) ||
+        // Known Issue: the trailing alternation had no leading \b, so "day"
+        // matched as a mid-word substring of "yesterday"/"someday"/
+        // "birthday" — found via a Phase 3 adversarial pass ("What did I
+        // train yesterday?" was silently answered as a generic "what's on
+        // today" summary). \b added before the group so each alternative
+        // only matches as a real, standalone word.
+        // Deliberately NOT including "yesterday" here — "what's on
+        // yesterday" already matches via "on"; adding "yesterday" itself
+        // would also catch "what did I TRAIN yesterday" (a gym question
+        // with no real answer today, no history-query capability exists)
+        // and confidently answer from an unrelated calendar day instead of
+        // honestly declining. resolveDate() still resolves "yesterday"
+        // wherever a date IS needed (delete/summarize-by-"on"/etc.).
+        // Explicit weekday names ALSO end in "day" and, unlike "yesterday",
+        // are a completely legitimate, common way to ask "what's on
+        // Thursday" — the \b fix above accidentally excluded them too
+        // (caught live: "What do I have Thursday?" stopped matching at
+        // all). Listed explicitly rather than restoring the loose "day"
+        // substring match that caused the original bug.
+        /\b(what('?s| is)?|show|how('?s| is)?).*\b(today|tomorrow|tonight|schedule|day|plan|on|calendar|left|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(t) ||
         /^(good\s+(morning|afternoon|evening)|hi|hey|hello)\b/.test(t)) {
       return { action: 'summarize', date };
     }
@@ -1525,16 +1659,97 @@ window.QuickNotes = (function () {
     // back to creation when no block matches.
     const A = window.AptCal;
     // Words that aren't part of a block title — dropped before fuzzy matching.
-    const FILLER = /\b(the|my|a|an|that|this|please|it|i|just|to|item|entry|event|block|task|as|off|for|on|today|tonight|tomorrow|already|done|complete[d]?|finished?)\b/gi;
+    const FILLER = /\b(the|my|a|an|that|this|please|it|i|just|to|item|entry|event|block|task|as|off|for|on|today|tonight|tomorrow|tmrw|tmr|already|done|complete[d]?|finished?)\b/gi;
     const phraseFrom = (re) => raw.replace(re, ' ').replace(FILLER, ' ').replace(/\s+/g, ' ').trim();
     const resolve = (phrase) => (A && A.matchTitle ? A.matchTitle(phrase) : null);
     // Coreference: a phrase that is empty or just a pronoun ("it", "that",
     // "this task", "the event") refers back to the last event acted on.
     const PRONOUN_ONLY = /^(it|that|this|this (task|event|one)|the (task|event|one))$/i;
+    // "Move it to Thursday"/"Delete it tomorrow": the RETIME/DELETE/CHECK/
+    // UNCHECK branches don't strip weekday names or "tomorrow" from their
+    // own phrase extraction (only FILLER's today/tonight/tomorrow are
+    // covered, and RETIME's own stripping doesn't even use FILLER) — so the
+    // phrase reaching coref() was "it thursday", which fails the exact
+    // PRONOUN_ONLY test and silently falls through to a literal (and
+    // doomed) search for an event titled "it thursday". A live adversarial
+    // pass caught this; an EARLIER live test had appeared to work only by
+    // coincidence (the test event's title happened to contain "audit",
+    // whose trailing "it" gave a false-positive weak substring match — not
+    // genuine coreference at all). Stripped here, once, so every caller of
+    // coref() benefits without duplicating this list at each call site.
+    const DATE_WORDS_IN_PHRASE = /\b(tomorrow|tonight|today|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi;
     const coref = (phrase) => {
       const p = (phrase || '').trim();
-      return ((!p || PRONOUN_ONLY.test(p)) && lastMentionedEventTaskName) ? lastMentionedEventTaskName : p;
+      // A completely ordinary "Delete it." (trailing sentence punctuation)
+      // left FILLER-stripping with a lone "." — which fails the exact
+      // PRONOUN_ONLY test just like the unstripped date words above did.
+      // Found live via a compound command's final clause ("...then delete
+      // it.") but confirmed general: a single plain "Delete it." has the
+      // identical failure, nothing compound-specific about it.
+      const pForPronounCheck = p.replace(DATE_WORDS_IN_PHRASE, ' ').replace(/[.!?,;:]+$/, '').replace(/\s+/g, ' ').trim();
+      return ((!pForPronounCheck || PRONOUN_ONLY.test(pForPronounCheck)) && lastMentionedEventTaskName) ? lastMentionedEventTaskName : p;
     };
+    // Known Issue #24/E8b, closed: resolve a phrase to a real title AND, in
+    // the same call, capture whether that resolution was a genuine tie —
+    // read immediately after resolve() runs (findEvent sets the flag/
+    // candidates synchronously, before resolve() returns), so this always
+    // reflects THIS call, never a stale one. Every mutating branch below
+    // uses this instead of a bare `resolve(phrase) || phrase`, so the
+    // returned intent itself carries `ambiguous`/`ambiguousCandidates` —
+    // applyIntent asks for clarification instead of mutating when set,
+    // rather than guessing via findEvent's own tie-break and disclosing
+    // only after the fact.
+    const resolveWithAmbiguity = (phrase) => {
+      const title = resolve(phrase);
+      const ambiguous = A.wasLastMatchAmbiguous();
+      const candidates = ambiguous ? A.getAmbiguousCandidates() : [];
+      return { match: title || phrase, found: !!title, ambiguous, candidates };
+    };
+    // A message that clearly OPENS with a create-intent verb ("Add SHENLONG_TEST
+    // check-in at 3pm") must never be hijacked by a mutation branch just
+    // because a trigger word ("check") happens to appear inside the intended
+    // TITLE. A live adversarial pass caught exactly this: "check-in" in a new
+    // event's title matched the CHECK/complete_event branch (checked before
+    // ADD), which fuzzy-matched and completed/moved an unrelated REAL event
+    // instead of creating the intended one — a genuinely dangerous class of
+    // bug (any of check/uncheck/delete/retime's trigger words appearing
+    // inside a title text: "check-in", "clearance meeting", "pushup club",
+    // "changeover review" ...). Guards UNCHECK/CHECK/DELETE/RETIME below,
+    // NOT rename/recover (both require a much more specific full-sentence
+    // pattern, not a bare trigger word, so a title collision can't fire them).
+    //
+    // SHENLONG P0 (2026-09-08, live-verified): the `^`-anchor above only
+    // recognized the create verb as the message's literal first word, so any
+    // ordinary request framing ("Please add...", "Can you schedule...", "I'd
+    // like to create...") left clearlyAddIntent false — reopening exactly the
+    // hijack this guard exists to prevent. Live reproduction: "Please add a
+    // check-in about X tomorrow at 6am" never reached the ADD branch at all;
+    // it silently marked an unrelated existing event complete instead,
+    // reporting a confident "✓ Awesome" success.
+    //
+    // Fixed by stripping a small, fully-enumerated whitelist of request
+    // framings from the START of the message before re-testing the same
+    // anchor — never applied to phrase/title extraction, so the fix only
+    // widens what counts as "clearly opens with a create verb," it never
+    // weakens the anchor itself. A rename/delete/complete/move/mark command,
+    // or a quoted title, does not open with "please"/"can you"/"could you"/
+    // "would you"/"I'd like to"/"I want to"/"I need you to" immediately
+    // followed by add/schedule/create/... — so none of those can accidentally
+    // satisfy this test; only an actual polite creation request can. Looped a
+    // few times so stacked framings ("Please, could you add...") resolve.
+    const ADD_INTENT_LEAD_INS = [
+      /^please[,]?\s+/i,
+      /^(?:can|could|would|will)\s+you\s+(?:please[,]?\s+)?/i,
+      /^i(?:'d|\s+would)?\s+like\s+(?:you\s+)?to\s+/i,
+      /^i\s+(?:want|need)\s+(?:you\s+)?to\s+/i,
+    ];
+    let tForAddIntent = t;
+    for (let pass = 0; pass < 3; pass++) {
+      const before = tForAddIntent;
+      for (const re of ADD_INTENT_LEAD_INS) tForAddIntent = tForAddIntent.replace(re, '');
+      if (tForAddIntent === before) break;
+    }
+    const clearlyAddIntent = /^(add|schedule|create|new|remind(er)?|set up|block)\b/i.test(tForAddIntent);
 
     // RENAME — change an existing block's title. Checked before re-time / delete
     // / add so "change the name of X to Y" is read as a title edit (there's no
@@ -1554,7 +1769,10 @@ window.QuickNotes = (function () {
             .replace(/^["'“”`]+|["'“”`]+$/g, '')       // wrapping quotes
             .trim()
         );
-        if (newTitle) return { action: 'rename_event', match: resolve(target) || target, newTitle };
+        if (newTitle) {
+          const r = resolveWithAmbiguity(target);
+          return { action: 'rename_event', match: r.match, newTitle, date, ambiguous: r.ambiguous, ambiguousCandidates: r.candidates };
+        }
       }
     }
 
@@ -1573,31 +1791,35 @@ window.QuickNotes = (function () {
       return { action: 'restore_event', match: phrase || null };
     }
     // UNCHECK / unmark / incomplete  → toggle done:false
-    if (/\b(uncheck|unmark|un-?mark|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t)) {
+    if (!clearlyAddIntent && (/\b(uncheck|unmark|un-?mark|incomplete|untick|unticked)\b/.test(t) || /\bnot\s+done\b/.test(t))) {
       const phrase = coref(phraseFrom(/\b(uncheck|unmark|un-?mark|incomplete|untick(ed)?|not\s+done)\b/gi));
-      const title = resolve(phrase);
-      if (title) return { action: 'uncheck_event', match: title, date };
+      const r = resolveWithAmbiguity(phrase);
+      if (r.found) return { action: 'uncheck_event', match: r.match, date, ambiguous: r.ambiguous, ambiguousCandidates: r.candidates };
       if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null, date };
     }
     // CHECK / complete / finish / done / tick / "log that I…"  → toggle done:true
-    if (/\b(check(\s*off)?|complete[d]?|finish(ed)?|done|tick(ed)?)\b/.test(t) ||
-        /\bmark\b[\s\S]*\b(done|complete[d]?)\b/.test(t) || /^log\s+(that\s+)?i\b/.test(t)) {
+    if (!clearlyAddIntent && (/\b(check(\s*off)?|complete[d]?|finish(ed)?|done|tick(ed)?)\b/.test(t) ||
+        /\bmark\b[\s\S]*\b(done|complete[d]?)\b/.test(t) || /^log\s+(that\s+)?i\b/.test(t))) {
       const phrase = coref(phraseFrom(/\b(log|check(\s*off)?|checkoff|complete[d]?|finish(ed)?|done|tick(ed)?|mark|did)\b/gi));
-      const title = resolve(phrase);
-      if (title) return { action: 'complete_event', match: title, date };
+      const r = resolveWithAmbiguity(phrase);
+      if (r.found) return { action: 'complete_event', match: r.match, date, ambiguous: r.ambiguous, ambiguousCandidates: r.candidates };
       if (phrase) return { action: 'add_event', title: cleanTitle(phrase), time: parseTime(t), durationMin: null, date };
     }
     // DELETE / remove / cancel  → remove the block entirely
-    if (/\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
+    if (!clearlyAddIntent && /\b(delete|remove|cancel|clear|drop)\b/.test(t)) {
       const phrase = coref(phraseFrom(/\b(delete|remove|cancel|clear|drop)\b/gi));
-      return { action: 'delete_event', match: resolve(phrase) || phrase, date };
+      const r = resolveWithAmbiguity(phrase);
+      return { action: 'delete_event', match: r.match, date, ambiguous: r.ambiguous, ambiguousCandidates: r.candidates };
     }
     // RE-TIME — move / reschedule / shift / reduce / extend / shorten / lengthen.
     // Pulls the task name + any time(s) or duration so it can recompute start AND
     // end of the block. A range ("10pm to 12am") sets both; a single time shifts;
     // "by/to N min|hr" resizes. "set"/"make" are excluded (they collide with the
-    // "set up" create verb). The branch only fires when a time/duration is given.
-    if (/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/.test(t)) {
+    // "set up" create verb). The branch fires when a time/duration is given, OR
+    // when only a date is given ("move it to Friday") — a date-only cross-day
+    // move, previously unsupported (the retime mechanics had no notion of
+    // changing an event's day at all — see apiRetimeEvent's opts.moveToDate).
+    if (!clearlyAddIntent && /\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/.test(t)) {
       // Prefer an explicit "X to Y" range (handles bare 24h hours like "22 to
       // 23:30"); fall back to the looser am/pm/colon scanner for "10pm to 12am".
       const range = parseTimeRange(t);
@@ -1605,7 +1827,7 @@ window.QuickNotes = (function () {
       const byMatch = t.match(/\bby\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
       const toDur = !range && t.match(/\bto\s+(\d+)\s*(min|minute|hour|hr)s?\b/);
       const conv = (mm) => (/hour|hr/.test(mm[2]) ? +mm[1] * 60 : +mm[1]);
-      if (times.length || byMatch || toDur) {
+      if (times.length || byMatch || toDur || date) {
         let stripped = raw.replace(/\b(move|reschedule|resched|shift|push|change|reduce|extend|shorten|lengthen|resize)\b/gi, ' ');
         if (range) stripped = stripped.replace(range.raw, ' ');
         const phrase = coref(stripped
@@ -1613,7 +1835,8 @@ window.QuickNotes = (function () {
           .replace(TIME_TOKENS, ' ')
           .replace(/\b(my|the|a|an)\b/gi, ' ')
           .replace(/\s+/g, ' ').trim());
-        const out = { action: 'retime_event', match: resolve(phrase) || phrase, date };
+        const r = resolveWithAmbiguity(phrase);
+        const out = { action: 'retime_event', match: r.match, date, ambiguous: r.ambiguous, ambiguousCandidates: r.candidates };
         if (times.length >= 2) { out.time = times[0]; out.endTime = times[1]; }
         else if (times.length === 1) { out.time = times[0]; }
         if (times.length < 2) {
@@ -1626,6 +1849,22 @@ window.QuickNotes = (function () {
     // ADD / schedule / remind (broad — LAST). "book" is intentionally NOT a
     // trigger: it collides with real titles like "read a book".
     if (/\b(add|schedule|create|new|remind(er)?|set up|block)\b/.test(t)) {
+      // Known Issue #53: this broad add/create match has no domain check, so a
+      // routine-authoring request ("Create a 3-day workout routine", "Add
+      // Bench Press to Monday") used to fall straight into add_event, which
+      // then asked "when should I schedule '<the whole sentence>'?" — an
+      // unsupported Gym operation silently became a Calendar one. Shenlong has
+      // no capability to create or edit routines (that's the Routine Builder's
+      // job, js/gym/routine-builder.js) — decline honestly instead of
+      // proposing a bogus calendar event. Deliberately narrow: bare "gym"/
+      // "workout" (e.g. "add gym at 5pm", "move workout to 4pm") are real,
+      // pre-existing, intentional calendar-block titles (Known Issue #22's
+      // fix) and must keep working — only fire on vocabulary that specifically
+      // signals routine construction, not just a gym-flavored calendar block.
+      const ROUTINE_AUTHORING = /\b(routine|workout plan|exercises?|reps?|sets?|bench(\s*press)?|squat|deadlift|leg day|push day|pull day|hypertrophy)\b/i;
+      if (ROUTINE_AUTHORING.test(t) && !parseTime(t) && !parseTimeRange(raw)) {
+        return { action: 'gym_unsupported' };
+      }
       // A "X to Y" range ("22 to 23:30") wins: it pins start + auto-duration and
       // is excised whole from the title so no clock fragment leaks through.
       const range = parseTimeRange(raw);
@@ -1644,7 +1883,16 @@ window.QuickNotes = (function () {
         .replace(/\bfrom\b/gi, ' ')
         .replace(/\bat\b\s*[\d:apm\s]+/i, '')
         .replace(/\bfor\b\s*\d+\s*(min|minute|hour|hr)s?/i, '')
-        .replace(/\b(today|tomorrow|tonight|this (morning|afternoon|evening))\b/gi, '')
+        // A leading "for"/"on"/"in" immediately before a date reference is a
+        // connector, not part of the title — consumed along with the date
+        // word itself so it doesn't leak through as a dangling preposition
+        // ("...call for tomorrow at 2pm" → title "...call for", live-caught
+        // 2026-09-03). Weekday names (with the same optional connector, plus
+        // "next"/"this") get the identical treatment — previously not
+        // stripped from the title at all ("...dinner on Friday at 7pm" →
+        // title "...dinner on Friday", also live-caught the same pass).
+        .replace(/\b(?:(?:for|on|in|to)\s+)?(today|tomorrow|tmrw|tmr|tonight|this (morning|afternoon|evening))\b/gi, '')
+        .replace(/\b(?:(?:for|on|in|to)\s+)?(?:next\s+|this\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi, '')
         .replace(/\b\d{4}-\d{2}-\d{2}\b/g, '')
         .replace(/\s+/g, ' ').trim()
         .replace(/\b(event|block)s?\s*$/i, '')   // drop a dangling connector noun
@@ -1697,6 +1945,22 @@ window.QuickNotes = (function () {
   // ── apply a structured intent (from local parser OR Gemini) ──────────────────
   async function applyIntent(intent) {
     const A = window.AptCal;
+    // Known Issue #24/E8b, closed: ask before mutating on a genuine tie,
+    // instead of guessing via findEvent's tie-break and only disclosing
+    // afterward. `parseLocal`'s rename/complete/uncheck/delete/retime
+    // branches now attach `ambiguous`/`ambiguousCandidates` themselves
+    // (right after their own resolve() call finds the tie) — checked here,
+    // once, before any of those five cases below ever calls a mutating
+    // AptCal method, so this covers all five without duplicating the check.
+    // A Gemini-sourced intent (no `ambiguous` field at all) is unaffected —
+    // falls through to the switch exactly as before.
+    if (intent.ambiguous && Array.isArray(intent.ambiguousCandidates) && intent.ambiguousCandidates.length > 1) {
+      const list = intent.ambiguousCandidates
+        .map((ev) => '“' + ev.title + '” (' + A.fmtTime(ev.start) + (ev.allDay ? '' : ' – ' + A.fmtTime(ev.end)) + ')')
+        .join(', ');
+      addMsg('ai', "More than one event matches that — which one did you mean? " + list + '.');
+      return;
+    }
     // Accept times as {h,m} (local parser) or "HH:MM"/"4pm" strings (Gemini).
     // A malformed "HH:MM" (e.g. Gemini hallucinating "30:99") is rejected here
     // the same way parseTime() rejects one locally — Known Issue #16.
@@ -1734,6 +1998,141 @@ window.QuickNotes = (function () {
     }
 
     switch (intent.action) {
+      // Known Issue #53 — no mutation, no calendar fallback. Honest refusal
+      // for a capability Shenlong genuinely doesn't have yet; points at the
+      // one surface that actually can do this.
+      // Recognized as gym-flavored (routine/exercise/sets vocabulary) but
+      // didn't match any of the specific ops Shenlong actually supports —
+      // NOT "no routine capability exists" (that framing went stale the
+      // moment real create/add/remove/set-sets/assign-day/delete shipped,
+      // v0.8). Points at the concrete phrasings that DO work instead of a
+      // blanket "yet".
+      case 'gym_unsupported':
+        addMsg('ai', "I'm not sure what to change. I can create a routine (\"Monday chest and triceps\"), add/remove an exercise (\"add bench press to Monday\"), change sets (\"change bench press to 4 sets\"), or delete a routine (\"delete my Friday routine\") — or open the Routine Builder on the Gym page for anything more involved.");
+        return;
+
+      // Known Issue #53's companion finding — grounded in the same two
+      // read-only sources the Gym page itself uses (a scheduled-by-weekday
+      // routine, or an already in-progress session), never invented.
+      case 'gym_today': {
+        const scheduledName = todaysScheduledRoutineName();
+        const gym = todayGymSummary();
+        if (gym && gym.workoutInProgress) {
+          addMsg('ai', 'You have an open ' + (gym.pinnedRoutineName || 'workout') + ' session — ' +
+            gym.setsLoggedInOpenSession + ' set' + (gym.setsLoggedInOpenSession === 1 ? '' : 's') + ' logged so far. Resume when ready.');
+        } else if (scheduledName) {
+          // "What EXERCISES do I have today?" gets the actual exercise list
+          // (grounded in the real routine object), not just its name.
+          if (intent.detail && window.Shelron.Routines) {
+            const routines = window.Shelron.Routines.getRoutines();
+            const r = routines.find((x) => x.name === scheduledName);
+            const names = r ? (r.exercises || []).map((e) => e.name) : [];
+            addMsg('ai', names.length
+              ? 'Today’s "' + scheduledName + '" routine: ' + names.join(', ') + '.'
+              : 'Today’s scheduled routine is "' + scheduledName + '", but it has no exercises added yet.');
+          } else {
+            addMsg('ai', 'Today’s scheduled routine is "' + scheduledName + '".');
+          }
+        } else {
+          addMsg('ai', 'Nothing scheduled for today in your routines. Want me to check the calendar instead?');
+        }
+        return;
+      }
+
+      case 'gym_week': {
+        if (!window.Shelron.Routines) { addMsg('ai', "I can't reach the routine data right now."); return; }
+        const week = window.Shelron.Routines.readWeek();
+        if (!week.scheduled.length) {
+          addMsg('ai', week.totalRoutines
+            ? "You have " + week.totalRoutines + " routine" + (week.totalRoutines === 1 ? '' : 's') + " saved, but none are scheduled to specific days yet."
+            : "You don't have any routines saved yet.");
+          return;
+        }
+        const lines = week.scheduled.map((d) => d.label + ': ' + d.routine.name);
+        addMsg('ai', 'Your weekly routine schedule — ' + lines.join('; ') + '.');
+        return;
+      }
+
+      // A recognized gym-authoring request that genuinely needs more
+      // information before anything can be created/changed — asks instead
+      // of guessing (never fabricates exercises or a schedule the user
+      // didn't specify), and is also how "move it to Friday"/"delete the
+      // workout"-style bare gym-vs-calendar ambiguity gets resolved without
+      // silently picking a domain.
+      case 'gym_clarify':
+        addMsg('ai', intent.question || 'Could you say a bit more about what you want?');
+        return;
+
+      // Known Issue #53's open half, closed: real routine create/add/
+      // remove/set-sets/delete, dispatched to window.Shelron.Routines —
+      // the deterministic write bridge (js/shelron/routine-authoring.js).
+      // Every branch below reports based on the ACTUAL result of that
+      // write, never an assumed success.
+      case 'gym_routine_op': {
+        if (!window.Shelron.Routines) { addMsg('ai', "I can't reach the routine data right now."); return; }
+        const result = await window.Shelron.Routines.apply(intent);
+        const op = intent.op;
+        // A live adversarial pass caught "Create X and add Y, then move it
+        // to Z" silently only doing the create, with the confirmation
+        // giving no hint that "add Y"/"move it to Z" never happened.
+        // Compound gym ops genuinely aren't supported yet (a real future
+        // capability, not an inline special case) — disclose it instead of
+        // letting a partial result read as a complete one.
+        const compoundNote = op.hasUnexecutedCompoundStep
+          ? ' (I only handled the first part of that — send the rest as its own message.)' : '';
+        if (op.kind === 'create_multi') {
+          if (!result.ok) { addMsg('ai', result.reason === 'catalog_unavailable' ? "I can't reach the exercise library right now — try again in a moment." : "That didn't work."); return; }
+          const parts = result.created.map((r) => {
+            const day = r.trainingDays[0] ? ' (' + window.Shelron.Routines.dayLabel(r.trainingDays[0]) + ')' : ' (unscheduled)';
+            return '"' + r.name + '"' + day + ' — ' + r.exercises.map((e) => e.name).join(', ');
+          });
+          addMsg('ai', '✓ Created ' + result.created.length + ' routine' + (result.created.length === 1 ? '' : 's') + ': ' + parts.join('; ') + '.' +
+            (result.cloudSynced ? '' : ' (saved locally — will sync once the connection is back.)') + compoundNote);
+          return;
+        }
+        if (op.kind === 'assign_day') {
+          if (!result.ok) { addMsg('ai', "That didn't work."); return; }
+          addMsg('ai', '✓ ' + window.Shelron.Routines.dayLabel(op.day) + ' is now your "' + result.routine.name + '" day: ' +
+            result.routine.exercises.map((e) => e.name).join(', ') + '.');
+          return;
+        }
+        if (op.kind === 'add_exercise') {
+          if (!result.ok) {
+            if (result.reason === 'exercise_not_found') addMsg('ai', "I couldn't find \"" + op.exerciseQuery + '" in the exercise library — try a more common name (e.g. "bench press").');
+            else if (result.reason === 'no_routine_for_day') addMsg('ai', "You don't have a routine scheduled for " + window.Shelron.Routines.dayLabel(op.day) + " yet — want me to create one first?");
+            else if (result.reason === 'already_present') addMsg('ai', '"' + result.exerciseName + '" is already in "' + result.routine.name + '".');
+            else addMsg('ai', "I'm not sure which routine to add that to — try naming a day, e.g. \"add bench press to Monday\".");
+            return;
+          }
+          addMsg('ai', '✓ Added "' + result.exerciseName + '" to "' + result.routine.name + '".');
+          return;
+        }
+        if (op.kind === 'remove_exercise') {
+          if (!result.ok) { addMsg('ai', "I couldn't find \"" + op.exerciseQuery + '" in your routines.'); return; }
+          addMsg('ai', '✓ Removed "' + result.exerciseName + '" from "' + result.routine.name + '".');
+          return;
+        }
+        if (op.kind === 'set_sets') {
+          if (!result.ok) {
+            if (result.reason === 'ambiguous_routine') {
+              addMsg('ai', '"' + result.exerciseName + '" is in more than one routine (' + result.candidates.join(', ') + ') — which one? Try "change bench press to 4 sets on Monday".');
+            } else {
+              addMsg('ai', "I couldn't find \"" + op.exerciseQuery + '" in your routines.');
+            }
+            return;
+          }
+          addMsg('ai', '✓ "' + result.exerciseName + '" is now ' + result.count + ' sets in "' + result.routine.name + '".');
+          return;
+        }
+        if (op.kind === 'delete_routine') {
+          if (!result.ok) { addMsg('ai', "I'm not sure which routine to delete — try naming a day, e.g. \"delete my Friday routine\"."); return; }
+          addMsg('ai', '✓ Deleted "' + result.name + '".');
+          return;
+        }
+        addMsg('ai', "That didn't work.");
+        return;
+      }
+
       case 'summarize':
         if (!(await ensureDate(intent.date)).ok) return;
         addMsg('ai', A.summarize());
@@ -1774,18 +2173,46 @@ window.QuickNotes = (function () {
         if (intent.endTime) opts.end = asTime(intent.endTime);
         if (intent.durationMin != null) opts.durationMin = intent.durationMin;
         if (intent.deltaMin != null) opts.deltaMin = intent.deltaMin;
-        if (!opts.start && !opts.end && opts.durationMin == null && opts.deltaMin == null) {
-          addMsg('ai', 'Re-time it to when? Try “move workout to 4pm” or “reduce film 10pm to 12am”.');
+        // `intent.date` on a move/retime is always the DESTINATION day —
+        // "move it to Friday" relocates the event; it never means "search
+        // Friday for a match." The match itself always resolves against
+        // whatever's currently loaded (selectedDate/currentEvents) plus
+        // pronoun memory (lastMentionedEventTaskName), exactly like every
+        // other mutating action. This is a deliberate simplification of a
+        // genuinely ambiguous phrase ("move the Friday meeting to 5pm" could
+        // theoretically mean "search Friday" instead) — chosen because every
+        // required test phrasing ("move it to Friday", "move my meeting to
+        // Friday") reads as a destination, and a single consistent rule
+        // beats a second, harder-to-predict heuristic.
+        if (intent.date) {
+          if (!window.Shelron.Intent.isValidCalendarDate(intent.date)) {
+            addMsg('ai', "That doesn't look like a valid date.");
+            return;
+          }
+          opts.moveToDate = intent.date;
+        }
+        if (!opts.start && !opts.end && opts.durationMin == null && opts.deltaMin == null && !opts.moveToDate) {
+          addMsg('ai', 'Re-time it to when? Try “move workout to 4pm” or “move it to Friday”.');
           return;
         }
-        const d2 = await ensureDate(intent.date);
-        if (!d2.ok) return;
+        if (!intent.match) {
+          addMsg('ai', "I'm not sure which event you mean — try naming it, e.g. “move the dentist appointment to Friday”.");
+          return;
+        }
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to re-time that."); return; }
-        const r = await A.retimeEvent(intent.match, opts, d2.date);
+        // Refresh the current day before searching (Known Issue #22's
+        // freshness guarantee, preserved even though `date` no longer means
+        // "which day to search") — then search that same freshly-fetched day.
+        const searchDate = A.getSelectedDate();
+        await A.fetchEventsForDate(searchDate);
+        const r = await A.retimeEvent(intent.match, opts, searchDate);
         const ambiguous = A.wasLastMatchAmbiguous();
         if (r.ok) remember(r.title);
+        const dayPrefix = r.ok && r.date
+          ? new Date(r.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) + ' at '
+          : '';
         addMsg('ai', r.ok
-          ? '✓ Updated “' + r.title + '” → ' + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
+          ? '✓ Moved “' + r.title + '” → ' + dayPrefix + r.when + '–' + r.end + ' (' + r.durationMin + ' min).'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
         if (r.ok && ambiguous) addMsg('ai', 'More than one event matched that -- I used the most likely one.');
         return;
@@ -1796,7 +2223,12 @@ window.QuickNotes = (function () {
         const next = intent.newTitle || intent.title;
         if (!next) { addMsg('ai', 'What should I rename it to?'); return; }
         if (A.isOffline()) { addMsg('ai', "I can't reach the calendar (proxy offline) to rename that."); return; }
-        const r = await A.renameEvent(intent.match, next);
+        // `intent.date`, when present, is the day to SEARCH (renaming has no
+        // "destination" concept, unlike move/retime) — same convention as
+        // complete_event/uncheck_event/delete_event below.
+        const d0 = await ensureDate(intent.date);
+        if (!d0.ok) return;
+        const r = await A.renameEvent(intent.match, next, d0.date);
         if (r.ok) { remember(r.title); addMsg('ai', '✓ Renamed event to “' + A.fmtTitle(r.title) + '”.'); }
         else addMsg('ai', r.noTitle ? 'What should I rename it to?'
           : "I couldn't find an event matching “" + (intent.match || '') + '”.');
@@ -1919,11 +2351,74 @@ window.QuickNotes = (function () {
   // that merely contains "and"/"then" (e.g. "add read a book and relax") and we
   // fall back to parsing the whole message intact.
   const CLAUSE_SPLIT = /\s*(?:,\s*(?:and|then)?\s+|\band\s+then\b|\bthen\b|\band\b|;|&|\+|\balso\b)\s*/i;
-  function parseCompound(msg) {
+  // Gym compound commands ("Create my Monday routine, add bench press, make
+  // it four sets, then rename it") previously always ran only the first
+  // recognized op, silently — gym-flavored messages bypass parseCompound
+  // below entirely (see its own comment), and Shelron.Routines' parseIntent
+  // never executes more than one op per call. Deliberately narrow fix:
+  // requires an explicit "then" — a comma/bare-"and" alone stays reserved
+  // for the multi-day CREATE pattern ("Monday chest and triceps, Wednesday
+  // back and biceps"), which has no verb per segment and would misparse if
+  // split. "then" is the one connector a genuine multi-day create phrase
+  // never uses, so it's a safe, unambiguous "these are separate steps"
+  // signal. Real future work is full compound support without requiring
+  // "then" specifically — tracked as a known scope limit, not solved here.
+  function parseGymCompound(msg) {
+    if (!(window.Shelron.Routines && window.Shelron.Routines.looksLikeGymRequest(msg))) return null;
+    if (!/\bthen\b/i.test(msg)) return null;
     const clauses = msg.split(CLAUSE_SPLIT).map(s => s.trim()).filter(Boolean);
     if (clauses.length < 2) return null;
+    // Same "count real intents, discard the parse" pattern parseCompound
+    // uses below — the clauses are what's returned/executed, re-parsed
+    // fresh right before each is applied (same reasoning as the pronoun-
+    // staleness fix: a later clause's "it"/day context must see the effect
+    // of an earlier clause actually running, not a snapshot from before
+    // any of them ran). EVERY clause must independently show a real gym
+    // signal — not just 2 of them — or this reverts to non-compound
+    // handling entirely. Found live: "Create a Monday chest routine and add
+    // bench press, then move it to Wednesday" split into 3 clauses, but
+    // clause 3 ("move it to Wednesday") carries no gym vocabulary of its
+    // own (a bare pronoun) — gym has no "move THIS routine" op at all, so
+    // that clause fell through to CALENDAR's own retime branch instead,
+    // meaning a gym compound command could leak into mutating an unrelated
+    // real calendar event via a coincidentally-matching "it". Requiring
+    // 100% of clauses to be gym-valid means a message like this simply
+    // isn't treated as compound at all (falls back to the single-message
+    // path, same disclosed "only handled the first part" behavior as
+    // before) rather than guessing which domain a stray clause belongs to.
+    const validCount = clauses.filter((c) => {
+      const it = parseLocal(c);
+      return it && (it.action === 'gym_routine_op' || it.action === 'gym_clarify');
+    }).length;
+    return (validCount >= 2 && validCount === clauses.length) ? clauses : null;
+  }
+  function parseCompound(msg) {
+    // A gym-authoring request legitimately uses commas/"and" as ITS OWN
+    // day/muscle-group separators ("Monday chest and triceps, Wednesday
+    // back and biceps, Friday legs") — splitting it here would shred it
+    // into fragments too small for Shelron.Routines' parser to recognize as
+    // one coherent multi-day request (each fragment would either build an
+    // incomplete routine or silently decline). Handled as ONE clause via
+    // the normal parseLocal(msg) path below instead — never split here.
+    if (window.Shelron.Routines && window.Shelron.Routines.looksLikeGymRequest(msg)) return null;
+    const clauses = msg.split(CLAUSE_SPLIT).map(s => s.trim()).filter(Boolean);
+    if (clauses.length < 2) return null;
+    // Only used to DECIDE whether this message is genuinely multi-intent
+    // (>=2 clauses each independently parse to something) — the CLAUSES are
+    // returned, not this parse's results. A Phase 4 adversarial pass found
+    // that returning the pre-parsed intents here made every pronoun in a
+    // compound command resolve against STALE context: "Create X, rename it,
+    // move it to Friday, then delete it" parsed ALL FOUR clauses up front,
+    // before clause 1 had even run — so "it" in clauses 2-4 could never see
+    // clause 1's just-created title (remember() only fires during apply,
+    // which hadn't happened yet for any clause). Every clause after the
+    // first silently failed with an empty or stale match. Clauses are
+    // re-parsed one at a time, interleaved with applying them, in handle()
+    // below — this pre-check's own parse is discarded, kept only as the
+    // cheap gate that stops "add read a book and relax" (one real intent
+    // that merely contains "and") from being misread as compound at all.
     const intents = clauses.map(c => parseLocal(c)).filter(Boolean);
-    return intents.length >= 2 ? intents : null;
+    return intents.length >= 2 ? clauses : null;
   }
 
   // ── submit flow ──────────────────────────────────────────────────────────────
@@ -1933,11 +2428,33 @@ window.QuickNotes = (function () {
     if (!msg || busy) return;
     busy = true; setSummoning(true);
     addMsg('user', msg);
+    // Gym compound commands (explicit "then" only — see parseGymCompound's
+    // own comment) checked first, same interleaved re-parse-then-apply
+    // pattern as the calendar compound loop below. Stops after a clause
+    // that comes back needing clarification — continuing past that would
+    // mean guessing at exactly the thing the user was just asked about.
+    const gymCompoundClauses = parseGymCompound(msg);
+    if (gymCompoundClauses) {
+      for (const c of gymCompoundClauses) {
+        const it = parseLocal(c);
+        if (!it) continue;
+        try { await applyIntent(it); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
+        if (it.action === 'gym_clarify') break;
+      }
+      busy = false; setSummoning(false); return;
+    }
     // Multi-intent corrections first: applying a restore BEFORE a delete is what
     // stops "recover X and delete Y" from collapsing into a second deletion.
-    const compound = parseCompound(msg);
-    if (compound) {
-      for (const it of compound) {
+    const compoundClauses = parseCompound(msg);
+    if (compoundClauses) {
+      for (const c of compoundClauses) {
+        // Re-parse HERE, not earlier — pronoun/coreference state
+        // (lastMentionedEventTaskName, Shelron.Routines' own lastRoutineRef)
+        // only updates as each clause is actually applied, so "rename it"/
+        // "move it"/"delete it" in clause 2+ needs clause 1's real effect,
+        // not whatever the parser saw before this whole message arrived.
+        const it = parseLocal(c);
+        if (!it) continue; // this exact clause didn't reparse to anything actionable; skip, don't crash the rest
         try { await applyIntent(it); } catch (e) { addMsg('ai', 'Something went wrong handling that.'); }
       }
       busy = false; setSummoning(false); return;
