@@ -74,6 +74,10 @@ async function routines() {
   return page.evaluate(() => { try { return JSON.parse(localStorage.getItem('rb_routines_v1')) || []; } catch (e) { return []; } });
 }
 async function clearRoutines() { await page.evaluate(() => localStorage.removeItem('rb_routines_v1')); }
+// Existing test hook (routine-authoring.js's own `forgetLastRoutine`) — resets
+// the module's domain-scoped coreference pointer without touching storage,
+// so a "no context" case can be tested without a page reload.
+async function forgetLastRoutine() { await page.evaluate(() => window.Shelron.Routines.forgetLastRoutine()); }
 const TODAY_CODE = ['sun','mon','tue','wed','thu','fri','sat'][new Date().getDay()];
 
 try {
@@ -571,6 +575,75 @@ try {
   {
     const r = await send('Show me my weekly routine');
     ok('B7: gym_week reads the real remaining schedule', /monday/i.test(r) && /wednesday/i.test(r) && !/friday:/i.test(r), r);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SHENLONG P1 (2026-09-09, live-verified) — parseDelete (routine-authoring.js
+  // :369-375) always filled `namePhrase` with something, including a bare "it"/
+  // "that", which is truthy and so defeated applyDeleteRoutine's own
+  // lastRoutineRef fallback (guarded by `!op.namePhrase`) — the exact
+  // mechanism built for "create a routine, then say delete it" never
+  // triggered. Fixed by having parseDelete normalize an EXACT bare-pronoun
+  // extraction to '' (no explicit name), so the pre-existing fallback runs.
+  // Proven via routines() directly (a real localStorage mutation), not just
+  // reply text, matching this file's own convention (see B6 above).
+  // ══════════════════════════════════════════════════════════════════════
+  {
+    await send('Create a Thursday shoulders routine');
+    const created = (await routines()).find((r) => (r.trainingDays || []).includes('thu'));
+    ok('P1-1: setup — a Thursday routine exists (becomes lastRoutineRef)', !!created, created && created.name);
+    const r = await send('Delete it');
+    const after = await routines();
+    ok('P1-1: "Delete it" genuinely removes the just-created routine via lastRoutineRef',
+      created && !after.some((x) => x.id === created.id), after.map((x) => x.name).join(', '));
+    ok('P1-1: reports genuine success, not the "not sure which routine" failure', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // Same class, the "that" variant — already-intended vocabulary per the
+    // existing pronoun trigger at routine-authoring.js:485 (`/\bit\b|\bthat\b/i`).
+    // A different weekday (Saturday) than P1-1 (Thursday) so the two cases
+    // can never interact even if one were to fail.
+    await send('Create a Saturday legs routine');
+    const created = (await routines()).find((r) => (r.trainingDays || []).includes('sat'));
+    ok('P1-2: setup — a Saturday routine exists (becomes lastRoutineRef)', !!created, created && created.name);
+    const r = await send('Delete that');
+    const after = await routines();
+    ok('P1-2: "Delete that" genuinely removes the just-created routine via lastRoutineRef',
+      created && !after.some((x) => x.id === created.id), after.map((x) => x.name).join(', '));
+    ok('P1-2: reports genuine success, not the "not sure which routine" failure', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // Negative case: a bare pronoun with NO valid lastRoutineRef must not
+    // guess. P1-2's own successful delete already nulls lastRoutineRef (it
+    // deletes exactly the routine that was referenced), but forgetLastRoutine
+    // is called explicitly so this case doesn't depend on that side effect.
+    // With no lastRoutineRef, routine-authoring.js:485's own guard
+    // (`lastRoutineRef && ...`) never engages at all, so this correctly never
+    // becomes a gym intent in the first place — it falls through to
+    // Calendar's own "delete it" handling, exactly like the pre-existing A16
+    // case just above (same scenario, same architecture) — not a gym-side
+    // "not sure which routine" reply.
+    await forgetLastRoutine();
+    const before = await routines();
+    const r = await send('Delete it');
+    const after = await routines();
+    ok('P1-3: "Delete it" with no lastRoutineRef removes nothing (does not guess)',
+      before.length === after.length && before.every((b) => after.some((a) => a.id === b.id)), after.map((x) => x.name).join(', '));
+    ok('P1-3: no fabricated success, and correctly stays out of the gym domain', !/^✓/.test(r) && !/routine/i.test(r), r);
+  }
+  {
+    // Explicit target text merely CONTAINING "it" as a substring ("legit")
+    // must not be treated as a bare pronoun (proves the fix is an exact
+    // whole-phrase match, not a substring test) — and, since no routine is
+    // named "legit", must fail honestly rather than silently falling back to
+    // lastRoutineRef (which is null here anyway, but this proves the
+    // namePhrase-truthy branch is what's actually stopping it).
+    const before = await routines();
+    const r = await send('Delete the legit routine');
+    const after = await routines();
+    ok('P1-4: a name merely containing "it" ("legit") is not treated as a bare pronoun',
+      before.length === after.length && before.every((b) => after.some((a) => a.id === b.id)), after.map((x) => x.name).join(', '));
+    ok('P1-4: fails honestly (does not fabricate a match)', /not sure which routine/i.test(r), r);
   }
 
   // ══════════════════════════════════════════════════════════════════════
