@@ -2674,6 +2674,25 @@ window.QuickNotes = (function () {
   let greeted = false;
   async function greet() {
     if (greeted) return; greeted = true;
+    // SHENLONG P2 (2026-09-10): the 6s safety-net below (for when
+    // apt:calendar-loaded never fires) used to call straight into
+    // generateDailyBrief() — which reads user-scoped localStorage
+    // (todayGymSummary/todayHealthSummary/recentGymSession) with no
+    // awareness of auth state at all. On a browser that still held a
+    // PREVIOUS account's un-reconciled data, a slow/degraded auth check
+    // (>6s) let this fire before reconcileUserScope() had run for the
+    // CURRENT session, so the greeting was built from the wrong account's
+    // gym/health data and permanently latched (the `greeted` guard above
+    // means it's never regenerated once apt:calendar-loaded does arrive).
+    // `apt:calendar-loaded` itself can never fire before this resolves —
+    // loadEvents() always goes through AptCal's own getClient(), which
+    // already awaits this same promise — so this is a genuine no-op on
+    // that path and only ever actually waits on the safety-net path,
+    // exactly where the gap was. Same defensive `|| Promise.resolve()`
+    // AptCal.getClient() already uses (js/index.js ~line 484), so this
+    // still resolves immediately in local-only mode (no Supabase
+    // configured) rather than hanging.
+    await (window.APP_AUTH_READY || Promise.resolve());
     // Under the Narrative Dashboard (Goal 4, feature-flagged), this chat log
     // is hidden until the user explicitly reveals it via "Ask Shenlong" —
     // js/narrative-dashboard.js already renders the same brief into the

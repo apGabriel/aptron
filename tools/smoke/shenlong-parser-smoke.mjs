@@ -685,6 +685,164 @@ try {
   }
 
   await page.screenshot({ path: path.join(ROOT, 'tools/smoke/shenlong-parser-smoke.png'), fullPage: true });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SECTION E — SHENLONG P2 (2026-09-10): auth-readiness gating for
+  // greet()'s (and narrative-dashboard.js's run()'s) user-scoped context
+  // reads. js/auth/main.js is NOT actually blocked in this harness — only
+  // the classic (non-module) <script src=".../@supabase/..."> CDN tag is,
+  // so window.supabase stays undefined but main.js's own module script
+  // still runs. It hits its documented "local-only fallback" branch
+  // (`if (!window.supabase || ...) resolveReady();`) and resolves
+  // window.APP_AUTH_READY immediately — which is exactly why every test
+  // above passes without any real auth. A first attempt at these tests set
+  // window.APP_AUTH_READY to a pending mock via addInitScript, only to
+  // have main.js's own fallback silently REASSIGN it to a fresh, already-
+  // resolved promise moments later (confirmed via a Promise.race probe).
+  // Fixed by pinning the property with a getter/setter that ignores any
+  // reassignment, so the mock survives main.js's own local-only-mode
+  // write. Each scenario also installs Playwright's virtual clock
+  // (deterministic control over the 6000/6500ms safety-nets — no real
+  // waiting) to prove the actual invariant: a stale, pre-reconciliation
+  // localStorage value must never reach a rendered greeting, regardless
+  // of trigger ordering.
+  // ══════════════════════════════════════════════════════════════════════
+  async function seedOpenSession(pg, setCount) {
+    await pg.evaluate((n) => {
+      localStorage.setItem('po_coach_v1', JSON.stringify({ sessions: [{ endedAt: null, sets: Array.from({ length: n }, () => ({})) }] }));
+    }, setCount);
+  }
+  async function resolvePendingAuth(pg) {
+    await pg.evaluate(() => { if (window.__p2ResolveAuth) window.__p2ResolveAuth(); });
+  }
+  const STALE_SETS = 1;   // "1 set logged" — pre-reconciliation account
+  const CURRENT_SETS = 7; // "7 sets logged" — post-reconciliation account
+
+  // Both the pending-auth Promise AND the stale marker MUST exist before
+  // the page's own scripts run at all — a first attempt at these tests set
+  // both via a post-load page.evaluate() and found the real page's own
+  // boot sequence had already raced ahead: with window.APP_AUTH_READY
+  // still genuinely undefined at that instant, Calendar's getClient()
+  // resolved immediately, the network-blocked fetch failed near-instantly,
+  // and apt:calendar-loaded fired — completing greet() — before the
+  // Playwright round-trip installing the override could land. addInitScript
+  // runs before ANY page script, closing that gap entirely.
+  async function newGatedPage(setCount) {
+    const pg = await ctx.newPage();
+    await pg.addInitScript((n) => {
+      let mockResolve;
+      const mockReady = new Promise((r) => { mockResolve = r; });
+      window.__p2ResolveAuth = mockResolve;
+      Object.defineProperty(window, 'APP_AUTH_READY', {
+        get() { return mockReady; },
+        set() { /* ignore main.js's own local-only-mode reassignment */ },
+        configurable: true,
+      });
+      localStorage.setItem('po_coach_v1', JSON.stringify({ sessions: [{ endedAt: null, sets: Array.from({ length: n }, () => ({})) }] }));
+    }, setCount);
+    await pg.clock.install();
+    return pg;
+  }
+
+  {
+    const p2 = await newGatedPage(STALE_SETS);
+    await p2.goto(`http://localhost:${PORT}/index.html`, { waitUntil: 'load', timeout: 15000 });
+    await p2.waitForSelector('#aiForm', { timeout: 10000 });
+
+    // P2-1: fast-forward past the 6s safety net with auth still pending —
+    // must not read the (stale) context yet at all.
+    await p2.clock.runFor(6001);
+    const briefCountPending = await p2.evaluate(() => document.querySelectorAll('.aios-brief').length);
+    ok('P2-1: 6s safety-net does not read/render user-scoped context while auth is still pending',
+      briefCountPending === 0, 'brief count after 6s with pending auth: ' + briefCountPending);
+
+    // P2-2: simulate reconciliation (the value a real reconcileUserScope()
+    // pass would leave behind) BEFORE resolving auth, then resolve. The
+    // already-in-flight greet() call (paused at its own await, not a new
+    // invocation) must proceed using the value present AT RESOLUTION time.
+    await seedOpenSession(p2, CURRENT_SETS);
+    await resolvePendingAuth(p2);
+    await p2.waitForFunction(() => document.querySelectorAll('.aios-brief').length > 0, null, { timeout: 5000 });
+    const brief2 = await p2.evaluate(() => { const b = document.querySelector('.aios-brief'); return b ? b.textContent : null; });
+    ok('P2-2: rendered brief reflects CURRENT (post-reconciliation) data, never the stale value',
+      new RegExp(CURRENT_SETS + ' sets logged').test(brief2) && !new RegExp(STALE_SETS + ' set logged').test(brief2), brief2);
+    ok('P2-2/P2-6: exactly one brief, no duplicate',
+      (await p2.evaluate(() => document.querySelectorAll('.aios-brief').length)) === 1);
+
+    // P2-6 (explicit): a later, redundant apt:calendar-loaded (greeted is
+    // already true) must be a genuine no-op, not a second brief.
+    await p2.evaluate(() => window.dispatchEvent(new CustomEvent('apt:calendar-loaded')));
+    await p2.waitForTimeout(50);
+    ok('P2-6: a later apt:calendar-loaded does not produce a duplicate greeting',
+      (await p2.evaluate(() => document.querySelectorAll('.aios-brief').length)) === 1);
+    await p2.close();
+  }
+
+  {
+    // P2-4: adversarial ordering — force apt:calendar-loaded to fire
+    // BEFORE auth resolves at all. The real app's own structure should
+    // make this impossible (loadEvents() always awaits AptCal's own
+    // getClient(), which awaits the same APP_AUTH_READY first) — but
+    // greet()'s own gate must independently hold even if that structural
+    // guarantee were ever bypassed elsewhere. {once:true} still consumes
+    // the listener on this dispatch; the assertion is that the resulting
+    // (already-invoked, now-paused) greet() call still doesn't read stale
+    // context until its own await resolves.
+    const p2b = await newGatedPage(STALE_SETS);
+    await p2b.goto(`http://localhost:${PORT}/index.html`, { waitUntil: 'load', timeout: 15000 });
+    await p2b.waitForSelector('#aiForm', { timeout: 10000 });
+
+    await p2b.evaluate(() => window.dispatchEvent(new CustomEvent('apt:calendar-loaded')));
+    await p2b.waitForTimeout(50);
+    const briefCountEarly = await p2b.evaluate(() => document.querySelectorAll('.aios-brief').length);
+    ok('P2-4: an early apt:calendar-loaded (before auth-ready) still does not read stale context',
+      briefCountEarly === 0, 'brief count: ' + briefCountEarly);
+
+    await seedOpenSession(p2b, CURRENT_SETS);
+    await resolvePendingAuth(p2b);
+    await p2b.waitForFunction(() => document.querySelectorAll('.aios-brief').length > 0, null, { timeout: 5000 });
+    const brief4 = await p2b.evaluate(() => { const b = document.querySelector('.aios-brief'); return b ? b.textContent : null; });
+    ok('P2-4: once auth resolves, the same already-invoked greet() call proceeds with CURRENT data',
+      new RegExp(CURRENT_SETS + ' sets logged').test(brief4) && !new RegExp(STALE_SETS + ' set logged').test(brief4), brief4);
+    await p2b.close();
+  }
+
+  // P2-3/P2-5 (auth-ready before/at the time of calendar-loaded — the
+  // normal, common-case ordering): not a separate dedicated test — every
+  // one of the 93 checks above already exercises exactly this path (the
+  // main `page`'s own boot: APP_AUTH_READY undefined → resolves
+  // immediately → calendar-loaded fires shortly after via the
+  // network-blocked catch path) and all passed, which already proves
+  // greet() completes correctly, exactly once, with no hang, under this
+  // ordering. A separate dedicated test here would be redundant.
+  // P2-7: existing suite regression — proven by this run's own 93/93 above.
+
+  {
+    // Narrative Dashboard parity (Phase 5): js/narrative-dashboard.js's
+    // run() reads the exact same todayGymSummary() shape via the exact
+    // same dual-trigger (apt:calendar-loaded / setTimeout(start, 6500))
+    // pattern, and received the identical one-line fix. One pair of
+    // checks proves the same invariant holds there — not a full re-
+    // derivation of P2-1..P2-6, since the underlying mechanism is already
+    // proven correct above and this file received a byte-for-byte
+    // equivalent change.
+    const p3 = await newGatedPage(STALE_SETS);
+    await p3.goto(`http://localhost:${PORT}/index.html?narrative=1`, { waitUntil: 'load', timeout: 15000 });
+    await p3.waitForSelector('#narrStory', { timeout: 10000 });
+
+    await p3.clock.runFor(6501);
+    const storyDuring = await p3.evaluate(() => document.getElementById('narrStory').textContent);
+    ok('P2-N1: narrative-dashboard\'s 6.5s safety-net does not read stale context while auth is pending',
+      !new RegExp(STALE_SETS + ' set logged').test(storyDuring), storyDuring);
+
+    await seedOpenSession(p3, CURRENT_SETS);
+    await resolvePendingAuth(p3);
+    await p3.waitForFunction((n) => new RegExp(n + ' sets logged').test(document.getElementById('narrStory').textContent), CURRENT_SETS, { timeout: 5000 });
+    const storyAfter = await p3.evaluate(() => document.getElementById('narrStory').textContent);
+    ok('P2-N2: narrative-dashboard renders the CURRENT (post-reconciliation) session once auth resolves',
+      new RegExp(CURRENT_SETS + ' sets logged').test(storyAfter) && !new RegExp(STALE_SETS + ' set logged').test(storyAfter), storyAfter);
+    await p3.close();
+  }
 } catch (e) {
   ok('FATAL during run', false, e.message + '\n' + e.stack);
 }

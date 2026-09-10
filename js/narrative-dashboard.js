@@ -144,6 +144,15 @@
   }
 
   async function run() {
+    // SHENLONG P2 (2026-09-10): same fix as js/index.js's greet() — this
+    // function's own 6500ms safety-net (below) used to call straight into
+    // todayGymSummary()/todayHealthSummary()/recentGymSession() with no
+    // auth-readiness check, so a slow auth check on a browser still holding
+    // a previous account's data could latch a stale-account story into
+    // storyEl with no later re-render (see `started` guard below). Same
+    // defensive `|| Promise.resolve()` AptCal.getClient() already uses, so
+    // this still resolves immediately in local-only mode.
+    await (window.APP_AUTH_READY || Promise.resolve());
     if (typeof window.__synthesizeBrief !== 'function' || !window.AptCal) {
       storyEl.textContent = 'Your day is still loading.';
       return;
