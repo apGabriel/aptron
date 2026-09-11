@@ -2667,7 +2667,6 @@ window.QuickNotes = (function () {
   // Bridges for js/narrative-dashboard.js (Goal 4/4.1) — the only consumer
   // outside this closure. Internal-ish, hence the `__` prefix per Module
   // Communication's convention; not part of the stable public API.
-  window.__generateDailyBrief = generateDailyBrief;
   window.__synthesizeBrief = synthesizeBrief;
 
   // ── opening greeting — once the first calendar load resolves ─────────────────
