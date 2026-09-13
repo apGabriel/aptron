@@ -843,6 +843,90 @@ try {
       new RegExp(CURRENT_SETS + ' sets logged').test(storyAfter) && !new RegExp(STALE_SETS + ' set logged').test(storyAfter), storyAfter);
     await p3.close();
   }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SHENLONG P6 (2026-09-13): closes a test-coverage gap found by the P5
+  // investigation. P2-N1/P2-N2 above deliberately seed an OPEN workout
+  // session, so they only ever exercise run()'s early-return branch (line
+  // ~168 of narrative-dashboard.js) — none of the committed suite ever
+  // reached the real synthesis path:
+  //   narrative-dashboard.run() -> window.__synthesizeBrief(narrativeSignals, hasEvents)
+  // This wraps the REAL window.__synthesizeBrief (never replacing its
+  // implementation — the wrapper calls straight through to the original and
+  // returns its result unchanged) to prove that exact call site is reached,
+  // with workoutInProgress genuinely false and a real signal selected.
+  // ══════════════════════════════════════════════════════════════════════
+  async function seedCompletedGymSession(pg, label) {
+    // Deliberately NOT the P2 open-session fixture — endedAt is set, so
+    // todayGymSummary().workoutInProgress is false, and recentGymSession()
+    // sees a real same-day completed session (daysAgo === 0), which
+    // computeGymSignals() turns into a genuine 'trained_today' signal.
+    await pg.evaluate((lbl) => {
+      localStorage.setItem('po_coach_v1', JSON.stringify({
+        sessions: [{ endedAt: new Date().toISOString(), label: lbl, sets: [{ weight: 100, reps: 8 }] }],
+      }));
+    }, label);
+  }
+  async function installBridgeSpy(pg) {
+    await pg.evaluate(() => {
+      const original = window.__synthesizeBrief;
+      window.__p6BridgeCalls = [];
+      window.__synthesizeBrief = async function (...args) {
+        window.__p6BridgeCalls.push({
+          argCount: args.length,
+          signalsIsArray: Array.isArray(args[0]),
+          signalsSnapshot: JSON.parse(JSON.stringify(args[0] || [])),
+          hasEventsType: typeof args[1],
+        });
+        return original.apply(this, args);
+      };
+    });
+  }
+
+  {
+    const p6 = await newGatedPage(0); // its open-session seed is irrelevant — overwritten below before auth resolves
+    await p6.goto(`http://localhost:${PORT}/index.html?narrative=1`, { waitUntil: 'load', timeout: 15000 });
+    await p6.waitForSelector('#narrStory', { timeout: 10000 });
+    await installBridgeSpy(p6);
+    await seedCompletedGymSession(p6, 'Push Day');
+
+    // Fire narrative-dashboard's own 6.5s safety-net while auth is still
+    // pending — run() must reach its auth await and stop there, never
+    // calling the bridge yet (mirrors P2-N1's invariant, applied here to
+    // the synthesis path instead of the early-return path).
+    await p6.clock.runFor(6501);
+    const callsWhilePending = await p6.evaluate(() => window.__p6BridgeCalls.length);
+    ok('P6-1: the bridge is not called while auth is still pending', callsWhilePending === 0, 'calls: ' + callsWhilePending);
+
+    await resolvePendingAuth(p6);
+    await p6.waitForFunction(() => window.__p6BridgeCalls && window.__p6BridgeCalls.length > 0, null, { timeout: 5000 });
+
+    const calls = await p6.evaluate(() => window.__p6BridgeCalls);
+    const story = await p6.evaluate(() => document.getElementById('narrStory').textContent);
+    const workoutInProgress = await p6.evaluate(() => {
+      try { return JSON.parse(localStorage.getItem('po_coach_v1')).sessions.some((s) => !s.endedAt); }
+      catch (e) { return null; }
+    });
+
+    ok('P6-2: workoutInProgress was genuinely false for this run (proves the synthesis path ran, not the early-return path)',
+      workoutInProgress === false);
+    ok('P6-3: narrative-dashboard.run() reached the real window.__synthesizeBrief bridge exactly once',
+      calls.length === 1, JSON.stringify(calls));
+    ok('P6-4: the bridge received an array as its first argument',
+      calls[0] && calls[0].signalsIsArray, JSON.stringify(calls[0]));
+    ok('P6-5: at least one selected signal is a plausible signal object (tier/domain/key/fact)',
+      calls[0] && Array.isArray(calls[0].signalsSnapshot) && calls[0].signalsSnapshot.length > 0 &&
+      calls[0].signalsSnapshot.every((s) => s && typeof s.tier === 'number' && typeof s.domain === 'string' && typeof s.key === 'string' && typeof s.fact === 'string'),
+      JSON.stringify(calls[0] && calls[0].signalsSnapshot));
+    ok('P6-6: the selected signals include the seeded "trained today" gym fact',
+      calls[0] && calls[0].signalsSnapshot.some((s) => s.key === 'trained_today'), JSON.stringify(calls[0] && calls[0].signalsSnapshot));
+    ok('P6-7: the bridge received hasEvents as a boolean second argument',
+      calls[0] && calls[0].hasEventsType === 'boolean', calls[0] && calls[0].hasEventsType);
+    ok('P6-8: the final #narrStory text is non-empty', typeof story === 'string' && story.trim().length > 0, story);
+    ok('P6-9: the final story is not the "still loading" placeholder', !/your day is still loading/i.test(story), story);
+
+    await p6.close();
+  }
 } catch (e) {
   ok('FATAL during run', false, e.message + '\n' + e.stack);
 }
