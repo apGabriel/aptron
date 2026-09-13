@@ -252,11 +252,20 @@
 
   // ── routine resolution — "Friday" / "my Friday routine" / "it" / a name ─
   function findRoutineByDay(routines, day) { return routines.find((r) => Array.isArray(r.trainingDays) && r.trainingDays.includes(day)) || null; }
+  // SHENLONG P7 (2026-09-13, live-verified): this fed applyDeleteRoutine's
+  // ONLY name-based resolution path, and its substring fallback below used
+  // to let "delete the triceps routine" silently delete "Chest & Triceps"
+  // (the first array match) while a routine actually named "Triceps Focus"
+  // sat untouched — no ambiguity/error was ever reported. The exact same
+  // bug class was already caught and fixed for exercise-level matching (see
+  // findExerciseByQuery below): a substring hit is not a real match, it's a
+  // coincidence, and coincidences must not drive a destructive delete.
+  // Exact normalized-name match only; anything else is a genuine "not
+  // found" (non-mutating) rather than a guess.
   function findRoutineByName(routines, name) {
     const q = normTokens(name).join(' ');
     if (!q) return null;
-    return routines.find((r) => normTokens(r.name).join(' ') === q) ||
-      routines.find((r) => normTokens(r.name).join(' ').indexOf(q) !== -1) || null;
+    return routines.find((r) => normTokens(r.name).join(' ') === q) || null;
   }
 
   // ── PARSING ───────────────────────────────────────────────────────────

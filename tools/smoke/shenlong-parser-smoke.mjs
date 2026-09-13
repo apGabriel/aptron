@@ -647,6 +647,79 @@ try {
   }
 
   // ══════════════════════════════════════════════════════════════════════
+  // SHENLONG P7 (2026-09-13, live-verified): findRoutineByName's substring
+  // fallback let "delete the triceps routine" silently delete "Chest &
+  // Triceps" (the first array match) while a routine actually named
+  // "Triceps Focus" sat untouched, with no ambiguity/error reported —
+  // reproduced live before this fix. findRoutineByName is applyDeleteRoutine's
+  // ONLY name-based resolution path (its only caller), so this exact-match-
+  // only fix cannot affect any other mutation kind. Uses a directly-seeded
+  // fixture (not `send('Create ...')`) since the real "Triceps Focus" name
+  // has no natural-language template that would produce it.
+  // ══════════════════════════════════════════════════════════════════════
+  function testRoutine(id, name) {
+    return { id, name, trainingDays: [], exercises: [], restEnabled: true, rest: 90, updated_at: new Date().toISOString() };
+  }
+  async function seedRoutines(list) {
+    await page.evaluate((arr) => { localStorage.setItem('rb_routines_v1', JSON.stringify(arr)); }, list);
+  }
+
+  {
+    // P7-1: an exact name match (no collision at all — "Triceps Focus" is
+    // named exactly) still deletes correctly. Proves the fix didn't also
+    // break the legitimate exact-match case.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p7_wrong', 'Chest & Triceps'), testRoutine('rt_p7_right', 'Triceps Focus')]);
+    const r = await send('Delete the Triceps Focus routine');
+    const rs = await routines();
+    ok('P7-1: an exact routine-name match still deletes correctly',
+      !rs.some((x) => x.id === 'rt_p7_right') && rs.some((x) => x.id === 'rt_p7_wrong'),
+      rs.map((x) => x.name).join(', '));
+    ok('P7-1: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // P7-2: the exact reported bug — "triceps" is a substring of BOTH
+    // routine names but an exact name of NEITHER. Must delete neither, and
+    // must not report a false success.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p7_a', 'Chest & Triceps'), testRoutine('rt_p7_b', 'Triceps Focus')]);
+    const r = await send('Delete the triceps routine');
+    const rs = await routines();
+    ok('P7-2: a substring collision between two routine names deletes NEITHER',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p7_a') && rs.some((x) => x.id === 'rt_p7_b'),
+      rs.map((x) => x.name).join(', '));
+    ok('P7-2: fails honestly — no false-success deletion message', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P7-3: only ONE routine exists and "triceps" is a substring of its
+    // name — no collision, no genuine ambiguity to ask about. Still must
+    // not delete: this proves the fix is "exact match required," not
+    // "unique partial match wins," which would have silently reintroduced
+    // the same class of risk the moment a second routine appeared later.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p7_c', 'Chest & Triceps')]);
+    const r = await send('Delete the triceps routine');
+    const rs = await routines();
+    ok('P7-3: a unique substring match still does NOT delete (exact-match-only, not "unique wins")',
+      rs.length === 1 && rs[0].id === 'rt_p7_c', rs.map((x) => x.name).join(', '));
+    ok('P7-3: operation is non-mutating and fails honestly', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P7-4: exact normalization (case-insensitive, whitespace-collapsing —
+    // existing normTokens() behavior, nothing new added by this fix) still
+    // resolves and deletes. Proves the fix removed only the substring
+    // fallback, not exact-match normalization itself.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p7_d', 'Upper Body')]);
+    const r = await send('delete upper   body routine');
+    const rs = await routines();
+    ok('P7-4: exact normalized match (case/whitespace-insensitive) still deletes',
+      !rs.some((x) => x.id === 'rt_p7_d'), rs.map((x) => x.name).join(', '));
+    ok('P7-4: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  await clearRoutines();
+
+  // ══════════════════════════════════════════════════════════════════════
   // SECTION C — natural-language variants (item 3's adversarial list)
   // ══════════════════════════════════════════════════════════════════════
   await clearRoutines();
