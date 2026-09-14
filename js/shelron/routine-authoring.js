@@ -252,6 +252,21 @@
 
   // ── routine resolution — "Friday" / "my Friday routine" / "it" / a name ─
   function findRoutineByDay(routines, day) { return routines.find((r) => Array.isArray(r.trainingDays) && r.trainingDays.includes(day)) || null; }
+  // SHENLONG P9 (2026-09-14, live-verified): applyDeleteRoutine's ONLY use
+  // of findRoutineByDay() used to take its first-match result as final —
+  // "Delete my Friday routine" with two real routines both scheduled Friday
+  // silently deleted whichever was FIRST in the array (proven array-order
+  // dependent), and "Delete my Friday Legs routine" against ["Upper Body",
+  // "Legs"] (both Friday) could delete "Upper Body" — the routine the user
+  // did NOT name — purely because it happened to be first. findRoutineByDay()
+  // itself is left unchanged (add_exercise/set_sets/read_week are
+  // non-destructive callers, out of this fix's scope — see the Brain note);
+  // this deletion-only helper returns EVERY day match so applyDeleteRoutine
+  // can require an exact candidate count, the same way P8 already requires
+  // an exact name-candidate count.
+  function findRoutinesByDay(routines, day) {
+    return routines.filter((r) => Array.isArray(r.trainingDays) && r.trainingDays.includes(day));
+  }
   // SHENLONG P7 (2026-09-13, live-verified): this fed applyDeleteRoutine's
   // ONLY name-based resolution path, and its substring fallback used to let
   // "delete the triceps routine" silently delete "Chest & Triceps" (the
@@ -402,6 +417,22 @@
     // ("legit") is untouched, so an explicit target is never reclassified as
     // a pronoun.
     if (/^(it|that)$/i.test(namePhrase)) namePhrase = '';
+    // SHENLONG P9 (2026-09-14, live-verified): namePhrase still contained
+    // the weekday word itself whenever one was present — "delete my Friday
+    // routine" produced namePhrase='friday' (not ''), which downstream code
+    // could mistake for a real routine-NAME signal when it's just the day
+    // constraint restated. Strip it here, same "on/in/for + weekday" strip
+    // parseSetSets already performs on its own query phrase — but unlike
+    // parseSetSets (where an emptied query means "no exercise at all," an
+    // invalid state), an emptied namePhrase here is a valid, meaningful
+    // result: "no name info beyond the day itself" is exactly what "delete
+    // my Friday routine" (with no further name) means. "friday legs" still
+    // correctly reduces to "legs" — a real name signal survives untouched.
+    if (day) {
+      namePhrase = namePhrase.replace(/\b(on|in|for)\b/gi, ' ')
+        .replace(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)('s)?\b/gi, ' ')
+        .replace(/\s+/g, ' ').trim();
+    }
     return { day, namePhrase };
   }
 
@@ -698,8 +729,32 @@
   async function applyDeleteRoutine(op) {
     const routines = getRoutines();
     let target = null;
-    if (op.day) target = findRoutineByDay(routines, op.day);
-    if (!target && op.namePhrase) {
+    // SHENLONG P9 (2026-09-14, live-verified, revised): an explicit day is
+    // its OWN fully-scoped resolution — it never silently degrades into an
+    // unscoped name search, and never leaves ambiguity for a later branch
+    // to guess at. A meaningful explicit name is now checked EVEN WHEN THE
+    // DAY ALONE IS ALREADY UNIQUE — the first version of this fix still let
+    // day-uniqueness override a contradictory name ("Delete my Friday Legs
+    // routine" against only "Upper Body" on Friday, with the real "Legs"
+    // actually on Monday, still deleted "Upper Body"). Narrowing by name
+    // (when one is present) always happens WITHIN the day candidate set —
+    // never the whole routine list — so a same-named routine on a
+    // DIFFERENT day can never satisfy a day+name request either way. Any
+    // outcome other than "exactly one candidate survives" returns
+    // immediately, non-mutating — this can never fall through to the
+    // name-only branch, day dropped, or lastRoutineRef below.
+    if (op.day) {
+      const dayMatches = findRoutinesByDay(routines, op.day);
+      if (dayMatches.length) {
+        const candidates = op.namePhrase ? findRoutineByName(dayMatches, op.namePhrase) : dayMatches;
+        if (candidates.length === 1) target = candidates[0];
+        else return { ok: false, reason: 'ambiguous_day', candidates: dayMatches.map((r) => r.name) };
+      }
+      // dayMatches.length === 0: target stays null, falls to the ordinary
+      // not_found return below — an explicit day that matches nothing must
+      // not be quietly dropped in favor of an unscoped name/lastRoutineRef
+      // guess.
+    } else if (op.namePhrase) {
       const nameMatches = findRoutineByName(routines, op.namePhrase);
       // SHENLONG P8: 2+ exact matches is genuine ambiguity, not a "pick
       // one" situation — return immediately so this can never fall through

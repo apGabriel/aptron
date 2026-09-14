@@ -660,6 +660,11 @@ try {
   function testRoutine(id, name) {
     return { id, name, trainingDays: [], exercises: [], restEnabled: true, rest: 90, updated_at: new Date().toISOString() };
   }
+  // SHENLONG P9: same shape as testRoutine(), plus explicit trainingDays —
+  // needed for day-collision fixtures (testRoutine() always seeds []).
+  function testRoutineOnDays(id, name, days) {
+    return { id, name, trainingDays: days, exercises: [], restEnabled: true, rest: 90, updated_at: new Date().toISOString() };
+  }
   async function seedRoutines(list) {
     await page.evaluate((arr) => { localStorage.setItem('rb_routines_v1', JSON.stringify(arr)); }, list);
   }
@@ -798,6 +803,208 @@ try {
     ok('P8-5: "Delete it" still resolves via lastRoutineRef and deletes the intended routine',
       created && !after.some((x) => x.id === created.id), after.map((x) => x.name).join(', '));
     ok('P8-5: reports genuine success, not the ambiguity/not-found path', /^✓ deleted/i.test(r), r);
+  }
+  await clearRoutines();
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SHENLONG P9 (2026-09-14, live-verified): applyDeleteRoutine checked
+  // op.day BEFORE op.namePhrase, and findRoutineByDay was a bare first-match
+  // — "Delete my Friday routine" against two real Friday routines silently
+  // deleted whichever was array-order-first, and "Delete my Friday Legs
+  // routine" against ["Upper Body","Legs"] (both Friday) could delete
+  // "Upper Body" — the routine the user did NOT name — purely by array
+  // order. parseDelete() also left the bare weekday word inside namePhrase
+  // ("friday"), which could be mistaken for a real name signal. Day
+  // resolution is now its own fully-scoped candidate set: exactly one day
+  // match still deletes outright (day-uniqueness alone is authoritative,
+  // unchanged from before); 2+ day matches require an explicit name to
+  // narrow that SAME candidate set down to exactly one, or the whole
+  // request fails honestly — never falling through to an unscoped name
+  // search, a different day, or lastRoutineRef.
+  // ══════════════════════════════════════════════════════════════════════
+  {
+    // P9-1: unique day — the ordinary, most common case. Must still work
+    // exactly as before this fix.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_unique', 'Legs', ['fri'])]);
+    const r = await send('Delete my Friday routine');
+    const rs = await routines();
+    ok('P9-1: a unique day match still deletes correctly', !rs.some((x) => x.id === 'rt_p9_unique'), rs.map((x) => x.name).join(', '));
+    ok('P9-1: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // P9-2: two routines share Friday, no name to disambiguate. Neither may
+    // be deleted.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_a', 'Friday A', ['fri']), testRoutineOnDays('rt_p9_b', 'Friday B', ['fri'])]);
+    const r = await send('Delete my Friday routine');
+    const rs = await routines();
+    ok('P9-2: two routines sharing a day are NOT silently deleted',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p9_a') && rs.some((x) => x.id === 'rt_p9_b'), rs.map((x) => x.name).join(', '));
+    ok('P9-2: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-3: identical scenario, array order reversed — proves the day
+    // resolver's safety doesn't depend on array order either.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_b2', 'Friday B', ['fri']), testRoutineOnDays('rt_p9_a2', 'Friday A', ['fri'])]);
+    const r = await send('Delete my Friday routine');
+    const rs = await routines();
+    ok('P9-3: reversed seed order is equally safe (no array-order-dependent day deletion)',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p9_a2') && rs.some((x) => x.id === 'rt_p9_b2'), rs.map((x) => x.name).join(', '));
+    ok('P9-3: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-4: THE confirmed bug, reproduced as a regression test. Two Friday
+    // routines, the user explicitly names the one they want ("Legs"), and
+    // it must be the one deleted — never "Upper Body" merely because it's
+    // array-first.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_upper', 'Upper Body', ['fri']), testRoutineOnDays('rt_p9_legs', 'Legs', ['fri'])]);
+    const r = await send('Delete my Friday Legs routine');
+    const rs = await routines();
+    ok('P9-4: an explicit name correctly narrows a duplicate-day match — deletes the NAMED routine, not the array-first one',
+      !rs.some((x) => x.id === 'rt_p9_legs') && rs.some((x) => x.id === 'rt_p9_upper'), rs.map((x) => x.name).join(', '));
+    ok('P9-4: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // P9-5: duplicate day, but the explicit name matches NEITHER day
+    // candidate — and a same-named routine exists on a DIFFERENT day. Name
+    // matching must stay scoped to the day's own candidates; the cross-day
+    // "Legs" must never be reachable from a Friday-scoped request.
+    await clearRoutines();
+    await seedRoutines([
+      testRoutineOnDays('rt_p9_upper2', 'Upper Body', ['fri']),
+      testRoutineOnDays('rt_p9_chest', 'Chest', ['fri']),
+      testRoutineOnDays('rt_p9_legs_mon', 'Legs', ['mon']),
+    ]);
+    const r = await send('Delete my Friday Legs routine');
+    const rs = await routines();
+    ok('P9-5: no Friday routine is deleted when the name matches none of the day\'s candidates',
+      rs.some((x) => x.id === 'rt_p9_upper2') && rs.some((x) => x.id === 'rt_p9_chest'), rs.map((x) => x.name).join(', '));
+    ok('P9-5: the same-named routine on a DIFFERENT day is untouched (name scoping cannot cross days)',
+      rs.some((x) => x.id === 'rt_p9_legs_mon'), rs.map((x) => x.name).join(', '));
+    ok('P9-5: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-6: duplicate day AND the explicit name itself collides (P8's
+    // ambiguity rule) between the two day candidates — proves P8's exact-
+    // name ambiguity check still works when nested inside a day-scoped set.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_legs_a', 'Legs', ['fri']), testRoutineOnDays('rt_p9_legs_b', 'legs', ['fri'])]);
+    const r = await send('Delete my Friday Legs routine');
+    const rs = await routines();
+    ok('P9-6: a duplicate normalized name WITHIN the day candidates is still ambiguous, not array-order-picked',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p9_legs_a') && rs.some((x) => x.id === 'rt_p9_legs_b'), rs.map((x) => x.name).join(', '));
+    ok('P9-6: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-7: three routines share the day, no name — guards the general
+    // ">= 2" invariant rather than only the exact two-item case.
+    await clearRoutines();
+    await seedRoutines([
+      testRoutineOnDays('rt_p9_t1', 'Friday One', ['fri']),
+      testRoutineOnDays('rt_p9_t2', 'Friday Two', ['fri']),
+      testRoutineOnDays('rt_p9_t3', 'Friday Three', ['fri']),
+    ]);
+    const r = await send('Delete my Friday routine');
+    const rs = await routines();
+    ok('P9-7: three same-day routines are equally safe — no first-match selection',
+      rs.length === 3, rs.map((x) => x.name).join(', '));
+    ok('P9-7: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-8: a multi-day routine sharing the requested day with a single-day
+    // routine. The multi-day routine must not be silently selected just
+    // because it happens to be array-first — this is a DELETE ROUTINE
+    // request, not "unschedule Friday from a routine."
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_full', 'Full Body', ['mon', 'fri']), testRoutineOnDays('rt_p9_other', 'Friday Only', ['fri'])]);
+    const r = await send('Delete my Friday routine');
+    const rs = await routines();
+    ok('P9-8: a multi-day routine is not silently selected merely because it is array-first',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p9_full') && rs.some((x) => x.id === 'rt_p9_other'), rs.map((x) => x.name).join(', '));
+    ok('P9-8: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-9: explicit name + a day that is ALREADY unique on its own, AND
+    // the name genuinely matches that same candidate — a unique day match
+    // is no longer sufficient on its own; the name (when present) is now
+    // actively checked against it too, and here it correctly agrees.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_legs3', 'Legs', ['fri']), testRoutineOnDays('rt_p9_upper3', 'Upper Body', ['sat'])]);
+    const r = await send('Delete my Friday Legs routine');
+    const rs = await routines();
+    ok('P9-9: a unique day match whose name AGREES with the explicit name still deletes correctly',
+      !rs.some((x) => x.id === 'rt_p9_legs3') && rs.some((x) => x.id === 'rt_p9_upper3'), rs.map((x) => x.name).join(', '));
+    ok('P9-9: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // P9-14: THE just-caught regression — exactly ONE routine matches the
+    // day, but the explicit name in the SAME command does NOT match it
+    // ("Upper Body" is the only Friday routine; "Legs" is a real routine,
+    // just on a different day). The first version of this fix treated
+    // day-uniqueness alone as authoritative and silently ignored the
+    // contradictory name here, deleting "Upper Body" — the routine the
+    // user explicitly did NOT ask for. Neither routine may be deleted.
+    await clearRoutines();
+    await seedRoutines([testRoutineOnDays('rt_p9_upper5', 'Upper Body', ['fri']), testRoutineOnDays('rt_p9_legs5', 'Legs', ['mon'])]);
+    const r = await send('Delete my Friday Legs routine');
+    const rs = await routines();
+    ok('P9-14: a unique day match whose name CONTRADICTS the explicit name is NOT deleted',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p9_upper5') && rs.some((x) => x.id === 'rt_p9_legs5'), rs.map((x) => x.name).join(', '));
+    ok('P9-14: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-10: an explicit-but-ambiguous day request must NEVER fall through
+    // to lastRoutineRef, even when a valid lastRoutineRef exists pointing
+    // at a real, different routine.
+    await clearRoutines();
+    await send('Create a Monday chest routine');
+    const mondayRoutine = (await routines()).find((x) => (x.trainingDays || []).includes('mon'));
+    ok('P9-10: setup — a Monday routine exists (becomes lastRoutineRef)', !!mondayRoutine, mondayRoutine && mondayRoutine.name);
+    await seedRoutines([mondayRoutine, testRoutineOnDays('rt_p9_fri_a', 'Friday A', ['fri']), testRoutineOnDays('rt_p9_fri_b', 'Friday B', ['fri'])]);
+    const r = await send('Delete my Friday routine');
+    const rs = await routines();
+    ok('P9-10: an ambiguous explicit day request deletes nothing, including not the lastRoutineRef target',
+      rs.length === 3 && rs.some((x) => x.id === mondayRoutine.id) && rs.some((x) => x.id === 'rt_p9_fri_a') && rs.some((x) => x.id === 'rt_p9_fri_b'),
+      rs.map((x) => x.name).join(', '));
+    ok('P9-10: fails honestly, no fallback to implicit lastRoutineRef context', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-11: P1's bare-pronoun/lastRoutineRef path is untouched — "Delete
+    // it" carries no day at all, so none of this fix's day logic engages.
+    await clearRoutines();
+    await send('Create a Sunday shoulders routine');
+    const created = (await routines()).find((x) => (x.trainingDays || []).includes('sun'));
+    ok('P9-11: setup — a Sunday routine exists (becomes lastRoutineRef)', !!created, created && created.name);
+    const r = await send('Delete it');
+    const after = await routines();
+    ok('P9-11: "Delete it" still resolves via lastRoutineRef, unaffected by the day-resolution fix',
+      created && !after.some((x) => x.id === created.id), after.map((x) => x.name).join(', '));
+    ok('P9-11: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // P9-12: P7's partial-name protection remains intact — no weekday
+    // present, so resolution proceeds through the name-only branch exactly
+    // as before this fix.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p9_c1', 'Chest & Triceps'), testRoutine('rt_p9_c2', 'Triceps Focus')]);
+    const r = await send('Delete the triceps routine');
+    const rs = await routines();
+    ok('P9-12: P7\'s partial-name protection remains intact (no day present, name-only path)',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p9_c1') && rs.some((x) => x.id === 'rt_p9_c2'), rs.map((x) => x.name).join(', '));
+    ok('P9-12: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P9-13: P8's exact-name-only (no day at all) deletion remains intact.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p9_legs4', 'Legs'), testRoutine('rt_p9_upper4', 'Upper Body')]);
+    const r = await send('Delete the Legs routine');
+    const rs = await routines();
+    ok('P9-13: P8\'s exact-name-only deletion (no day present) remains intact',
+      !rs.some((x) => x.id === 'rt_p9_legs4') && rs.some((x) => x.id === 'rt_p9_upper4'), rs.map((x) => x.name).join(', '));
+    ok('P9-13: reports genuine success', /^✓ deleted/i.test(r), r);
   }
   await clearRoutines();
 
