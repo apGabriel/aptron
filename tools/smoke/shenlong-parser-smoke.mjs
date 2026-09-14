@@ -720,6 +720,88 @@ try {
   await clearRoutines();
 
   // ══════════════════════════════════════════════════════════════════════
+  // SHENLONG P8 (2026-09-13, live-verified): even after P7's exact-match-
+  // only fix, two routines CAN legitimately normalize to the same key
+  // ("Legs"/"legs", "Upper Body"/"upper   body") and findRoutineByName's old
+  // `routines.find(...)` silently returned/deleted whichever one was FIRST
+  // in the array — proven array-order dependent by reversing the seed order
+  // and watching the deleted routine flip. findRoutineByName now returns
+  // EVERY exact match (still exact-only, never substring); applyDeleteRoutine
+  // treats 2+ as genuine ambiguity and returns immediately with no mutation,
+  // never falling through to lastRoutineRef/day/any other resolver.
+  // ══════════════════════════════════════════════════════════════════════
+  {
+    // P8-1: two routines both normalize to "leg" ("Legs" seeded first).
+    // Neither may be deleted; the response must not claim success.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p8_a', 'Legs'), testRoutine('rt_p8_b', 'legs')]);
+    const r = await send('Delete the Legs routine');
+    const rs = await routines();
+    ok('P8-1: two routines sharing the same normalized name are NOT silently deleted',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p8_a') && rs.some((x) => x.id === 'rt_p8_b'),
+      rs.map((x) => x.name).join(', '));
+    ok('P8-1: response indicates uncertainty, never a false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P8-2: identical scenario, array order REVERSED ("legs" seeded first
+    // this time). Must be equally safe — this is the exact invariant that
+    // was previously broken (reversing seed order used to flip which
+    // routine got deleted for the identical command).
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p8_b2', 'legs'), testRoutine('rt_p8_a2', 'Legs')]);
+    const r = await send('Delete the Legs routine');
+    const rs = await routines();
+    ok('P8-2: reversed seed order is equally safe (no array-order-dependent deletion)',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p8_a2') && rs.some((x) => x.id === 'rt_p8_b2'),
+      rs.map((x) => x.name).join(', '));
+    ok('P8-2: response indicates uncertainty, never a false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P8-3: a genuinely unique exact name (no collision at all) must still
+    // delete normally — the ambiguity guard must not overreach into the
+    // ordinary single-match case.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p8_legs', 'Legs'), testRoutine('rt_p8_upper', 'Upper Body')]);
+    const r = await send('Delete the Legs routine');
+    const rs = await routines();
+    ok('P8-3: a genuinely unique exact name still deletes correctly',
+      !rs.some((x) => x.id === 'rt_p8_legs') && rs.some((x) => x.id === 'rt_p8_upper'),
+      rs.map((x) => x.name).join(', '));
+    ok('P8-3: reports genuine success', /^✓ deleted/i.test(r), r);
+  }
+  {
+    // P8-4: P7's substring protection remains intact after this change —
+    // "triceps" is a substring of both names but an exact name of neither,
+    // so this must still be a plain not_found (0 exact matches), not the
+    // new ambiguous_name path, and certainly not a deletion.
+    await clearRoutines();
+    await seedRoutines([testRoutine('rt_p8_c', 'Chest & Triceps'), testRoutine('rt_p8_d', 'Triceps Focus')]);
+    const r = await send('Delete the triceps routine');
+    const rs = await routines();
+    ok('P8-4: P7\'s partial-name protection remains intact (0 exact matches, not deleted)',
+      rs.length === 2 && rs.some((x) => x.id === 'rt_p8_c') && rs.some((x) => x.id === 'rt_p8_d'),
+      rs.map((x) => x.name).join(', '));
+    ok('P8-4: fails honestly, no false success', /not sure which routine/i.test(r) && !/^✓/.test(r), r);
+  }
+  {
+    // P8-5: P1's pronoun/lastRoutineRef deletion path is untouched by this
+    // change — parseDelete blanks a bare pronoun's namePhrase to '', so the
+    // new ambiguity-count logic (gated on `op.namePhrase` being truthy)
+    // never even runs for "Delete it"; the pre-existing lastRoutineRef
+    // fallback still resolves and deletes exactly the intended routine.
+    await clearRoutines();
+    await send('Create a Sunday shoulders routine');
+    const created = (await routines()).find((x) => (x.trainingDays || []).includes('sun'));
+    ok('P8-5: setup — a Sunday routine exists (becomes lastRoutineRef)', !!created, created && created.name);
+    const r = await send('Delete it');
+    const after = await routines();
+    ok('P8-5: "Delete it" still resolves via lastRoutineRef and deletes the intended routine',
+      created && !after.some((x) => x.id === created.id), after.map((x) => x.name).join(', '));
+    ok('P8-5: reports genuine success, not the ambiguity/not-found path', /^✓ deleted/i.test(r), r);
+  }
+  await clearRoutines();
+
+  // ══════════════════════════════════════════════════════════════════════
   // SECTION C — natural-language variants (item 3's adversarial list)
   // ══════════════════════════════════════════════════════════════════════
   await clearRoutines();

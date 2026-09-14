@@ -253,19 +253,30 @@
   // ── routine resolution — "Friday" / "my Friday routine" / "it" / a name ─
   function findRoutineByDay(routines, day) { return routines.find((r) => Array.isArray(r.trainingDays) && r.trainingDays.includes(day)) || null; }
   // SHENLONG P7 (2026-09-13, live-verified): this fed applyDeleteRoutine's
-  // ONLY name-based resolution path, and its substring fallback below used
-  // to let "delete the triceps routine" silently delete "Chest & Triceps"
-  // (the first array match) while a routine actually named "Triceps Focus"
-  // sat untouched — no ambiguity/error was ever reported. The exact same
-  // bug class was already caught and fixed for exercise-level matching (see
+  // ONLY name-based resolution path, and its substring fallback used to let
+  // "delete the triceps routine" silently delete "Chest & Triceps" (the
+  // first array match) while a routine actually named "Triceps Focus" sat
+  // untouched — no ambiguity/error was ever reported. The exact same bug
+  // class was already caught and fixed for exercise-level matching (see
   // findExerciseByQuery below): a substring hit is not a real match, it's a
-  // coincidence, and coincidences must not drive a destructive delete.
-  // Exact normalized-name match only; anything else is a genuine "not
-  // found" (non-mutating) rather than a guess.
+  // coincidence, and coincidences must not drive a destructive delete. The
+  // substring fallback was removed; exact normalized-name match only.
+  //
+  // SHENLONG P8 (2026-09-13, live-verified): exact-match alone wasn't
+  // enough — two routines CAN legitimately normalize to the same key
+  // ("Legs" / "legs" / " LEGS ", or "Upper Body" / "upper   body"), and the
+  // old `routines.find(...)` returned whichever one happened to be FIRST in
+  // the array, silently deleting it with no ambiguity warning. Proven
+  // array-order dependent: reversing the seed order flipped which routine
+  // got deleted for the identical command. Returns EVERY exact match now
+  // (still exact-only, never substring — P7's protection is unchanged) so
+  // the caller can tell "one real target" apart from "genuinely ambiguous,"
+  // mirroring the hits-collection style applySetSets already uses below for
+  // the same "same exercise, ambiguous which routine" problem.
   function findRoutineByName(routines, name) {
     const q = normTokens(name).join(' ');
-    if (!q) return null;
-    return routines.find((r) => normTokens(r.name).join(' ') === q) || null;
+    if (!q) return [];
+    return routines.filter((r) => normTokens(r.name).join(' ') === q);
   }
 
   // ── PARSING ───────────────────────────────────────────────────────────
@@ -688,7 +699,15 @@
     const routines = getRoutines();
     let target = null;
     if (op.day) target = findRoutineByDay(routines, op.day);
-    if (!target && op.namePhrase) target = findRoutineByName(routines, op.namePhrase);
+    if (!target && op.namePhrase) {
+      const nameMatches = findRoutineByName(routines, op.namePhrase);
+      // SHENLONG P8: 2+ exact matches is genuine ambiguity, not a "pick
+      // one" situation — return immediately so this can never fall through
+      // to lastRoutineRef/day/any other resolver below. Deletion stops here;
+      // 0 matches still reaches the ordinary not_found outcome just below.
+      if (nameMatches.length > 1) return { ok: false, reason: 'ambiguous_name', candidates: nameMatches.map((r) => r.name) };
+      target = nameMatches[0] || null;
+    }
     if (!target && !op.day && !op.namePhrase && lastRoutineRef) target = routines.find((r) => r.id === lastRoutineRef.id) || null;
     if (!target) return { ok: false, reason: 'not_found' };
     const remaining = routines.filter((r) => r.id !== target.id);
