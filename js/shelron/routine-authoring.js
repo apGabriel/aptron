@@ -631,7 +631,43 @@
     const match = matchExercise(op.exerciseQuery, catalog);
     if (!match) return { ok: false, reason: 'exercise_not_found', query: op.exerciseQuery };
     const routines = getRoutines();
-    let r = resolveTargetRoutine(routines, op.day);
+    // SHENLONG P10b (2026-09-15, live-verified): an explicit op.day used to
+    // resolve via resolveTargetRoutine() → findRoutineByDay() — a bare
+    // Array.find() with no candidate-count awareness at all (unlike
+    // applySetSets's P10a fix or applyDeleteRoutine's P9 fix, this caller
+    // never had ANY ambiguity guard). Proven reachable through the real
+    // Gym app UI (its lightweight routine-creation flow has no cross-
+    // routine day-uniqueness check): with 2+ routines scheduled for the
+    // same day, the exercise was silently added to whichever was first in
+    // array order — confirmed order-dependent, and confirmed that a
+    // routine NAME mentioned in the phrase ("...to my Push Day routine on
+    // friday") is not actually parsed by parseAddOrRemove() (it returns
+    // only {exerciseQuery, day}) and so cannot disambiguate this today.
+    // Deliberately local to applyAddExercise — resolveTargetRoutine() and
+    // applyRemoveExercise() (which shares it) are left untouched; that
+    // caller has its own independently-reachable day-ambiguity bug, tracked
+    // as a separate follow-up, and must not be affected by this fix. An
+    // explicit day is now resolved directly against ALL routines
+    // (add_exercise has no exercise-hit set to scope against — it may be
+    // adding a genuinely new exercise — so the candidate set is every
+    // routine scheduled that day, not P10a's hits-based scoping): exactly
+    // one day-matching routine mutates; zero preserves the existing
+    // no_routine_for_day failure below unchanged; two or more fails
+    // immediately, non-mutating, reusing 'ambiguous_day' — the same reason
+    // applyDeleteRoutine already uses for this identical "day matched 2+
+    // routines" shape (routine-authoring.js:782) — so no js/index.js
+    // change is needed; its existing generic add_exercise fallback message
+    // already renders this honestly. lastRoutineRef is never consulted
+    // when a day is given (resolveTargetRoutine, the only place it's read,
+    // is not called in this branch); the no-day path below is untouched.
+    let r;
+    if (op.day) {
+      const dayCandidates = routines.filter((x) => Array.isArray(x.trainingDays) && x.trainingDays.includes(op.day));
+      if (dayCandidates.length > 1) return { ok: false, reason: 'ambiguous_day', candidates: dayCandidates.map((x) => x.name) };
+      r = dayCandidates[0] || null;
+    } else {
+      r = resolveTargetRoutine(routines, op.day);
+    }
     if (!r) {
       if (op.day) return { ok: false, reason: 'no_routine_for_day', day: op.day };
       return { ok: false, reason: 'no_target' };

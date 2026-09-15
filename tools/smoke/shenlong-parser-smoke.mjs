@@ -1501,6 +1501,241 @@ try {
 
     await clearRoutines(); await forgetLastRoutine();
   }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SECTION P10b — applyAddExercise() day-scoped resolution hardening
+  // ══════════════════════════════════════════════════════════════════════
+  // P10b investigation proved applyAddExercise() had NO ambiguity guard at
+  // all on its explicit-day path (resolveTargetRoutine() → findRoutineByDay()
+  // is a bare first-match Array.find()): 2+ routines sharing a day silently
+  // received the exercise on whichever was first in array order, reachable
+  // through the real Gym app's own routine-creation flow (no cross-routine
+  // day-uniqueness check there). The fix is local to applyAddExercise() —
+  // resolveTargetRoutine() and applyRemoveExercise() (which shares it) are
+  // deliberately untouched; that caller's own independently-reachable day
+  // ambiguity is a separate follow-up, not fixed here. As with P10a, these
+  // tests seed rb_routines_v1 directly (stable ids, exact array order,
+  // multi-day arrays) and assert on stored state, not response text alone.
+  {
+    const benchId = await page.evaluate(async () => {
+      const catalog = await window.Shelron.Routines.loadCatalog();
+      const m = window.Shelron.Routines.matchExercise('bench press', catalog);
+      return m ? m.id : 'barbell_bench_press';
+    });
+    const squatId = await page.evaluate(async () => {
+      const catalog = await window.Shelron.Routines.loadCatalog();
+      const m = window.Shelron.Routines.matchExercise('squat', catalog);
+      return m ? m.id : 'squat';
+    });
+    const mkEx = (name, exId, sets) => ({ exId, name, muscleGroup: 'chest', sets: Array.from({ length: sets }, () => ({ weight: 0, reps: 10 })), restEnabled: true, rest: 90 });
+    const mkRoutine = (id, name, trainingDays, exercises) => ({ id, name, exercises, restEnabled: true, rest: 90, goal: null, trainingDays, updated_at: new Date().toISOString() });
+    const bench = (exId) => mkEx('Barbell Bench Press', exId, 3);
+
+    // P10b-1: unique day — single Friday routine — must succeed and mutate
+    // exactly that routine.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10b-1', 'Push Day', ['fri'], [])]);
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-1: succeeds', /^✓/.test(r), r);
+      ok('P10b-1: exactly that routine receives Bench Press', after[0].exercises.some(e => e.exId === benchId), JSON.stringify(after));
+    }
+
+    // P10b-2: two same-day routines — no mutation, no success, honest
+    // ambiguity (routine-authoring.js's new 'ambiguous_day' reason, rendered
+    // via js/index.js's existing generic add_exercise fallback message).
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-2-a', 'Upper Body', ['fri'], []),
+        mkRoutine('p10b-2-b', 'Push Day', ['fri'], []),
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-2: no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-2: no success response', !/^✓/.test(r), r);
+      ok('P10b-2: an honest ambiguity response, not a false "not found"', /not sure which routine/i.test(r), r);
+    }
+
+    // P10b-3: reversed array order — identical safe outcome, proving array
+    // order is now irrelevant.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-3-b', 'Push Day', ['fri'], []),
+        mkRoutine('p10b-3-a', 'Upper Body', ['fri'], []),
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-3: reversed order — no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-3: reversed order — no success response', !/^✓/.test(r), r);
+    }
+
+    // P10b-4: three same-day routines — no hardcoded 2-candidate assumption.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-4-a', 'Friday One', ['fri'], []),
+        mkRoutine('p10b-4-b', 'Friday Two', ['fri'], []),
+        mkRoutine('p10b-4-c', 'Friday Three', ['fri'], []),
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-4: three same-day routines — no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-4: three same-day routines — ambiguity reported', /not sure which routine/i.test(r), r);
+    }
+
+    // P10b-5: a multi-day routine ([mon,fri]) plus a Friday-only routine —
+    // both are legitimate Friday candidates, so this is ambiguous too.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-5-multi', 'Full Body', ['mon', 'fri'], []),
+        mkRoutine('p10b-5-fri', 'Push Day', ['fri'], []),
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-5: multi-day + Friday-only — no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-5: multi-day + Friday-only — ambiguity reported', /not sure which routine/i.test(r), r);
+    }
+
+    // P10b-6: zero matching day — existing no_routine_for_day failure is
+    // preserved unchanged; the Monday routine is untouched.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10b-6-mon', 'Push Day', ['mon'], [])]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-6: no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-6: existing no_routine_for_day message preserved', /don.t have a routine scheduled for friday/i.test(r), r);
+    }
+
+    // P10b-7a: lastRoutineRef points at Monday; an explicit, unambiguous
+    // Friday match must still win — day is authoritative over lastRoutineRef
+    // even when lastRoutineRef resolves successfully to a DIFFERENT routine.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-7a-mon', 'Push Day', ['mon'], []),
+        mkRoutine('p10b-7a-fri', 'Upper Body', ['fri'], []),
+      ]);
+      await send('Add shoulder press to Monday'); // establishes lastRoutineRef = Monday routine
+      const midway = await routines();
+      ok('P10b-7a: setup — lastRoutineRef now points at Monday', midway.find(x => x.id === 'p10b-7a-mon').exercises.some(e => /shoulder press/i.test(e.name)), midway);
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      const mon = after.find(x => x.id === 'p10b-7a-mon');
+      const fri = after.find(x => x.id === 'p10b-7a-fri');
+      ok('P10b-7a: the Friday routine is selected', fri.exercises.some(e => e.exId === benchId), JSON.stringify(fri));
+      ok('P10b-7a: Monday (lastRoutineRef) is NOT selected', !mon.exercises.some(e => e.exId === benchId), JSON.stringify(mon));
+    }
+
+    // P10b-7b: stronger variant — no Friday routine exists at all,
+    // lastRoutineRef points at Monday. Must NOT fall back to Monday.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10b-7b-mon', 'Push Day', ['mon'], [])]);
+      await send('Add shoulder press to Monday'); // establishes lastRoutineRef = Monday routine
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-7b: no mutation — no fallback to lastRoutineRef when the day matches nothing', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-7b: honest no_routine_for_day, not a silent Monday success', !/^✓/.test(r) && /don.t have a routine scheduled for friday/i.test(r), r);
+    }
+
+    // P10b-8: existing already-present behavior preserved — one Friday
+    // routine (unique for that day), already contains Bench Press.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10b-8', 'Push Day', ['fri'], [bench(benchId)])]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-8: no duplicate exercise added', after[0].exercises.length === before[0].exercises.length, JSON.stringify(after));
+      ok('P10b-8: existing already-present response preserved', /already in/i.test(r), r);
+      ok('P10b-8: routine count and exercise count unchanged', after.length === 1 && after[0].exercises.length === 1, JSON.stringify(after));
+    }
+
+    // P10b-9: no-day behavior preserved — untouched code path. Verifies
+    // lastRoutineRef still resolves the target when no day is given.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-9-a', 'Routine A', ['tue'], []),
+        mkRoutine('p10b-9-b', 'Routine B', ['thu'], []),
+      ]);
+      await send('Add shoulder press to tuesday'); // establishes lastRoutineRef via the untouched day-1-candidate path
+      const r = await send('Add bench press'); // no day at all — must resolve via lastRoutineRef (existing, untouched behavior)
+      const after = await routines();
+      const a = after.find(x => x.id === 'p10b-9-a');
+      const b = after.find(x => x.id === 'p10b-9-b');
+      ok('P10b-9: no-day add resolves via the existing (untouched) lastRoutineRef path', a.exercises.some(e => e.exId === benchId), JSON.stringify(a));
+      ok('P10b-9: the other routine is untouched', !b.exercises.some(e => e.exId === benchId), JSON.stringify(b));
+    }
+
+    // P10b-10: same-day ambiguity with DIFFERING unrelated exercise content
+    // in each routine — neither sibling is partially mutated.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-10-a', 'Upper Body', ['fri'], [mkEx('Squat', squatId, 3)]),
+        mkRoutine('p10b-10-b', 'Push Day', ['fri'], [mkEx('Squat', squatId, 5)]), // different set count — proves no partial/wrong-object mutation either
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-10: neither routine changes at all', JSON.stringify(before) === JSON.stringify(after), r);
+    }
+
+    // P10b-11: a phrase that LOOKS like it names a routine must NOT act as
+    // newly-supported disambiguation grammar — parseAddOrRemove() still
+    // only extracts {exerciseQuery, day}, so with 2 Friday routines this
+    // must remain ambiguous exactly like P10b-2, not silently resolve to
+    // "Push Day" because the text happened to say so.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-11-a', 'Upper Body', ['fri'], []),
+        mkRoutine('p10b-11-b', 'Push Day', ['fri'], []),
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to my Push Day routine on friday');
+      const after = await routines();
+      ok('P10b-11: the named text does not disambiguate — still no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-11: still an honest ambiguity response, not a name-resolved success', !/^✓/.test(r) && /not sure which routine/i.test(r), r);
+    }
+
+    // P10b-12: same-day ambiguity where one candidate already has the
+    // exercise and the other doesn't. EXPECTED (per the actual
+    // implementation, documented before asserting): add_exercise's day
+    // candidates are computed purely from `trainingDays` membership,
+    // independent of exercise content — the already_present check only
+    // ever runs AFTER a single unique target is resolved (routine-
+    // authoring.js:676, unchanged by this fix). So this must resolve
+    // exactly like P10b-2 (ambiguous, no mutation) — the exercise already
+    // existing in ONE candidate must NOT make that candidate the unique
+    // target, and must NOT be silently treated as an idempotent no-op.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10b-12-a', 'Upper Body', ['fri'], [bench(benchId)]), // already has it
+        mkRoutine('p10b-12-b', 'Push Day', ['fri'], []),                  // does not
+      ]);
+      const before = await routines();
+      const r = await send('Add bench press to friday');
+      const after = await routines();
+      ok('P10b-12: neither "already present" state nor "missing" state breaks day-based ambiguity — no mutation', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10b-12: reports ambiguity, not "already in" and not success', !/already in/i.test(r) && !/^✓/.test(r) && /not sure which routine/i.test(r), r);
+    }
+
+    await clearRoutines(); await forgetLastRoutine();
+  }
 } catch (e) {
   ok('FATAL during run', false, e.message + '\n' + e.stack);
 }
