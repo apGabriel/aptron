@@ -709,12 +709,43 @@
     // that has it; if the exercise is genuinely split across several
     // unrelated routines with no other signal, asks instead of guessing.
     let targetRoutine = null;
-    if (op.day) targetRoutine = findRoutineByDay(routines, op.day);
-    if (!targetRoutine && lastRoutineRef) targetRoutine = hits.find((h) => h.r.id === lastRoutineRef.id) ? routines.find((r) => r.id === lastRoutineRef.id) : null;
-    const uniqueRoutines = Array.from(new Set(hits.map((h) => h.r)));
-    if (!targetRoutine && uniqueRoutines.length === 1) targetRoutine = uniqueRoutines[0];
-    if (!targetRoutine) {
-      return { ok: false, reason: 'ambiguous_routine', exerciseName: hits[0].e.name, candidates: uniqueRoutines.map((r) => r.name) };
+    // SHENLONG P10a (2026-09-15, live-verified): an explicit op.day used to
+    // resolve via findRoutineByDay(routines, op.day) — the FULL routine
+    // list, independent of `hits` (the routines that actually contain the
+    // requested exercise). Three proven defects: (1) a day match outside
+    // `hits` made `hits.find(h => h.r === targetRoutine)` below return
+    // undefined, and the next line's `hit.e.sets` access threw a TypeError;
+    // (2) a day matching zero routines left targetRoutine null and fell
+    // through to the lastRoutineRef/uniqueRoutines fallbacks below, silently
+    // mutating a routine on a DIFFERENT day than the one the user named;
+    // (3) a day matching 2+ hit-routines picked the first by array order,
+    // bypassing the ambiguity check entirely — the same silent,
+    // order-dependent selection P9 already fixed for deletion. An explicit
+    // day is now its OWN fully-scoped resolution, built exclusively from
+    // `hits` (never the full routine list): any outcome other than "exactly
+    // one day-scoped hit routine" returns immediately, non-mutating — this
+    // can never fall through to lastRoutineRef or the unscoped
+    // uniqueRoutines check below, mirroring applyDeleteRoutine's P9 day
+    // handling. No new failure reason is introduced — 'exercise_not_found'
+    // and 'ambiguous_routine' already cover these outcomes, and js/index.js
+    // (out of this fix's authorized scope) already renders both correctly,
+    // 'ambiguous_routine' with its candidate list intact.
+    if (op.day) {
+      const dayHits = hits.filter((h) => Array.isArray(h.r.trainingDays) && h.r.trainingDays.includes(op.day));
+      const dayRoutines = Array.from(new Set(dayHits.map((h) => h.r)));
+      if (dayRoutines.length === 1) targetRoutine = dayRoutines[0];
+      else if (dayRoutines.length > 1) {
+        return { ok: false, reason: 'ambiguous_routine', exerciseName: hits[0].e.name, candidates: dayRoutines.map((r) => r.name) };
+      } else {
+        return { ok: false, reason: 'exercise_not_found', query: op.exerciseQuery };
+      }
+    } else {
+      if (lastRoutineRef) targetRoutine = hits.find((h) => h.r.id === lastRoutineRef.id) ? routines.find((r) => r.id === lastRoutineRef.id) : null;
+      const uniqueRoutines = Array.from(new Set(hits.map((h) => h.r)));
+      if (!targetRoutine && uniqueRoutines.length === 1) targetRoutine = uniqueRoutines[0];
+      if (!targetRoutine) {
+        return { ok: false, reason: 'ambiguous_routine', exerciseName: hits[0].e.name, candidates: uniqueRoutines.map((r) => r.name) };
+      }
     }
     const hit = hits.find((h) => h.r === targetRoutine);
     const cur = hit.e.sets && hit.e.sets.length ? hit.e.sets[0] : { weight: 0, reps: DEFAULT_REPS };

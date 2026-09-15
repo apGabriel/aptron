@@ -74,6 +74,12 @@ async function routines() {
   return page.evaluate(() => { try { return JSON.parse(localStorage.getItem('rb_routines_v1')) || []; } catch (e) { return []; } });
 }
 async function clearRoutines() { await page.evaluate(() => localStorage.removeItem('rb_routines_v1')); }
+// P10a: direct localStorage seeding — the P10a day-scoped set_sets tests need
+// exact control over routine id, array order, and trainingDays (two same-day
+// routines, a multi-day routine, reversed order) that chat-driven creation
+// can't reliably produce. Mirrors rb_routines_v1's real schema (same shape
+// applyCreateMulti/applyAddExercise write).
+async function setRoutines(rs) { await page.evaluate((rs) => localStorage.setItem('rb_routines_v1', JSON.stringify(rs)), rs); }
 // Existing test hook (routine-authoring.js's own `forgetLastRoutine`) — resets
 // the module's domain-scoped coreference pointer without touching storage,
 // so a "no context" case can be tested without a page reload.
@@ -1288,6 +1294,212 @@ try {
     ok('P6-9: the final story is not the "still loading" placeholder', !/your day is still loading/i.test(story), story);
 
     await p6.close();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SECTION P10a — applySetSets() day-scoped resolution hardening
+  // ══════════════════════════════════════════════════════════════════════
+  // P10 investigation proved three defects in applySetSets()'s explicit-day
+  // branch (it resolved op.day via findRoutineByDay() against the FULL
+  // routine list, independent of `hits` — the exercise-containing routines):
+  //   1. a day match outside `hits` made `hits.find(...)` return undefined,
+  //      and the next line's `hit.e.sets` access threw a TypeError;
+  //   2. a day matching zero routines fell through to lastRoutineRef/
+  //      uniqueRoutines, silently mutating a routine on the WRONG day;
+  //   3. a day matching 2+ hit-routines picked the first by array order,
+  //      bypassing the ambiguity check — the same bug class P9 already
+  //      fixed for deletion.
+  // P10a scopes op.day resolution exclusively to `hits`. These tests seed
+  // rb_routines_v1 directly (stable synthetic ids, exact array order,
+  // multi-day arrays) rather than building routines via chat — the chat
+  // parser can't reliably produce the precise fixtures these cases need.
+  // Assertions read stored routine state directly, never response text
+  // alone (response text is also checked as a secondary signal).
+  {
+    const benchId = await page.evaluate(async () => {
+      const catalog = await window.Shelron.Routines.loadCatalog();
+      const m = window.Shelron.Routines.matchExercise('bench press', catalog);
+      return m ? m.id : 'barbell_bench_press';
+    });
+    const squatId = await page.evaluate(async () => {
+      const catalog = await window.Shelron.Routines.loadCatalog();
+      const m = window.Shelron.Routines.matchExercise('squat', catalog);
+      return m ? m.id : 'squat';
+    });
+    const mkEx = (name, exId, sets) => ({ exId, name, muscleGroup: 'chest', sets: Array.from({ length: sets }, () => ({ weight: 0, reps: 10 })), restEnabled: true, rest: 90 });
+    const mkRoutine = (id, name, trainingDays, exercises) => ({ id, name, exercises, restEnabled: true, rest: 90, goal: null, trainingDays, updated_at: new Date().toISOString() });
+    const bench = (exId, sets) => mkEx('Barbell Bench Press', exId, sets);
+
+    // P10a-1: day-matching routine exists but does NOT have the exercise;
+    // a different-day routine does. Structural crash reproduction — before
+    // the fix this threw inside apply() (caught by index.js's generic
+    // try/catch as "Something went wrong handling that.").
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-1-fri', 'Upper Body', ['fri'], [mkEx('Squat', squatId, 3)]),
+        mkRoutine('p10a-1-mon', 'Push Day', ['mon'], [bench(benchId, 3)]),
+      ]);
+      const before = await routines();
+      const r = await send('Change bench press to 4 sets on friday');
+      const after = await routines();
+      // No try/catch wraps send() itself — if applySetSets threw (the
+      // pre-fix TypeError), index.js's own handle()-level try/catch still
+      // produces SOME reply ("Something went wrong handling that."), so
+      // send() resolving at all here already proves no page-level crash
+      // reached Playwright. The real proof this is now a clean, HONEST
+      // failure (not a caught crash) is the specific message below.
+      ok('P10a-1: no success response (the day-named routine has no Bench Press)', !/^✓/.test(r), r);
+      ok('P10a-1: an honest "not found" reply, not the generic caught-exception message', !/something went wrong/i.test(r), r);
+      ok('P10a-1: neither routine is mutated', JSON.stringify(before) === JSON.stringify(after), r);
+    }
+
+    // P10a-2: explicit day matches ZERO routines at all; the exercise is
+    // unique on a different day. Must not silently drop the day constraint
+    // and fall back to the unique-hit routine.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10a-2-mon', 'Push Day', ['mon'], [bench(benchId, 3)])]);
+      const before = await routines();
+      const r = await send('Change bench press to 4 sets on friday');
+      const after = await routines();
+      ok('P10a-2: the only (Monday) routine remains unchanged', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10a-2: no success response — the explicit Friday constraint was not dropped', !/^✓/.test(r), r);
+    }
+
+    // P10a-2b: same shape as P10a-2, but lastRoutineRef is deliberately
+    // pointed at the Monday routine first (via a prior successful no-day
+    // set_sets call) — proves an explicit day never consults lastRoutineRef,
+    // even when it points at a routine that DOES have the exercise.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10a-2b-mon', 'Push Day', ['mon'], [bench(benchId, 3)])]);
+      await send('Change bench press to 3 sets'); // no day — uniquely resolves, sets lastRoutineRef
+      const midway = await routines();
+      ok('P10a-2b: setup — lastRoutineRef now points at the Monday routine', midway[0].exercises[0].sets.length === 3, midway);
+      const r = await send('Change bench press to 4 sets on friday');
+      const after = await routines();
+      ok('P10a-2b: an explicit (unmatched) day is not overridden by lastRoutineRef', JSON.stringify(midway) === JSON.stringify(after), r);
+    }
+
+    // P10a-3 / P10a-4: two Friday routines, BOTH contain Bench Press —
+    // genuine ambiguity. Run in both array orders to prove the outcome is
+    // no longer array-order-dependent (both must ask, neither must mutate).
+    for (const [label, order] of [['P10a-3', 'A-first'], ['P10a-4', 'B-first']]) {
+      await clearRoutines(); await forgetLastRoutine();
+      const rA = mkRoutine('p10a-34-a', 'Push A', ['fri'], [bench(benchId, 3)]);
+      const rB = mkRoutine('p10a-34-b', 'Push B', ['fri'], [bench(benchId, 3)]);
+      await setRoutines(order === 'A-first' ? [rA, rB] : [rB, rA]);
+      const before = await routines();
+      const r = await send('Change bench press to 5 sets on friday');
+      const after = await routines();
+      ok(`${label} (${order}): neither Friday routine is modified`, JSON.stringify(before) === JSON.stringify(after), r);
+      ok(`${label} (${order}): ambiguity is reported, not a silent pick`, /more than one routine|which one/i.test(r), r);
+    }
+
+    // P10a-5: two Friday routines, only ONE contains Bench Press — must
+    // resolve unambiguously to that one; the other stays untouched.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-5-a', 'Upper Body', ['fri'], [mkEx('Squat', squatId, 3)]),
+        mkRoutine('p10a-5-b', 'Push Day', ['fri'], [bench(benchId, 3)]),
+      ]);
+      const r = await send('Change bench press to 4 sets on friday');
+      const after = await routines();
+      const a = after.find(x => x.id === 'p10a-5-a');
+      const b = after.find(x => x.id === 'p10a-5-b');
+      ok('P10a-5: the routine containing Bench Press is modified', b.exercises[0].sets.length === 4, r);
+      ok('P10a-5: the other Friday routine (no Bench Press) is untouched', a.exercises[0].sets.length === 3, JSON.stringify(a));
+    }
+
+    // P10a-6: two Friday routines with Bench Press + an unrelated Monday
+    // routine that also has it — ambiguity must stay SCOPED to Friday;
+    // Monday must never be considered or touched.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-6-a', 'Push A', ['fri'], [bench(benchId, 3)]),
+        mkRoutine('p10a-6-b', 'Push B', ['fri'], [bench(benchId, 3)]),
+        mkRoutine('p10a-6-mon', 'Push Mon', ['mon'], [bench(benchId, 3)]),
+      ]);
+      const before = await routines();
+      const r = await send('Change bench press to 5 sets on friday');
+      const after = await routines();
+      ok('P10a-6: no mutation occurs anywhere, including Monday', JSON.stringify(before) === JSON.stringify(after), r);
+      const cands = (r.match(/\(([^)]+)\)/) || [])[1] || '';
+      ok('P10a-6: ambiguity candidates are Friday-only (Push Mon not listed)', /push a/i.test(cands) && /push b/i.test(cands) && !/push mon/i.test(cands), r);
+    }
+
+    // P10a-7: a multi-day routine ([mon, fri]) with Bench Press, plus a
+    // second Friday-only routine with Bench Press — both are legitimate
+    // Friday candidates, so this is ambiguous too.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-7-multi', 'Push Multi', ['mon', 'fri'], [bench(benchId, 3)]),
+        mkRoutine('p10a-7-fri', 'Push Fri', ['fri'], [bench(benchId, 3)]),
+      ]);
+      const before = await routines();
+      const r = await send('Change bench press to 5 sets on friday');
+      const after = await routines();
+      ok('P10a-7: neither the multi-day nor the Friday-only routine is modified', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10a-7: ambiguity is reported', /more than one routine|which one/i.test(r), r);
+    }
+
+    // P10a-8: the day-matched routine contains the SAME exercise twice —
+    // must still be treated as ONE routine candidate (not two), and the
+    // existing "first entry wins" set-count behavior is unaffected by the
+    // day-scoping change.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-8-fri', 'Push Day', ['fri'], [bench(benchId, 3), bench(benchId, 6)]),
+      ]);
+      const r = await send('Change bench press to 4 sets on friday');
+      const rs = await routines();
+      ok('P10a-8: resolves unambiguously (one routine, not treated as 2 candidates)', /^✓/.test(r), r);
+      ok('P10a-8: still exactly one routine, with both original exercise entries intact', rs.length === 1 && rs[0].exercises.length === 2, JSON.stringify(rs));
+      ok('P10a-8: the first (matched) entry now has the new count', rs[0].exercises[0].sets.length === 4, JSON.stringify(rs[0].exercises));
+      ok('P10a-8: the second entry is untouched (existing first-match behavior, unaffected by day-scoping)', rs[0].exercises[1].sets.length === 6, JSON.stringify(rs[0].exercises));
+    }
+
+    // P10a-9: existing NO-DAY ambiguity regression (pre-existing B4b
+    // behavior) remains intact — two routines with Bench Press, no day
+    // named, no recency signal: must still ask and mutate neither.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-9-a', 'Routine A', ['tue'], [bench(benchId, 3)]),
+        mkRoutine('p10a-9-b', 'Routine B', ['thu'], [bench(benchId, 3)]),
+      ]);
+      const before = await routines();
+      const r = await send('Change bench press to 5 sets');
+      const after = await routines();
+      ok('P10a-9: no-day ambiguity regression — neither routine mutates', JSON.stringify(before) === JSON.stringify(after), r);
+      ok('P10a-9: no-day ambiguity regression — still asks which one', /more than one routine|which one/i.test(r), r);
+    }
+
+    // P10a-10: existing lastRoutineRef behavior WITHOUT an explicit day
+    // remains intact — the exercise is unique to the last-touched routine's
+    // context is irrelevant here since uniqueRoutines already resolves it;
+    // this proves lastRoutineRef still disambiguates a genuinely-split
+    // exercise when no day is given (the no-day branch is untouched code,
+    // this is a regression check on that untouched path).
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10a-10-a', 'Routine A', ['tue'], [bench(benchId, 3)]),
+        mkRoutine('p10a-10-b', 'Routine B', ['thu'], [bench(benchId, 3)]),
+      ]);
+      await send('Remove bench press from tuesday'); // Routine A is the sole Tuesday routine — unambiguous day-scoped remove, establishes it as lastRoutineRef via remove_exercise's own remember()
+      const r = await send('Change bench press to 5 sets'); // no day — only Routine B still has it, resolves via uniqueRoutines (lastRoutineRef points at A, which no longer has it)
+      const after = await routines();
+      const b = after.find(x => x.id === 'p10a-10-b');
+      ok('P10a-10: lastRoutineRef path (no day) still works — unique remaining hit resolves correctly', b.exercises[0].sets.length === 5, JSON.stringify(after));
+    }
+
+    await clearRoutines(); await forgetLastRoutine();
   }
 } catch (e) {
   ok('FATAL during run', false, e.message + '\n' + e.stack);
