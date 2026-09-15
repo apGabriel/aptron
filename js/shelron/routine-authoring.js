@@ -709,8 +709,48 @@
     const catalog = await loadCatalog();
     const match = catalog.length ? matchExercise(op.exerciseQuery, catalog) : null;
     const routines = getRoutines();
-    let r = resolveTargetRoutine(routines, op.day);
-    const targets = r ? [r] : routines;
+    // SHENLONG P10c (2026-09-15, live-verified): an explicit op.day used to
+    // resolve via resolveTargetRoutine() → findRoutineByDay() — the same
+    // bare first-match Array.find() P10b fixed for applyAddExercise — but
+    // this caller compounded it with its OWN extra fallback
+    // (`targets = r ? [r] : routines`): when the day match failed
+    // (0 candidates), `r` was null and `targets` silently widened to EVERY
+    // routine in the app, on every day, not just the ones sharing the
+    // named day. Proven live: "Remove bench press from friday" with no
+    // Friday routine at all silently removed Bench Press from an unrelated
+    // Monday routine, reporting full "✓ Removed" success — the explicit
+    // day was dropped with no signal at all. Also proven: 2+ same-day
+    // routines picked the array-first one regardless of whether it even
+    // had the exercise (a false "not found" was possible when it didn't,
+    // and a wrong-routine removal when it did). Deliberately local to
+    // applyRemoveExercise, mirroring P10b's applyAddExercise fix exactly —
+    // resolveTargetRoutine() (shared with applyAddExercise, already fixed
+    // there) and the no-day path below are untouched. Day candidates are
+    // computed from trainingDays membership only, BEFORE any exercise
+    // lookup — unlike P10a's set_sets fix, this must establish day
+    // uniqueness first, or an exercise present in only one of several
+    // same-day routines would become an accidental implicit disambiguator
+    // (the exact false-"not found"/wrong-routine failure mode above).
+    // Exactly one day-matching routine is searched for the exercise
+    // (existing exercise_not_found behavior preserved if it's not there);
+    // zero day-matching routines fails immediately with the same
+    // exercise_not_found reason this function already used for total
+    // failure — no widening to all routines, no lastRoutineRef fallback;
+    // two or more day-matching routines fails immediately with
+    // 'ambiguous_day' (the same reason applyDeleteRoutine and
+    // applyAddExercise already use for this identical shape), before any
+    // exercise lookup or mutation. js/index.js's remove_exercise handler
+    // renders any `!result.ok` with one existing, reason-agnostic honest
+    // message — no js/index.js change needed for either new outcome.
+    let targets;
+    if (op.day) {
+      const dayCandidates = routines.filter((x) => Array.isArray(x.trainingDays) && x.trainingDays.includes(op.day));
+      if (dayCandidates.length > 1) return { ok: false, reason: 'ambiguous_day', candidates: dayCandidates.map((x) => x.name) };
+      targets = dayCandidates.length ? [dayCandidates[0]] : [];
+    } else {
+      const r = resolveTargetRoutine(routines, op.day);
+      targets = r ? [r] : routines;
+    }
     let hitRoutine = null, hitExercise = null;
     for (const cand of targets) {
       const found = findExerciseByQuery(cand.exercises, op.exerciseQuery, match);
