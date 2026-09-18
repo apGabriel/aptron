@@ -762,22 +762,38 @@
       // existence in the CURRENT routine list first — a stale reference
       // (pointing at an id no longer present) is treated as absent rather
       // than silently falling through to the old global-first-match scan.
-      // With no usable reference, every routine containing the exercise is
-      // collected up front, mirroring applySetSets's `hits` pattern
-      // exactly: zero hits preserves the existing exercise_not_found
-      // failure below unchanged; exactly one hit targets that routine
-      // (existing success behavior, unaffected); two or more hits fails
-      // immediately, non-mutating, reusing 'ambiguous_routine' — the same
-      // reason applySetSets already uses for this identical shape.
-      const validRef = lastRoutineRef ? routines.find((r) => r.id === lastRoutineRef.id) : null;
-      if (validRef) {
-        targets = [validRef];
+      // Every routine containing the exercise is collected up front,
+      // mirroring applySetSets's `hits` pattern exactly: zero hits preserves
+      // the existing exercise_not_found failure below unchanged; exactly
+      // one hit targets that routine (existing success behavior,
+      // unaffected); two or more hits fails immediately, non-mutating,
+      // reusing 'ambiguous_routine' — the same reason applySetSets already
+      // uses for this identical shape.
+      //
+      // SHENLONG P11a (2026-09-18, investigated then fixed): P10d's first
+      // version validated lastRoutineRef by routine EXISTENCE only
+      // (`routines.find(r => r.id === lastRoutineRef.id)`) — weaker than
+      // applySetSets's own reference check, which requires the referenced
+      // routine to actually be IN `hits`. Proven live: a lastRoutineRef
+      // left over from an unrelated earlier action (pointing at a routine
+      // that still exists but does not contain the requested exercise)
+      // caused a false exercise_not_found even when exactly one OTHER
+      // routine unambiguously had the exercise — applySetSets, given the
+      // identical shape, correctly ignored the irrelevant reference and
+      // resolved the unique candidate. A reference is now only trusted when
+      // it resolves to a routine that is itself one of the hits — an
+      // existing-but-irrelevant reference is treated the same as an absent
+      // one and falls through to the hits-based resolution below, exactly
+      // like a stale (nonexistent-id) reference already did.
+      const hits = [];
+      routines.forEach((r) => {
+        const e = findExerciseByQuery(r.exercises, op.exerciseQuery, match);
+        if (e) hits.push({ r, e });
+      });
+      const refHit = lastRoutineRef ? hits.find((h) => h.r.id === lastRoutineRef.id) : null;
+      if (refHit) {
+        targets = [refHit.r];
       } else {
-        const hits = [];
-        routines.forEach((r) => {
-          const e = findExerciseByQuery(r.exercises, op.exerciseQuery, match);
-          if (e) hits.push({ r, e });
-        });
         if (hits.length > 1) return { ok: false, reason: 'ambiguous_routine', exerciseName: hits[0].e.name, candidates: hits.map((h) => h.r.name) };
         targets = hits.length ? [hits[0].r] : [];
       }

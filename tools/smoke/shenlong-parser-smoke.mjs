@@ -2141,6 +2141,86 @@ try {
         /^✓/.test(r) && !after.find(x => x.id === 'p10d-10-a').exercises.some(e => e.exId === benchId), r);
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION P11a — applyRemoveExercise() existing-but-irrelevant
+    // lastRoutineRef fix
+    // ══════════════════════════════════════════════════════════════════════
+    // P11a investigation (2026-09-18) proved P10d's `validRef` check
+    // (routine EXISTENCE only) was weaker than applySetSets's own reference
+    // check (routine must be IN `hits` — i.e. actually contain the
+    // requested exercise). A lastRoutineRef left over from an unrelated
+    // earlier action, still pointing at a real routine that simply doesn't
+    // have the requested exercise, caused a false exercise_not_found even
+    // when exactly one OTHER routine unambiguously had it — reproduced live
+    // through the real chat path, not just applyDirect(). The fix requires
+    // the referenced routine to be one of `hits` before trusting it;
+    // otherwise it's treated exactly like an absent/stale reference and
+    // falls through to the existing hits-based resolution.
+
+    // P11a-1: lastRoutineRef points at a routine that EXISTS but does NOT
+    // contain the requested exercise; exactly ONE other routine does — the
+    // irrelevant reference must not block the unambiguous resolution.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p11a-1-ghost', 'Ghost Routine', ['tue'], [mkEx('Squat', squatId, 3)])]);
+      await send('Remove squat from tuesday'); // establishes lastRoutineRef = Ghost Routine (now empty, but still exists)
+      // Ghost Routine remains in storage (unlike P10d-7/8's stale-ref setup,
+      // which removes it entirely) — the distinguishing shape for this fix.
+      await setRoutines([
+        mkRoutine('p11a-1-ghost', 'Ghost Routine', ['tue'], []),
+        mkRoutine('p11a-1-b', 'Routine B', [], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const r = await send('Remove bench press'); // no day — lastRoutineRef still points at the (irrelevant) Ghost Routine
+      const after = await routines();
+      const ghost = after.find(x => x.id === 'p11a-1-ghost');
+      const b = after.find(x => x.id === 'p11a-1-b');
+      ok('P11a-1: succeeds despite the irrelevant lastRoutineRef', /^✓/.test(r), r);
+      ok('P11a-1: the actual (unique) candidate is mutated', !b.exercises.some(e => e.exId === benchId), JSON.stringify(b));
+      ok('P11a-1: the referenced-but-irrelevant routine is untouched', JSON.stringify(ghost.exercises) === '[]', JSON.stringify(ghost));
+      ok('P11a-1: before/after differ only in the actual candidate', JSON.stringify(before.find(x => x.id === 'p11a-1-ghost')) === JSON.stringify(ghost), JSON.stringify(before));
+    }
+
+    // P11a-2: same existing-but-irrelevant reference, but with TWO other
+    // routines containing the exercise — must fail as ambiguous_routine,
+    // never silently pick the referenced routine or a first array match.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p11a-2-ghost', 'Ghost Routine', ['tue'], [mkEx('Squat', squatId, 3)])]);
+      await send('Remove squat from tuesday'); // establishes lastRoutineRef = Ghost Routine (now empty, but still exists)
+      await setRoutines([
+        mkRoutine('p11a-2-ghost', 'Ghost Routine', ['tue'], []),
+        mkRoutine('p11a-2-a', 'Routine A', [], [bench(benchId)]),
+        mkRoutine('p11a-2-b', 'Routine B', [], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      ok('P11a-2: irrelevant ref + 2 real candidates — ambiguous_routine', result.ok === false && result.reason === 'ambiguous_routine', JSON.stringify(result));
+      ok('P11a-2: irrelevant ref + 2 real candidates — zero mutation', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P11a-3: sanity check — a VALID reference (the routine both exists AND
+    // actually contains the exercise) among 2+ candidates still wins,
+    // unaffected by the stricter hits-membership check. Smallest
+    // re-assertion of P10d-6/P10c-11, not a full re-run.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p11a-3-a', 'Routine A', ['tue'], [bench(benchId)]),
+        mkRoutine('p11a-3-b', 'Routine B', ['thu'], [bench(benchId)]),
+      ]);
+      await send('Remove bench press from tuesday'); // establishes lastRoutineRef = Routine A
+      await send('Add bench press to tuesday'); // re-add so there's something to remove via the no-day path
+      const r = await send('Remove bench press'); // no day — Routine A is both referenced AND a real hit
+      const after = await routines();
+      const a = after.find(x => x.id === 'p11a-3-a');
+      const b = after.find(x => x.id === 'p11a-3-b');
+      ok('P11a-3: a genuinely valid reference still resolves directly, not via the ambiguity check', /^✓/.test(r), r);
+      ok('P11a-3: the referenced routine (A) is mutated', !a.exercises.some(e => e.exId === benchId), JSON.stringify(a));
+      ok('P11a-3: the other matching routine (B) is untouched', b.exercises.some(e => e.exId === benchId), JSON.stringify(b));
+    }
+
     await clearRoutines(); await forgetLastRoutine();
   }
 } catch (e) {
