@@ -1767,6 +1767,14 @@ try {
       const m = window.Shelron.Routines.matchExercise('bench press', catalog);
       return m ? m.id : 'barbell_bench_press';
     });
+    // Only needed below by P10d-7/P10d-8's stale-lastRoutineRef setup (a
+    // second, unrelated exercise used to establish a reference via a
+    // routine that's then removed from storage entirely).
+    const squatId = await page.evaluate(async () => {
+      const catalog = await window.Shelron.Routines.loadCatalog();
+      const m = window.Shelron.Routines.matchExercise('squat', catalog);
+      return m ? m.id : 'squat';
+    });
     const mkEx = (name, exId, sets) => ({ exId, name, muscleGroup: 'chest', sets: Array.from({ length: sets }, () => ({ weight: 0, reps: 10 })), restEnabled: true, rest: 90 });
     const mkRoutine = (id, name, trainingDays, exercises) => ({ id, name, exercises, restEnabled: true, rest: 90, goal: null, trainingDays, updated_at: new Date().toISOString() });
     const bench = (exId) => mkEx('Barbell Bench Press', exId, 3);
@@ -1946,26 +1954,191 @@ try {
       ok('P10c-11: reports genuine success', /^✓/.test(r), r);
     }
 
-    // OUT-OF-SCOPE LEGACY BEHAVIOR (regression lock only, NOT fixed by
-    // P10c): no day AND no lastRoutineRef, with the exercise present in 2+
-    // unrelated routines — the fallback `targets = routines` loop has no
-    // ambiguity check at all (unlike applySetSets's own no-day path), so it
-    // silently picks the array-first routine that has the exercise. This
-    // test documents that this PRE-EXISTING behavior is deliberately left
-    // unchanged by P10c, not that it is considered safe.
+    // ══════════════════════════════════════════════════════════════════════
+    // SECTION P10d — applyRemoveExercise() no-day/no-reference ambiguity fix
+    // ══════════════════════════════════════════════════════════════════════
+    // P10d investigation (2026-09-16) proved the no-day branch's fallback
+    // (`targets = r ? [r] : routines`) had no ambiguity check at all when no
+    // valid lastRoutineRef existed: it silently picked whichever routine
+    // containing the exercise happened to be FIRST in array order, and a
+    // stale lastRoutineRef (pointing at an id no longer present) fell
+    // through to that exact same unguarded global scan. The fix mirrors
+    // applySetSets's own no-day branch: a lastRoutineRef is only trusted if
+    // it still resolves against the CURRENT routine list; otherwise every
+    // routine containing the exercise is collected up front and exactly one
+    // must survive before any mutation — two or more now fails immediately
+    // with 'ambiguous_routine' (the same reason applySetSets already uses
+    // for this identical shape), never a silent first-match pick.
+    //
+    // P10d-1/2 replace the old "P10c-legacy" test, which used to lock in
+    // and document the pre-fix silent-first-match behavior as deliberately
+    // out of scope; it is now a regression test for the corrected behavior.
+
+    // P10d-1: two routines contain the exercise, no day, no lastRoutineRef
+    // — must fail as ambiguous, not silently pick one.
     {
       await clearRoutines(); await forgetLastRoutine();
       await setRoutines([
-        mkRoutine('p10c-legacy-a', 'Routine A', ['tue'], [bench(benchId)]),
-        mkRoutine('p10c-legacy-b', 'Routine B', ['thu'], [bench(benchId)]),
+        mkRoutine('p10d-1-a', 'Routine A', ['tue'], [bench(benchId)]),
+        mkRoutine('p10d-1-b', 'Routine B', ['thu'], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      ok('P10d-1: reason is ambiguous_routine', result.ok === false && result.reason === 'ambiguous_routine', JSON.stringify(result));
+      ok('P10d-1: neither routine mutated', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P10d-2: same two routines, reversed array order — result must not
+    // depend on array order (still ambiguous, same candidate set, still no
+    // mutation).
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10d-2-b', 'Routine B', ['thu'], [bench(benchId)]),
+        mkRoutine('p10d-2-a', 'Routine A', ['tue'], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      ok('P10d-2: reversed order — still ambiguous_routine', result.ok === false && result.reason === 'ambiguous_routine', JSON.stringify(result));
+      ok('P10d-2: reversed order — candidate set unchanged regardless of order',
+        JSON.stringify((result.candidates || []).slice().sort()) === JSON.stringify(['Routine A', 'Routine B'].sort()), JSON.stringify(result));
+      ok('P10d-2: reversed order — neither routine mutated', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P10d-3: three routines contain the exercise — still ambiguous, zero
+    // mutation (not just a 2-candidate special case).
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10d-3-a', 'Routine A', [], [bench(benchId)]),
+        mkRoutine('p10d-3-b', 'Routine B', [], [bench(benchId)]),
+        mkRoutine('p10d-3-c', 'Routine C', [], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      ok('P10d-3: three candidates — still ambiguous_routine', result.ok === false && result.reason === 'ambiguous_routine', JSON.stringify(result));
+      ok('P10d-3: three candidates — zero mutation', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P10d-4: exactly ONE routine contains the exercise, no day, no
+    // reference — the unique candidate is unambiguous and must still
+    // resolve and mutate normally.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10d-4-a', 'Routine A', [], [bench(benchId)]),
+        mkRoutine('p10d-4-b', 'Routine B', [], []),
       ]);
       const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
       const after = await routines();
-      const a = after.find(x => x.id === 'p10c-legacy-a');
-      const b = after.find(x => x.id === 'p10c-legacy-b');
-      ok('P10c-legacy (out of scope, documented not fixed): no-day/no-lastRoutineRef still silently picks the array-first routine',
-        result.ok === true && !a.exercises.some(e => e.exId === benchId) && b.exercises.some(e => e.exId === benchId),
-        JSON.stringify({ result, a, b }));
+      const a = after.find(x => x.id === 'p10d-4-a');
+      const b = after.find(x => x.id === 'p10d-4-b');
+      ok('P10d-4: unique candidate succeeds', result.ok === true, JSON.stringify(result));
+      ok('P10d-4: the unique routine is mutated', !a.exercises.some(e => e.exId === benchId), JSON.stringify(a));
+      ok('P10d-4: the unrelated routine is unaffected', JSON.stringify(b.exercises) === '[]', JSON.stringify(b));
+    }
+
+    // P10d-5: zero routines contain the exercise — honest not-found, zero
+    // mutation (unchanged pre-existing behavior, re-asserted for this path).
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10d-5-a', 'Routine A', [], [])]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      ok('P10d-5: exercise_not_found', result.ok === false && result.reason === 'exercise_not_found', JSON.stringify(result));
+      ok('P10d-5: zero mutation', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P10d-6: valid lastRoutineRef with 2+ candidate routines — the
+    // referenced routine is selected; the other matching routine is
+    // untouched (the reference path remains deterministic and unaffected).
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10d-6-a', 'Routine A', ['tue'], [bench(benchId)]),
+        mkRoutine('p10d-6-b', 'Routine B', ['thu'], [bench(benchId)]),
+      ]);
+      await send('Remove bench press from tuesday'); // establishes lastRoutineRef = Routine A
+      await send('Add bench press to tuesday'); // re-add so there's something to remove via the no-day path
+      const r = await send('Remove bench press'); // no day — must resolve via lastRoutineRef, not the ambiguity check
+      const after = await routines();
+      const a = after.find(x => x.id === 'p10d-6-a');
+      const b = after.find(x => x.id === 'p10d-6-b');
+      ok('P10d-6: reports genuine success via lastRoutineRef, not ambiguity', /^✓/.test(r), r);
+      ok('P10d-6: the referenced routine (A) is mutated', !a.exercises.some(e => e.exId === benchId), JSON.stringify(a));
+      ok('P10d-6: the other matching routine (B) is untouched', b.exercises.some(e => e.exId === benchId), JSON.stringify(b));
+    }
+
+    // P10d-7: stale/invalid lastRoutineRef (points at an id no longer
+    // present) with 2+ candidate routines — must be treated as unusable and
+    // fall to the ambiguity check, NEVER the old first-match fallback.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10d-7-ghost', 'Ghost Routine', ['tue'], [mkEx('Squat', squatId, 3)])]);
+      await send('Remove squat from tuesday'); // establishes lastRoutineRef = Ghost Routine
+      // Replace storage entirely: Ghost Routine is gone; two new routines both have Bench Press.
+      await setRoutines([
+        mkRoutine('p10d-7-a', 'Routine A', [], [bench(benchId)]),
+        mkRoutine('p10d-7-b', 'Routine B', [], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      ok('P10d-7: stale ref — ambiguous_routine, not a silent first-match', result.ok === false && result.reason === 'ambiguous_routine', JSON.stringify(result));
+      ok('P10d-7: stale ref — zero mutation', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P10d-8: stale/invalid lastRoutineRef with exactly ONE candidate — a
+    // reference that can't be used must not prevent the (unambiguous)
+    // unique candidate from resolving normally.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10d-8-ghost', 'Ghost Routine', ['tue'], [mkEx('Squat', squatId, 3)])]);
+      await send('Remove squat from tuesday'); // establishes lastRoutineRef = Ghost Routine
+      await setRoutines([
+        mkRoutine('p10d-8-a', 'Routine A', [], [bench(benchId)]),
+        mkRoutine('p10d-8-b', 'Routine B', [], []),
+      ]);
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press' });
+      const after = await routines();
+      const a = after.find(x => x.id === 'p10d-8-a');
+      ok('P10d-8: stale ref + unique candidate — succeeds', result.ok === true, JSON.stringify(result));
+      ok('P10d-8: stale ref + unique candidate — that routine is mutated', !a.exercises.some(e => e.exId === benchId), JSON.stringify(a));
+    }
+
+    // P10d-9: explicit-day behavior (P10c) is unaffected by the no-day
+    // branch change — smallest possible re-assertion, not a re-run of the
+    // full P10c suite: an explicit day matching 2+ routines still fails as
+    // 'ambiguous_day' before any exercise lookup, exactly as P10c-2 proved.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([
+        mkRoutine('p10d-9-a', 'Upper Body', ['fri'], [bench(benchId)]),
+        mkRoutine('p10d-9-b', 'Push Day', ['fri'], [bench(benchId)]),
+      ]);
+      const before = await routines();
+      const result = await applyDirect({ kind: 'remove_exercise', exerciseQuery: 'bench press', day: 'fri' });
+      const after = await routines();
+      ok('P10d-9: explicit-day ambiguity (P10c) unaffected by the P10d fix', result.ok === false && result.reason === 'ambiguous_day', JSON.stringify(result));
+      ok('P10d-9: explicit-day — no mutation', JSON.stringify(before) === JSON.stringify(after), JSON.stringify(after));
+    }
+
+    // P10d-10: no-day + VALID lastRoutineRef, single candidate — the
+    // existing reference-resolves-directly path (already covered end-to-end
+    // by P10c-11) is unaffected by the P10d fix — smallest re-assertion.
+    {
+      await clearRoutines(); await forgetLastRoutine();
+      await setRoutines([mkRoutine('p10d-10-a', 'Routine A', ['tue'], [bench(benchId)])]);
+      await send('Remove bench press from tuesday'); // establishes lastRoutineRef = Routine A
+      await send('Add bench press to tuesday'); // re-add so there's something to remove via the no-day path
+      const r = await send('Remove bench press'); // no day — resolves via lastRoutineRef
+      const after = await routines();
+      ok('P10d-10: no-day + valid lastRoutineRef still resolves directly, unaffected by the ambiguity check',
+        /^✓/.test(r) && !after.find(x => x.id === 'p10d-10-a').exercises.some(e => e.exId === benchId), r);
     }
 
     await clearRoutines(); await forgetLastRoutine();

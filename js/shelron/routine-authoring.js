@@ -725,9 +725,10 @@
     // and a wrong-routine removal when it did). Deliberately local to
     // applyRemoveExercise, mirroring P10b's applyAddExercise fix exactly —
     // resolveTargetRoutine() (shared with applyAddExercise, already fixed
-    // there) and the no-day path below are untouched. Day candidates are
-    // computed from trainingDays membership only, BEFORE any exercise
-    // lookup — unlike P10a's set_sets fix, this must establish day
+    // there) was untouched by P10c; its own no-day fallback's separate
+    // ambiguity defect was tracked as a follow-up and is fixed by P10d
+    // below. Day candidates are computed from trainingDays membership only,
+    // BEFORE any exercise lookup — unlike P10a's set_sets fix, this must establish day
     // uniqueness first, or an exercise present in only one of several
     // same-day routines would become an accidental implicit disambiguator
     // (the exact false-"not found"/wrong-routine failure mode above).
@@ -748,8 +749,38 @@
       if (dayCandidates.length > 1) return { ok: false, reason: 'ambiguous_day', candidates: dayCandidates.map((x) => x.name) };
       targets = dayCandidates.length ? [dayCandidates[0]] : [];
     } else {
-      const r = resolveTargetRoutine(routines, op.day);
-      targets = r ? [r] : routines;
+      // SHENLONG P10d (2026-09-16, investigated then fixed): the no-day
+      // branch used to fall back to `r ? [r] : routines` — a stale or
+      // absent lastRoutineRef silently widened `targets` to EVERY routine
+      // in the app, and the caller's own for-loop below took whichever one
+      // happened to be first in array order and actually contained the
+      // exercise, with no ambiguity check at all (unlike applySetSets's
+      // equivalent no-day branch, which already collects every hit and
+      // requires exactly one before mutating). Proven order-dependent live:
+      // reversing two routines' array order flipped which one lost the
+      // exercise for the identical command. lastRoutineRef is checked for
+      // existence in the CURRENT routine list first — a stale reference
+      // (pointing at an id no longer present) is treated as absent rather
+      // than silently falling through to the old global-first-match scan.
+      // With no usable reference, every routine containing the exercise is
+      // collected up front, mirroring applySetSets's `hits` pattern
+      // exactly: zero hits preserves the existing exercise_not_found
+      // failure below unchanged; exactly one hit targets that routine
+      // (existing success behavior, unaffected); two or more hits fails
+      // immediately, non-mutating, reusing 'ambiguous_routine' — the same
+      // reason applySetSets already uses for this identical shape.
+      const validRef = lastRoutineRef ? routines.find((r) => r.id === lastRoutineRef.id) : null;
+      if (validRef) {
+        targets = [validRef];
+      } else {
+        const hits = [];
+        routines.forEach((r) => {
+          const e = findExerciseByQuery(r.exercises, op.exerciseQuery, match);
+          if (e) hits.push({ r, e });
+        });
+        if (hits.length > 1) return { ok: false, reason: 'ambiguous_routine', exerciseName: hits[0].e.name, candidates: hits.map((h) => h.r.name) };
+        targets = hits.length ? [hits[0].r] : [];
+      }
     }
     let hitRoutine = null, hitExercise = null;
     for (const cand of targets) {
