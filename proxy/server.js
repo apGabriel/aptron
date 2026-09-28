@@ -926,6 +926,7 @@ function rowToGoogle(row) {
 async function listGoogleDelta(cal, syncToken, full) {
   const items = [];
   let pageToken = null, nextSyncToken = null;
+  let windowTimeMin = null, windowTimeMax = null;   // only set for a tokenless (full) pull
   do {
     const params = { calendarId: GCAL_ID, singleEvents: true, maxResults: 250, pageToken: pageToken || undefined };
     if (syncToken && !full) {
@@ -939,13 +940,15 @@ async function listGoogleDelta(cal, syncToken, full) {
       params.timeMin = new Date(Date.now() - FULL_SYNC_WINDOW_DAYS   * 864e5).toISOString();
       params.timeMax = new Date(Date.now() + FUTURE_SYNC_WINDOW_DAYS * 864e5).toISOString();
       params.showDeleted = false;         // clean baseline
+      windowTimeMin = params.timeMin;
+      windowTimeMax = params.timeMax;
     }
     const res = await cal.events.list(params);
     (res.data.items || []).forEach((e) => items.push(e));
     pageToken     = res.data.nextPageToken || null;
     nextSyncToken = res.data.nextSyncToken || nextSyncToken;
   } while (pageToken);
-  return { items, nextSyncToken };
+  return { items, nextSyncToken, windowTimeMin, windowTimeMax };
 }
 async function applyItemsToSupabase(uid, items) {
   const confirmed = items.filter((e) => e.status !== 'cancelled');
@@ -961,25 +964,113 @@ async function applyItemsToSupabase(uid, items) {
   for (const ev of cancelled) await tombstoneByGoogleId(uid, ev.id);
   return { upserts: confirmed.length, tombstones: cancelled.length };
 }
+
+// ── RECONCILE — full-baseline-only cleanup for rows Google no longer mirrors ──
+// A full/baseline pull (showDeleted:false, no syncToken) structurally cannot
+// receive cancellations from Google — applyItemsToSupabase above can only ever
+// ADD or REFRESH rows during a full pull, never remove one. This closes that
+// gap, but ONLY for exactly the window a *completed* full baseline queried, and
+// only for rows a full pull is actually allowed to touch.
+//
+// Coverage predicate (why start/end don't both need to be inside the window):
+// Google's own timeMin/timeMax filter is an interval-OVERLAP test — timeMin is
+// an exclusive lower bound on an event's END, timeMax an exclusive upper bound
+// on an event's START (see the Google Calendar API `events.list` reference for
+// timeMin/timeMax; this repo's own comment above only names the two params, not
+// the inclusive/exclusive overlap semantics, so this predicate is asserted from
+// the documented API contract and pinned down by the Watch Film test case below,
+// which really did come back from the live probe under a narrow same-day window
+// despite starting the evening before). A row is therefore "covered" by
+// [timeMin, timeMax) iff `starts_at < timeMax && ends_at > timeMin` — the exact
+// mirror of Google's own filter. A row whose interval doesn't overlap the
+// window at all was never something this baseline could have confirmed one way
+// or the other, so it is always left untouched regardless of confirmedIds.
+function computeStaleRowIds(rows, timeMin, timeMax, confirmedIds) {
+  const winMin = new Date(timeMin).getTime();
+  const winMax = new Date(timeMax).getTime();
+  return rows.filter((row) => {
+    if (!row.google_event_id) return false;                   // never Aptron-only/local rows
+    if (row.sync_state !== 'synced') return false;             // pending local edit, not a clean mirror
+    if (row.deleted_at) return false;                          // already tombstoned — idempotent
+    if (confirmedIds.has(row.google_event_id)) return false;   // Google still returns this exact occurrence
+    const s = new Date(row.starts_at).getTime();
+    const e = new Date(row.ends_at || row.starts_at).getTime();
+    return s < winMax && e > winMin;                           // overlap test — see comment above
+  }).map((row) => row.id);
+}
+// Reconciliation only ever runs after a full pull whose pagination genuinely
+// completed: no exception escaped listGoogleDelta (a mid-pagination failure
+// throws and is never reached here — see pullSync), AND Google actually handed
+// back a nextSyncToken. nextSyncToken only arrives on a page where Google
+// considers the listing complete, so its absence after a clean pagination loop
+// is Google's own signal that this baseline shouldn't be trusted as exhaustive
+// — not a row-count guess, an evidence-based completeness signal already
+// required anyway to persist the next delta's syncToken.
+function isReconciliationEligible(full, nextSyncToken) {
+  return !!(full && nextSyncToken);
+}
+async function reconcileFullBaseline(uid, timeMin, timeMax, confirmedIds) {
+  const r = await sbFetch(
+    '/events?user_id=eq.' + encodeURIComponent(uid) +
+    '&sync_state=eq.synced&google_event_id=not.is.null&deleted_at=is.null' +
+    '&select=id,google_event_id,starts_at,ends_at'
+  );
+  if (!r.ok) throw new Error('reconcile candidate read failed (HTTP ' + r.status + ')');
+  const rows = await r.json();
+  const staleIds = computeStaleRowIds(rows, timeMin, timeMax, confirmedIds);
+  if (!staleIds.length) return 0;
+  const now = new Date().toISOString();
+  // Repeat the SAME ownership/state predicates the candidate read above used,
+  // as a conditional guard against the GET→PATCH race: if another sync/edit
+  // already moved a row off sync_state='synced' (e.g. the user started a local
+  // edit) or already tombstoned/resurrected it in the meantime, this WHERE
+  // simply won't match that row anymore — Postgres/PostgREST treats "0 rows
+  // matched" as an ordinary success, not an error, so this never breaks the
+  // call, it just stops it from clobbering state that moved on since the GET.
+  // `id IN (...)` alone would happily overwrite whatever the row currently is.
+  const r2 = await sbFetch(
+    '/events?id=in.(' + staleIds.map(encodeURIComponent).join(',') + ')' +
+    '&user_id=eq.' + encodeURIComponent(uid) +
+    '&sync_state=eq.synced&deleted_at=is.null',
+    {
+      method: 'PATCH', headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ deleted_at: now, sync_state: 'synced', updated_at: now }),
+    }
+  );
+  if (!r2.ok) throw new Error('reconcile tombstone failed (HTTP ' + r2.status + ')');
+  // Report what the conditional WHERE actually matched, not what we asked
+  // for — with return=minimal there'd be no way to tell the two apart, and a
+  // row that moved on between the read and this write must be reflected here,
+  // not just silently excluded from the mutation.
+  return (await r2.json()).length;
+}
+
 async function pullSync(uid, conn, cal) {
   let full = !conn.sync_token;
-  let items, nextSyncToken;
+  let items, nextSyncToken, windowTimeMin, windowTimeMax;
   try {
-    ({ items, nextSyncToken } = await listGoogleDelta(cal, conn.sync_token || null, full));
+    ({ items, nextSyncToken, windowTimeMin, windowTimeMax } = await listGoogleDelta(cal, conn.sync_token || null, full));
   } catch (e) {
     if (!isGone(e)) throw e;
     // 410 GONE → the syncToken expired/invalidated. Drop it and do a clean sync.
     console.warn('[sync] syncToken gone for', uid, '→ full resync');
     full = true;
-    ({ items, nextSyncToken } = await listGoogleDelta(cal, null, true));
+    ({ items, nextSyncToken, windowTimeMin, windowTimeMax } = await listGoogleDelta(cal, null, true));
   }
   const counts = await applyItemsToSupabase(uid, items);
+  let reconciled = 0;
+  if (isReconciliationEligible(full, nextSyncToken)) {
+    const confirmedIds = new Set(items.filter((e) => e.status !== 'cancelled').map((e) => e.id));
+    reconciled = await reconcileFullBaseline(uid, windowTimeMin, windowTimeMax, confirmedIds);
+  } else if (full) {
+    console.warn('[sync] full baseline for', uid, 'completed without nextSyncToken — skipping reconciliation this run');
+  }
   await patchConnection(uid, {
     sync_token: nextSyncToken || null,
     last_sync_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   });
-  return Object.assign({ full, seen: items.length }, counts);
+  return Object.assign({ full, seen: items.length, reconciled }, counts);
 }
 
 // ── PUSH — local → Google (creates / patches / deletes for sync_state='local') ─
@@ -1083,5 +1174,12 @@ if (require.main === module) {
     console.log('');
   });
 }
+
+// Exposed ONLY for tools/smoke/calendar-reconciliation-smoke.mjs — no HTTP
+// surface change, no behavior change for the running app. These are the same
+// functions the real sync path calls; the smoke test exercises them directly
+// (with a fake `cal`/`sbFetch`-shaped stub, never a live Google/Supabase call)
+// instead of re-implementing the logic in the test.
+app._internal = { computeStaleRowIds, isReconciliationEligible, listGoogleDelta, pullSync };
 
 module.exports = app;
