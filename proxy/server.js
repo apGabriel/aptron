@@ -1009,14 +1009,69 @@ function computeStaleRowIds(rows, timeMin, timeMax, confirmedIds) {
 function isReconciliationEligible(full, nextSyncToken) {
   return !!(full && nextSyncToken);
 }
+
+const RECONCILE_PAGE_SIZE = 1000;   // see fetchAllRows — matches PostgREST's common default db-max-rows
+
+// ── paginated, verified-complete PostgREST GET ────────────────────────────────
+// An unbounded GET can be silently capped by PostgREST's configured
+// db-max-rows (commonly 1000) WITHOUT a non-2xx status — the only signal is
+// the returned row count falling short of Content-Range's exact total. This
+// is exactly how a production account with 13k+ mirrored rows caused
+// reconcileFullBaseline's original single unbounded GET to examine only a
+// capped subset and silently miss every stale candidate outside it, even
+// though the read itself "succeeded" (r.ok was true). Prefer: count=exact +
+// Content-Range is the SAME convention this file already uses in
+// deleteMirroredEvents above; this generalizes it into an explicit
+// Range/Range-Unit pagination loop that REFUSES to return a result unless
+// the accumulated row count exactly matches what PostgREST itself reports as
+// the total for this filter — fails closed (throws) rather than ever
+// silently treating a partial read as complete. The caller MUST include a
+// stable `order=` in `path` so pages can't skip or duplicate rows as the
+// underlying table changes between requests.
+async function fetchAllRows(path, pageSize) {
+  pageSize = pageSize || RECONCILE_PAGE_SIZE;
+  const rows = [];
+  let offset = 0, total = NaN;
+  do {
+    const r = await sbFetch(path, {
+      method: 'GET',
+      headers: { Prefer: 'count=exact', 'Range-Unit': 'items', Range: offset + '-' + (offset + pageSize - 1) },
+    });
+    if (!r.ok) throw new Error('paged read failed (HTTP ' + r.status + ') at offset ' + offset);
+    const batch = await r.json();
+    const totalPart = (r.headers.get('content-range') || '').split('/')[1];
+    total = totalPart === '*' ? NaN : parseInt(totalPart, 10);
+    if (!Number.isFinite(total)) {
+      throw new Error('paged read: PostgREST did not report an exact total (Content-Range=' +
+        JSON.stringify(r.headers.get('content-range')) + ') — refusing to treat as complete');
+    }
+    rows.push(...batch);
+    offset += batch.length;
+    if (batch.length === 0) break;   // no forward progress; the length check below catches any shortfall
+  } while (offset < total);
+  if (rows.length !== total) {
+    throw new Error('paged read: accumulated ' + rows.length + ' rows but PostgREST reported ' + total +
+      ' total for this filter — refusing to treat as complete');
+  }
+  return rows;
+}
+
 async function reconcileFullBaseline(uid, timeMin, timeMax, confirmedIds) {
-  const r = await sbFetch(
+  // Narrow to the exact overlap window in SQL first — without this, the
+  // candidate set is the user's WHOLE mirrored history (10k+ rows for an
+  // active account), not just this baseline's window. Same strict overlap
+  // test computeStaleRowIds re-checks in JS below (kept, not removed — this
+  // is a defense-in-depth narrowing, not a replacement for it), so a mismatch
+  // here could only ever under-select rows computeStaleRowIds would also
+  // exclude, never smuggle in one it wouldn't have flagged anyway.
+  // order=id.asc gives pagination a stable, deterministic cursor.
+  const rows = await fetchAllRows(
     '/events?user_id=eq.' + encodeURIComponent(uid) +
     '&sync_state=eq.synced&google_event_id=not.is.null&deleted_at=is.null' +
-    '&select=id,google_event_id,starts_at,ends_at'
+    '&starts_at=lt.' + encodeURIComponent(timeMax) +
+    '&ends_at=gt.' + encodeURIComponent(timeMin) +
+    '&select=id,google_event_id,starts_at,ends_at&order=id.asc'
   );
-  if (!r.ok) throw new Error('reconcile candidate read failed (HTTP ' + r.status + ')');
-  const rows = await r.json();
   const staleIds = computeStaleRowIds(rows, timeMin, timeMax, confirmedIds);
   if (!staleIds.length) return 0;
   const now = new Date().toISOString();
@@ -1028,21 +1083,30 @@ async function reconcileFullBaseline(uid, timeMin, timeMax, confirmedIds) {
   // matched" as an ordinary success, not an error, so this never breaks the
   // call, it just stops it from clobbering state that moved on since the GET.
   // `id IN (...)` alone would happily overwrite whatever the row currently is.
-  const r2 = await sbFetch(
-    '/events?id=in.(' + staleIds.map(encodeURIComponent).join(',') + ')' +
-    '&user_id=eq.' + encodeURIComponent(uid) +
-    '&sync_state=eq.synced&deleted_at=is.null',
-    {
-      method: 'PATCH', headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({ deleted_at: now, sync_state: 'synced', updated_at: now }),
-    }
-  );
-  if (!r2.ok) throw new Error('reconcile tombstone failed (HTTP ' + r2.status + ')');
-  // Report what the conditional WHERE actually matched, not what we asked
-  // for — with return=minimal there'd be no way to tell the two apart, and a
-  // row that moved on between the read and this write must be reflected here,
-  // not just silently excluded from the mutation.
-  return (await r2.json()).length;
+  // Batched (not one giant id IN (...)) so a large stale set can never build a
+  // URL past practical length limits; each batch repeats the full guard, and
+  // any batch failing aborts the whole reconciliation rather than reporting a
+  // partial success.
+  let reconciledCount = 0;
+  for (let i = 0; i < staleIds.length; i += RECONCILE_PAGE_SIZE) {
+    const batchIds = staleIds.slice(i, i + RECONCILE_PAGE_SIZE);
+    const r2 = await sbFetch(
+      '/events?id=in.(' + batchIds.map(encodeURIComponent).join(',') + ')' +
+      '&user_id=eq.' + encodeURIComponent(uid) +
+      '&sync_state=eq.synced&deleted_at=is.null',
+      {
+        method: 'PATCH', headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ deleted_at: now, sync_state: 'synced', updated_at: now }),
+      }
+    );
+    if (!r2.ok) throw new Error('reconcile tombstone failed (HTTP ' + r2.status + ')');
+    // Report what the conditional WHERE actually matched, not what we asked
+    // for — with return=minimal there'd be no way to tell the two apart, and a
+    // row that moved on between the read and this write must be reflected here,
+    // not just silently excluded from the mutation.
+    reconciledCount += (await r2.json()).length;
+  }
+  return reconciledCount;
 }
 
 async function pullSync(uid, conn, cal) {
@@ -1180,6 +1244,6 @@ if (require.main === module) {
 // functions the real sync path calls; the smoke test exercises them directly
 // (with a fake `cal`/`sbFetch`-shaped stub, never a live Google/Supabase call)
 // instead of re-implementing the logic in the test.
-app._internal = { computeStaleRowIds, isReconciliationEligible, listGoogleDelta, pullSync };
+app._internal = { computeStaleRowIds, isReconciliationEligible, listGoogleDelta, pullSync, fetchAllRows, reconcileFullBaseline };
 
 module.exports = app;

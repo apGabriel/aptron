@@ -30,7 +30,7 @@
 // Usage: node tools/smoke/calendar-reconciliation-smoke.mjs
 import app from '../../proxy/server.js';
 
-const { computeStaleRowIds, isReconciliationEligible, listGoogleDelta, pullSync } = app._internal;
+const { computeStaleRowIds, isReconciliationEligible, listGoogleDelta, pullSync, fetchAllRows, reconcileFullBaseline } = app._internal;
 
 let failures = 0;
 function check(name, cond, detail) {
@@ -206,7 +206,15 @@ function withFakeFetch(candidateRows, run, opts) {
     }
     if (u.includes('/events') && method === 'GET') {
       calls.candidateGet++;
-      return { ok: true, status: 200, json: async () => candidateRows };
+      // Single-page response (these fixtures are a handful of rows) — still
+      // needs a real Content-Range so fetchAllRows's completeness check
+      // passes. The large-dataset tests below exercise genuine pagination.
+      const n = candidateRows.length;
+      return {
+        ok: true, status: 200,
+        headers: { get: (h) => h.toLowerCase() === 'content-range' ? (n ? '0-' + (n - 1) + '/' + n : '*/0') : null },
+        json: async () => candidateRows,
+      };
     }
     if (u.includes('/events') && method === 'POST') {
       calls.upsertPost++;
@@ -305,7 +313,12 @@ await withFakeFetch(
       // 2. Simulate a concurrent local edit landing on row-raced right after
       //    this read — production code has no way to see this happen.
       table.get('row-raced').sync_state = 'local';
-      return { ok: true, status: 200, json: async () => snapshot };
+      const n = snapshot.length;
+      return {
+        ok: true, status: 200,
+        headers: { get: (h) => h.toLowerCase() === 'content-range' ? (n ? '0-' + (n - 1) + '/' + n : '*/0') : null },
+        json: async () => snapshot,
+      };
     }
     if (u.includes('/events') && method === 'PATCH' && u.includes('id=in.(')) {
       calls.reconcilePatch++;
@@ -426,6 +439,303 @@ await withFakeFetch(
     check('int: zero-stale reports reconciled=0', result.reconciled === 0, result.reconciled);
   }
 );
+
+// ═════════════════════════════════════════════════════════════════════════
+// Layer 3 — realistic scale: >1000 rows, genuine PostgREST-style pagination
+// ═════════════════════════════════════════════════════════════════════════
+// This is the layer that actually reproduces the production incident (an
+// account with 13k+ mirrored rows: reconcileFullBaseline's original single
+// unbounded GET was silently capped by PostgREST's db-max-rows, so stale
+// rows outside whatever page came back were never examined — "r.ok" stayed
+// true the whole time, so nothing in the old code could ever have noticed).
+// Every fixture above this point tops out at a handful of rows — none of
+// them could have caught this. The mock below is a small in-memory "table"
+// plus a real Range/Content-Range-aware GET handler and a real
+// conditional-predicate PATCH handler, driven by the REAL
+// reconcileFullBaseline/fetchAllRows — not a reimplementation of either.
+function parseFilters(url) {
+  const params = new URLSearchParams(url.split('?')[1] || '');
+  const startsLt = params.get('starts_at');
+  const endsGt = params.get('ends_at');
+  return {
+    user_id: (params.get('user_id') || '').replace(/^eq\./, '') || null,
+    sync_state: (params.get('sync_state') || '').replace(/^eq\./, '') || null,
+    google_event_id_not_null: params.get('google_event_id') === 'not.is.null',
+    deleted_at_is_null: params.get('deleted_at') === 'is.null',
+    starts_lt: startsLt ? startsLt.replace(/^lt\./, '') : null,
+    ends_gt: endsGt ? endsGt.replace(/^gt\./, '') : null,
+  };
+}
+function matchesFilters(row, f) {
+  if (f.user_id && row.user_id !== f.user_id) return false;
+  if (f.sync_state && row.sync_state !== f.sync_state) return false;
+  if (f.google_event_id_not_null && row.google_event_id == null) return false;
+  if (f.deleted_at_is_null && row.deleted_at != null) return false;
+  if (f.starts_lt && !(new Date(row.starts_at).getTime() < new Date(f.starts_lt).getTime())) return false;
+  if (f.ends_gt && !(new Date(row.ends_at).getTime() > new Date(f.ends_gt).getTime())) return false;
+  return true;
+}
+function parseRange(fetchOpts) {
+  const h = fetchOpts && fetchOpts.headers && fetchOpts.headers.Range;
+  if (!h) return { start: 0, end: Infinity };
+  const [s, e] = h.split('-').map((x) => parseInt(x, 10));
+  return { start: s, end: e };
+}
+function withBigFakeFetch(database, run, opts) {
+  opts = opts || {};
+  const calls = { candidateGetPages: 0, reconcilePatchBatches: 0, patchedIdBatches: [], connectionPatch: 0, upsertPost: 0 };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, fetchOpts) => {
+    const method = (fetchOpts && fetchOpts.method) || 'GET';
+    const u = String(url);
+    if (u.includes('/calendar_connections')) { calls.connectionPatch++; return { ok: true, status: 200, json: async () => [{}] }; }
+    if (u.includes('/events') && method === 'POST') { calls.upsertPost++; return { ok: true, status: 200, json: async () => [] }; }
+    if (u.includes('/events') && method === 'GET') {
+      const { start, end } = parseRange(fetchOpts);
+      calls.candidateGetPages++;
+      if (opts.failAtOffset != null && start === opts.failAtOffset) {
+        throw new Error('simulated page-fetch failure at offset ' + start);
+      }
+      const filtered = database.filter((r) => matchesFilters(r, parseFilters(u)))
+        .slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const total = filtered.length;
+      const realEnd = Math.min(end, total - 1);
+      const batch = start <= realEnd ? filtered.slice(start, realEnd + 1) : [];
+      const contentRange = batch.length ? (start + '-' + (start + batch.length - 1) + '/' + total) : ('*/' + total);
+      return {
+        ok: true, status: 200,
+        headers: { get: (h2) => h2.toLowerCase() === 'content-range' ? contentRange : null },
+        json: async () => batch,
+      };
+    }
+    if (u.includes('/events') && method === 'PATCH' && u.includes('id=in.(')) {
+      calls.reconcilePatchBatches++;
+      const m = u.match(/id=in\.\(([^)]*)\)/);
+      const requestedIds = m ? decodeURIComponent(m[1]).split(',') : [];
+      const f = parseFilters(u);
+      const body = JSON.parse(fetchOpts.body);
+      const matched = [];
+      for (const id of requestedIds) {
+        const r = database.find((row2) => row2.id === id);
+        if (r && matchesFilters(r, f)) { Object.assign(r, body); matched.push({ id }); }
+      }
+      calls.patchedIdBatches.push(requestedIds);
+      return { ok: true, status: 200, json: async () => matched };
+    }
+    if (u.includes('/events') && method === 'PATCH') { return { ok: true, status: 200, json: async () => [] }; }
+    throw new Error('unexpected fetch in big test: ' + method + ' ' + u);
+  };
+  return run(calls).finally(() => { globalThis.fetch = realFetch; });
+}
+
+const BIG_UID = 'uid-big';
+const bigRow = (id, google_event_id, extra) => ({
+  id, google_event_id,
+  starts_at: '2030-01-15T06:00:00Z', ends_at: '2030-01-15T06:05:00Z',
+  user_id: BIG_UID, sync_state: 'synced', deleted_at: null,
+  ...(extra || {}),
+});
+// 999 current filler rows (ids big-00000..big-00998) + 1 stale row still on
+// page 1 (big-00999) → exactly fills the real production default page size
+// (1000) for a completed first page. Then 3 more rows land entirely on page
+// 2 (big-01000..big-01002): 2 stale, 1 current — "a stale row beyond the
+// first page" and "a valid row beyond the first page", both for real.
+//
+// Built fresh by this factory for EACH test below rather than shared —
+// reconciliation mutates matched rows in place (Object.assign in the PATCH
+// handler), so reusing one array across tests would let an earlier test's
+// writes silently shrink a later test's candidate pool (caught exactly this
+// way while writing this file: a shared array made the page-fetch-failure
+// test below stop requesting a second page at all, since the prior test had
+// already soft-deleted enough rows to make everything fit on page one).
+function buildBigDatabaseWithNoise() {
+  const bigDatabase = [];
+  const bigConfirmedIds = new Set();
+  for (let i = 0; i < 999; i++) {
+    const n = String(i).padStart(5, '0');
+    bigDatabase.push(bigRow('big-' + n, 'ge-filler-' + n));
+    bigConfirmedIds.add('ge-filler-' + n);
+  }
+  bigDatabase.push(bigRow('big-00999', 'ge-stale-page1'));                 // stale, page 1
+  bigDatabase.push(bigRow('big-01000', 'ge-stale-page2-a'));                // stale, page 2
+  bigDatabase.push(bigRow('big-01001', 'ge-current-page2', {}));           // current, page 2
+  bigConfirmedIds.add('ge-current-page2');
+  bigDatabase.push(bigRow('big-01002', 'ge-stale-page2-b'));                // stale, page 2
+  // Noise that must NEVER be touched, regardless of scale/pagination:
+  const otherUserRow     = bigRow('other-user-1', 'ge-other-user', { user_id: 'uid-not-big' });
+  const localOnlyRow     = bigRow('local-only-1', null, { sync_state: 'local' });
+  const alreadyDeletedRow = bigRow('already-deleted-1', 'ge-already-deleted', { deleted_at: '2029-01-01T00:00:00.000Z' });
+  const outOfWindowRow   = bigRow('out-of-window-1', 'ge-out-of-window', { starts_at: '2029-06-01T00:00:00Z', ends_at: '2029-06-01T01:00:00Z' });
+  return {
+    bigConfirmedIds,
+    database: bigDatabase.concat([otherUserRow, localOnlyRow, alreadyDeletedRow, outOfWindowRow]),
+  };
+}
+
+// 1/2/3/4/5/6/7 — >1000 rows, a stale + current row beyond page 1, local-only,
+// other-user, already-deleted, out-of-window — all in one realistic dataset.
+{
+const { database: bigDatabaseWithNoise, bigConfirmedIds } = buildBigDatabaseWithNoise();
+await withBigFakeFetch(bigDatabaseWithNoise, async (calls) => {
+  const reconciled = await reconcileFullBaseline(BIG_UID, TIME_MIN, TIME_MAX, bigConfirmedIds);
+  check('big: candidate read paginates across >1000 rows (2+ pages)', calls.candidateGetPages >= 2, calls.candidateGetPages);
+  check('big: exactly the 3 planted stale rows reconciled (incl. one past page 1)', reconciled === 3, reconciled);
+  const patched = calls.patchedIdBatches.flat();
+  check('big: patched set is exactly the planted stale ids', sameSet(patched, ['big-00999', 'big-01000', 'big-01002']), JSON.stringify(patched));
+  check('big: current row beyond page 1 preserved (not in patched set)', !patched.includes('big-01001'));
+  check('big: other-user row never touched', !patched.includes('other-user-1'));
+  check('big: local-only row never touched', !patched.includes('local-only-1'));
+  check('big: already-deleted row never touched', !patched.includes('already-deleted-1'));
+  check('big: out-of-window row never touched', !patched.includes('out-of-window-1'));
+});
+}
+
+// 8/9 — a page-fetch failure after at least one successful page must reject
+// and issue ZERO PATCH requests — never treat a partial read as complete.
+// Fresh dataset (see buildBigDatabaseWithNoise's comment — the prior test's
+// PATCH already mutated its own copy, so this gets its own unmutated 1003).
+{
+const { database: bigDatabaseWithNoise2, bigConfirmedIds: bigConfirmedIds2 } = buildBigDatabaseWithNoise();
+await withBigFakeFetch(bigDatabaseWithNoise2, async (calls) => {
+  let threw = false;
+  try { await reconcileFullBaseline(BIG_UID, TIME_MIN, TIME_MAX, bigConfirmedIds2); }
+  catch (e) { threw = /simulated page-fetch failure/.test(e.message); }
+  check('big-failure: incomplete candidate read rejects', threw);
+  check('big-failure: at least one page had already succeeded', calls.candidateGetPages >= 1, calls.candidateGetPages);
+  check('big-failure: zero PATCH requests issued on an incomplete read', calls.reconcilePatchBatches === 0, calls.reconcilePatchBatches);
+}, { failAtOffset: 1000 });   // mirrors reconcileFullBaseline's real default page size
+}
+
+// Multi-batch PATCH: every row in scope is stale (1200 of them) — forces the
+// WRITE side to batch too (id IN (...) with 1200 UUIDs would risk URL-length
+// limits in one request), proving the batching loop covers every row exactly
+// once and never silently drops a batch.
+{
+  const allStaleDatabase = [];
+  for (let i = 0; i < 1200; i++) {
+    const n = String(i).padStart(5, '0');
+    allStaleDatabase.push(bigRow('allstale-' + n, 'ge-allstale-' + n));
+  }
+  await withBigFakeFetch(allStaleDatabase, async (calls) => {
+    const reconciled = await reconcileFullBaseline(BIG_UID, TIME_MIN, TIME_MAX, new Set());
+    check('multibatch: all 1200 stale rows reconciled', reconciled === 1200, reconciled);
+    check('multibatch: PATCH issued in more than one batch', calls.reconcilePatchBatches >= 2, calls.reconcilePatchBatches);
+    check('multibatch: every batch stayed within the page-size cap', calls.patchedIdBatches.every((b) => b.length <= 1000));
+    const allIds = calls.patchedIdBatches.flat();
+    check('multibatch: union of all batches covers every row exactly once, no duplicates/drops',
+      allIds.length === 1200 && new Set(allIds).size === 1200);
+  });
+}
+
+// 10/11 (big scale) — conditional PATCH still protects a row whose state
+// changes between the read and the write, and the reported count reflects
+// only what was actually matched — same guarantees as the small-scale race
+// test above, now proven at realistic scale too.
+{
+  const raceDatabase = [];
+  for (let i = 0; i < 50; i++) {
+    const n = String(i).padStart(5, '0');
+    raceDatabase.push(bigRow('big-' + n, 'ge-filler-' + n));
+  }
+  raceDatabase.push(bigRow('big-raced', 'ge-raced-stale'));
+  let getCount = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, fetchOpts) => {
+    const method = (fetchOpts && fetchOpts.method) || 'GET';
+    const u = String(url);
+    if (u.includes('/calendar_connections')) return { ok: true, status: 200, json: async () => [{}] };
+    if (u.includes('/events') && method === 'GET') {
+      getCount++;
+      const { start, end } = parseRange(fetchOpts);
+      const filtered = raceDatabase.filter((r) => matchesFilters(r, parseFilters(u)))
+        .slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const total = filtered.length;
+      const realEnd = Math.min(end, total - 1);
+      const batch = (start <= realEnd ? filtered.slice(start, realEnd + 1) : []).map((r) => ({ ...r }));
+      if (getCount === 1) {
+        // Simulate the race right after the (first) page is served.
+        const raced = raceDatabase.find((r) => r.id === 'big-raced');
+        if (raced) raced.sync_state = 'local';
+      }
+      const cr = batch.length ? (start + '-' + (start + batch.length - 1) + '/' + total) : ('*/' + total);
+      return { ok: true, status: 200, headers: { get: (h) => h.toLowerCase() === 'content-range' ? cr : null }, json: async () => batch };
+    }
+    if (u.includes('/events') && method === 'PATCH' && u.includes('id=in.(')) {
+      const m = u.match(/id=in\.\(([^)]*)\)/);
+      const requestedIds = m ? decodeURIComponent(m[1]).split(',') : [];
+      const f = parseFilters(u);
+      const body = JSON.parse(fetchOpts.body);
+      const matched = [];
+      for (const id of requestedIds) {
+        const r = raceDatabase.find((row2) => row2.id === id);
+        if (r && matchesFilters(r, f)) { Object.assign(r, body); matched.push({ id }); }
+      }
+      return { ok: true, status: 200, json: async () => matched };
+    }
+    throw new Error('unexpected fetch: ' + method + ' ' + u);
+  };
+  try {
+    const reconciled = await reconcileFullBaseline(BIG_UID, TIME_MIN, TIME_MAX, new Set());
+    check('race (scale): raced row excluded from the reconciled count', reconciled === 50, reconciled);
+    check('race (scale): raced row retained its changed state, not tombstoned',
+      raceDatabase.find((r) => r.id === 'big-raced').sync_state === 'local' &&
+      !raceDatabase.find((r) => r.id === 'big-raced').deleted_at);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+// ── fetchAllRows direct tests — fast, small-page-size edge cases ───────────
+function makeTinyPagedFetch(rows, tinyOpts) {
+  tinyOpts = tinyOpts || {};
+  return async (url, fetchOpts) => {
+    const { start, end } = parseRange(fetchOpts);
+    if (tinyOpts.failAtOffset != null && start === tinyOpts.failAtOffset) throw new Error('simulated tiny page failure at ' + start);
+    const total = tinyOpts.reportedTotalOverride != null ? tinyOpts.reportedTotalOverride : rows.length;
+    const realEnd = Math.min(end, rows.length - 1);
+    const batch = start <= realEnd ? rows.slice(start, realEnd + 1) : [];
+    const cr = tinyOpts.omitContentRange ? null : (batch.length ? (start + '-' + (start + batch.length - 1) + '/' + total) : ('*/' + total));
+    return { ok: true, status: 200, headers: { get: (h) => h.toLowerCase() === 'content-range' ? cr : null }, json: async () => batch };
+  };
+}
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = makeTinyPagedFetch(Array.from({ length: 7 }, (_, i) => ({ id: 'tiny-' + i })));
+  const rows = await fetchAllRows('/events?x=1', 3);
+  globalThis.fetch = realFetch;
+  check('fetchAllRows: multi-page (pageSize=3, 7 rows) accumulates all rows', rows.length === 7, rows.length);
+}
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = makeTinyPagedFetch([{ id: 'x' }], { omitContentRange: true });
+  let threw = false;
+  try { await fetchAllRows('/events?x=1', 10); } catch (e) { threw = /did not report an exact total/.test(e.message); }
+  globalThis.fetch = realFetch;
+  check('fetchAllRows: missing Content-Range total → fails closed', threw);
+}
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = makeTinyPagedFetch([{ id: 'x' }, { id: 'y' }], { reportedTotalOverride: 5 });
+  let threw = false;
+  try { await fetchAllRows('/events?x=1', 2); } catch (e) { threw = /accumulated 2 rows but PostgREST reported 5/.test(e.message); }
+  globalThis.fetch = realFetch;
+  check('fetchAllRows: accumulated-count-vs-reported-total mismatch → fails closed', threw);
+}
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = makeTinyPagedFetch([]);
+  const rows = await fetchAllRows('/events?x=1', 10);
+  globalThis.fetch = realFetch;
+  check('fetchAllRows: empty valid result → returns [] without throwing', Array.isArray(rows) && rows.length === 0, rows.length);
+}
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = makeTinyPagedFetch(Array.from({ length: 10 }, (_, i) => ({ id: 'z' + i })), { failAtOffset: 3 });
+  let threw = false;
+  try { await fetchAllRows('/events?x=1', 3); } catch (e) { threw = /simulated tiny page failure at 3/.test(e.message); }
+  globalThis.fetch = realFetch;
+  check('fetchAllRows: failure on a later page rejects (fails closed)', threw);
+}
 
 Date.now = realDateNow;
 console.log(failures ? '\n' + failures + ' FAILED' : '\nall passed');
