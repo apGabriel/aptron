@@ -86,7 +86,11 @@
       client_id: r.id,
       name: r.name || 'Untitled routine',
       exercises: r.exercises || [],
-      updated_at: r.updated_at || new Date().toISOString()
+      updated_at: r.updated_at || new Date().toISOString(),
+      training_days: Array.isArray(r.trainingDays) ? r.trainingDays : [],
+      goal: r.goal || null,
+      rest: (r.rest != null ? r.rest : null),
+      rest_enabled: r.restEnabled !== false
     };
   }
   const logClientId = (exId, date) => exId + '|' + date;
@@ -141,7 +145,11 @@
         id: row.client_id || row.id,
         name: row.name,
         exercises: row.exercises || [],
-        updated_at: row.updated_at || row.created_at
+        updated_at: row.updated_at || row.created_at,
+        trainingDays: Array.isArray(row.training_days) ? row.training_days : [],
+        goal: row.goal || null,
+        rest: (row.rest != null ? row.rest : null),
+        restEnabled: row.rest_enabled !== false
       }));
       if (window.__gymRBMergeRoutines) window.__gymRBMergeRoutines(mapped);
     } catch (e) {}
