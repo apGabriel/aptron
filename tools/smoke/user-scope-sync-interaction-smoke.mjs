@@ -132,11 +132,11 @@ try {
     });
     const r3a = await page.evaluate(async () => {
       const mod = await import('/js/auth/user_scope.js');
-      return { changed: mod.reconcileUserScope('uidA') }; // first-ever run: grandfathers, does not clear
+      return { changed: mod.reconcileUserScope('uidA') }; // first-ever run (ADR-025): clears too, now
     });
-    ok('T3a. first-ever reconcile grandfathers A\'s existing memory', r3a.changed === false);
+    ok('T3a. first-ever reconcile on an unreconciled browser clears (ADR-025)', r3a.changed === true);
     const stillA = await page.evaluate(() => localStorage.getItem('shenlong_memory_v1'));
-    ok('T3b. A\'s memory survives the grandfather run', stillA !== null);
+    ok('T3b. pre-existing memory does NOT survive the first-ever run — no grandfathering', stillA === null);
 
     // User B arrives on the same browser.
     const r3b = await page.evaluate(async () => {
@@ -182,14 +182,17 @@ try {
       window.__resolveAuthReady();
     });
     await wait(page, 200);
+    // Establish uidA as already onboarded on this browser (ADR-025: the
+    // first-ever reconcile now clears too, so do it before seeding uidA's
+    // OWN representative data — otherwise this step would just wipe it).
+    await page.evaluate(async () => {
+      const mod = await import('/js/auth/user_scope.js');
+      mod.reconcileUserScope('uidA');
+    });
     await page.evaluate(() => {
       localStorage.setItem('aptron_profile_v1', JSON.stringify({ name: 'admin', theme: 'neon' }));
       localStorage.setItem('po_coach_v1', JSON.stringify({ sessions: [1] }));
       localStorage.setItem('rb_routines_v1', JSON.stringify([{ id: 'r1' }]));
-    });
-    const r4a = await page.evaluate(async () => {
-      const mod = await import('/js/auth/user_scope.js');
-      return mod.reconcileUserScope('uidA'); // first-ever run
     });
     const r4b = await page.evaluate(async () => {
       const mod = await import('/js/auth/user_scope.js');
@@ -201,7 +204,7 @@ try {
       routines: localStorage.getItem('rb_routines_v1'),
     }));
     ok('T4. same-uid re-login does not clear ANY representative domain (not read as a cross-user migration)',
-      r4a === false && r4b === false && state.profile !== null && state.coach !== null && state.routines !== null);
+      r4b === false && state.profile !== null && state.coach !== null && state.routines !== null);
     await page.close();
   }
 
@@ -220,13 +223,14 @@ try {
     });
     // The reconcile/clear runs BEFORE APP_AUTH_READY resolves — this is the
     // exact ordering js/auth/main.js's markReady() uses.
-    const r5 = await page.evaluate(async () => {
+    // Exploratory-only run (first-ever reconcile on THIS harness instance,
+    // not asserted below) — the real race this test targets needs an
+    // actual uid *change*, exercised properly on page2 below with a
+    // pre-seeded aptron_last_uid.
+    await page.evaluate(async () => {
       const mod = await import('/js/auth/user_scope.js');
-      return mod.reconcileUserScope('uidB'); // different uid: first-ever run on THIS harness -> grandfather
+      return mod.reconcileUserScope('uidB');
     });
-    // First-ever run grandfathers rather than clearing — so exercise the
-    // REAL race by seeding a prior uid marker first, reloading, then
-    // reconciling to a different one, all before APP_AUTH_READY resolves.
     await page.close();
 
     const page2 = await freshPage();

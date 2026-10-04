@@ -113,21 +113,27 @@ export function clearUserScopedState() {
 // consumer is allowed to run (js/auth/main.js gates APP_AUTH_READY on
 // this). Returns true if a clear happened.
 //
-// First-ever run on a browser (no marker yet, e.g. right after this fix
-// ships) deliberately does NOT clear — it grandfathers whatever's
-// present in to the currently authenticated uid instead of discarding a
-// real, legitimate cache on the one transition deploy. Every SUBSEQUENT
-// uid change on this browser clears normally. A currently-contaminated
-// browser's already-written Supabase rows are a separate, explicit data
-// cleanup — this only stops FUTURE cross-user writes.
+// ADR-025 (supersedes this point of ADR-024): first-ever run on a browser
+// (no marker yet) now ALSO clears, instead of grandfathering whatever's
+// present in to the currently authenticated uid. ADR-024 accepted that gap
+// as a one-time, deploy-day-only cost; live evidence instead showed it
+// recurring indefinitely — every never-yet-reconciled browser (a QA
+// machine, a reset profile, a fresh install) hits the same "no marker"
+// branch on its very first login, with no way to tell "genuinely fresh
+// device" apart from "stale data, never reconciled" from localStorage
+// alone. The cost of clearing unconditionally is low: a legitimate
+// single-device user with a real remote row gets it re-pulled into local
+// storage within the same `APP_AUTH_READY` boot (sync.js's init() checks
+// remote before deciding whether to push), so this trades a narrow,
+// bounded loss (locally-made, never-yet-synced offline edits on a
+// never-before-reconciled browser) for closing an unbounded, recurring
+// cross-account leak. A currently-contaminated browser's already-written
+// Supabase rows are a separate, explicit data cleanup — this only stops
+// FUTURE cross-user writes.
 export function reconcileUserScope(uid) {
   if (!uid) return false;
   let last = null;
   try { last = localStorage.getItem(LAST_UID_KEY); } catch (e) {}
-  if (last === null) {
-    try { localStorage.setItem(LAST_UID_KEY, uid); } catch (e) {}
-    return false;
-  }
   if (last === uid) return false;
   clearUserScopedState();
   try { localStorage.setItem(LAST_UID_KEY, uid); } catch (e) {}
