@@ -1403,6 +1403,11 @@
         : alreadySaved
         ? '<span class="wr-outfit-saved-badge">✓ Saved</span>'
         : '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-save" data-save="' + o.id + '" type="button">＋ Save Outfit</button>';
+      // 3D Outfit Visualization entry point (pre-Shelron stopgap,
+      // see js/wardrobe-fitting-room/fitting-room.js) -- passes the
+      // outfit's existing pieces array straight through, no new
+      // selection state.
+      const try3d = '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-3d" data-try3d="' + o.id + '" type="button">🧍 Try in 3D</button>';
       return (
         '<div class="wr-outfit-card">' +
           '<div class="wr-outfit-strip">' + slots + '</div>' +
@@ -1417,9 +1422,17 @@
               '<span><b>' + o.pieces.length + '</b> pieces</span>' +
               '<span><b>' + Weather.ICON[o.season] + '</b> ' + o.season + '</span>' +
             '</div>' +
-            '<div class="wr-outfit-actions">' + action + '</div>' +
+            '<div class="wr-outfit-actions">' + try3d + action + '</div>' +
           '</div>' +
         '</div>');
+    }
+
+    function openFittingRoom(o) {
+      if (window.WardrobeFittingRoom && typeof window.WardrobeFittingRoom.open === 'function') {
+        window.WardrobeFittingRoom.open(o.pieces);
+      } else {
+        Toast.show('3D viewer unavailable');
+      }
     }
 
     function renderOutfits(outfits) {
@@ -1431,6 +1444,11 @@
       out.innerHTML = currentOutfits.map((o) => outfitCard(o, 'generated')).join('');
       out.querySelectorAll('[data-save]').forEach((b) =>
         b.addEventListener('click', () => saveOutfit(b.dataset.save)));
+      out.querySelectorAll('[data-try3d]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const o = currentOutfits.find((x) => x.id === b.dataset.try3d);
+          if (o) openFittingRoom(o);
+        }));
     }
 
     function saveOutfit(id) {
@@ -1458,6 +1476,11 @@
           // its badge back to a re-clickable Save button.
           renderOutfits(currentOutfits);
           Toast.show('Removed');
+        }));
+      wrap.querySelectorAll('[data-try3d]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const o = saved.find((x) => x.id === b.dataset.try3d);
+          if (o) openFittingRoom(o);
         }));
     }
 
