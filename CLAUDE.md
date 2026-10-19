@@ -223,8 +223,15 @@ per-user mirror driven by the proxy (push-then-pull, local-wins).
 
 # AI Architecture — Shelron
 
-Aptron's AI platform is **Shelron** — designed 2026-07-21, architecture only,
-no implementation yet. Full design:
+Aptron's AI platform is **Shelron** — designed 2026-07-21. Corrected 2026-09-02
+(this line went stale for 5+ weeks): Shelron is not unimplemented architecture
+— it is live, as **Shenlong**, the dashboard's assistant (`js/index.js`, the
+`.aios-chat` card). Two of Shelron's 8 engines exist today (both deterministic,
+zero-AI: `isValidCalendarDate`, `parseStrictTime` in `js/shelron/intent-engine.js`);
+the rest (Context Builder, Memory Engine, Calendar Engine, Decision Engine,
+Prompt Builder, Agent Manager) remain designed, not built — Shenlong's actual
+reasoning today is the hybrid pattern described below, not those engines. Full
+design and current status:
 
 ```
 aptron Brain/02 Architecture/Shelron.md

@@ -157,6 +157,20 @@ body::before {
   font-size: 11px; letter-spacing: 0.04em; color: var(--text-tertiary);
   margin-top: 2px;
 }
+/* Visual hierarchy across the stacked right-column panels -- previously all
+   four (Outfit Generator, Saved Outfits, Recommendations, Style Profile)
+   used identical chrome and read as one undifferentiated stack of gray
+   boxes. The Outfit Generator is the page's actual hero interaction (the
+   thing "styled by AI" refers to), so it gets a touch more presence; the
+   supporting panels turn down their own visual weight to match, so the
+   emphasis is relative, not an added element. */
+.wr-panel-hero {
+  border-color: color-mix(in srgb, var(--wr-accent) 30%, var(--border));
+  box-shadow: var(--glass-shadow), 0 0 0 1px color-mix(in srgb, var(--wr-accent) 10%, transparent);
+}
+.wr-panel-hero .wr-panel-title { font-size: 21px; }
+.wr-panel-quiet { background: var(--bg-secondary); box-shadow: none; }
+.wr-panel-quiet .wr-panel-title { font-size: 16px; }
 
 /* ---------- Buttons ---------- */
 .wr-btn {
@@ -250,7 +264,13 @@ body::before {
   width: 24px; height: 24px; border-radius: 50%;
   background: rgba(5, 5, 6, 0.6); border: none; color: #fff;
   font-size: 12px; line-height: 1; cursor: pointer;
-  opacity: 0; transition: opacity 0.15s; backdrop-filter: blur(4px);
+  /* Faintly visible by default (not opacity:0) -- this per-garment
+     generation lock is Aptron's one real differentiator against every
+     competitor reviewed (none offer force-include/exclude on individual
+     items), so it should be discoverable, not hidden entirely behind a
+     hover a touch-device user may never trigger. Still steps up on
+     hover/focus/locked exactly as before. */
+  opacity: 0.38; transition: opacity 0.15s; backdrop-filter: blur(4px);
   z-index: 1;
 }
 .wr-item:hover .wr-item-lock, .wr-item:focus-within .wr-item-lock { opacity: 1; }
@@ -277,6 +297,29 @@ body::before {
 .wr-item-add-icon { font-size: 26px; line-height: 1; }
 .wr-item-add-label { font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
 
+/* Items that don't suit the currently-active season/weather stay fully
+   browsable but read quieter — surfaces Weather.suitsSeason() (already
+   computed for outfit generation + gap analysis) directly on the closet
+   grid instead of only inside AI output, so forgotten off-season pieces are
+   still discoverable at a glance without a second "stats" surface. */
+.wr-item-offseason img { opacity: 0.5; }
+.wr-item-offseason .wr-item-meta { opacity: 0.7; }
+
+/* Keyboard focus — reuses the existing, protected --focus-ring token
+   (never chained to --wr-accent, see :root comment) so a future accent
+   change can't make focus invisible. Was previously only applied to
+   .wr-input/.wr-select; the closet grid, chips and segmented controls had
+   no visible focus state at all. */
+.wr-item:focus-visible,
+.wr-cat-chip:focus-visible,
+.wr-portrait:focus-visible,
+.wr-season-toggle button:focus-visible,
+.wr-seg button:focus-visible,
+.wr-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .wr-empty {
   grid-column: 1 / -1;
   text-align: center; color: var(--text-tertiary);
@@ -288,6 +331,13 @@ body::before {
 .wr-outfit-card {
   border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--bg-secondary); overflow: hidden;
+  animation: wr-card-in 0.32s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes wr-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wr-outfit-card { animation: none; }
 }
 .wr-outfit-strip {
   display: flex; gap: 0; height: 130px; background: var(--bg-deep);
@@ -324,6 +374,17 @@ body::before {
 .wr-outfit-meta b { color: var(--text-secondary); font-weight: 600; }
 .wr-outfit-actions { margin-top: 11px; display: flex; gap: 8px; }
 .wr-outfit-actions .wr-btn { flex: 1; }
+/* Persistent saved-state -- previously a generated card gave no lasting sign
+   it had already been saved (only a toast that fades in ~2s); this reads
+   the same Store.savedOutfits() list the Saved Outfits panel already uses,
+   no new storage. */
+.wr-outfit-saved-badge {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 15px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 700; color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+}
 
 /* ---------- Recommendation feed (gap analysis) ---------- */
 .wr-rec-feed { display: flex; flex-direction: column; gap: 9px; }
@@ -395,7 +456,20 @@ body::before {
   border-radius: var(--radius-md); margin-bottom: 14px;
   background: var(--bg-secondary);
 }
-.wr-modal h3 { font-family: var(--font-display); font-size: 18px; margin-bottom: 12px; }
+.wr-modal-title {
+  display: flex; align-items: center; gap: 9px; margin-bottom: 14px;
+}
+.wr-modal-title h3 {
+  font-family: var(--font-display); font-size: 19px; font-weight: 700;
+}
+.wr-modal-title .wr-item-swatch {
+  width: 15px; height: 15px; margin: 0;
+}
+.wr-modal-season {
+  font-size: 11px; font-weight: 600; color: var(--text-tertiary);
+  padding: 3px 9px; border-radius: 999px; background: var(--bg-secondary);
+  border: 1px solid var(--border-soft); margin-left: auto; white-space: nowrap;
+}
 .wr-input, .wr-select {
   width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
   background: var(--bg-secondary); border: 1px solid var(--border);
@@ -403,6 +477,18 @@ body::before {
   outline: none; transition: border-color 0.15s;
 }
 .wr-input:focus, .wr-select:focus { border-color: var(--focus-ring); }
+/* Custom chevron, same convention already established in css/gym.css's
+   .po-hist-filter / .rb-search selects -- strips native <select> chrome
+   (which reads flat/generic against the editorial rest of this page) and
+   redraws the exact same affordance in the page's own ink color. */
+.wr-select {
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%23B8B6B0' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px;
+}
+html:is([data-apt-theme="light"], [data-apt-theme="nordic"], [data-apt-theme="custom-light"]) .wr-select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%231D2129' stroke-width='1.5' fill='none' stroke-linecap='round'/></svg>");
+}
 .wr-modal-label {
   display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--text-tertiary); margin: 12px 0 6px;

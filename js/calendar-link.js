@@ -404,6 +404,10 @@
     setSub('Syncing with Google…', '');
     try {
       const res = await authedFetch(API + '/api/calendar/sync/trigger', { method: 'POST', signal: AbortSignal.timeout(30000) });
+      // 202 = the server did NOT run a sync: another one for this user already
+      // holds the lock. res.ok is true for it, but nothing was pulled, so it must
+      // not fall through to the "freshly pulled events" reload below.
+      if (res.status === 202) { setSub('A sync is already running — try Refresh again in a moment', 'is-warn'); return; }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       await res.json().catch(() => ({}));
       // Show freshly pulled Google events, then re-read status/health.

@@ -1069,6 +1069,7 @@
       const grid = document.getElementById('wrCloset');
       if (!grid) return;
       const items = visible();
+      const season = Weather.activeSeason();
       let html = '';
       items.forEach((i) => {
         const cat = CATEGORIES.find((c) => c.id === i.category);
@@ -1076,8 +1077,12 @@
         const lockIcon = lock === 'include' ? '📌' : lock === 'exclude' ? '🚫' : '🔓';
         const lockTitle = lock === 'include' ? 'Forced in — tap to exclude'
           : lock === 'exclude' ? 'Excluded — tap to clear' : 'Tap to force into outfits';
+        // Reuses the same suitsSeason() check the AI generator and gap
+        // analysis already run -- surfaces it quietly (a dimmed image) so
+        // off-season pieces stay findable without a separate stats screen.
+        const offSeason = !Weather.suitsSeason(i, season);
         html +=
-          '<div class="wr-item' + (lock ? ' wr-item-' + lock : '') + '" data-id="' + i.id + '" tabindex="0" role="button">' +
+          '<div class="wr-item' + (lock ? ' wr-item-' + lock : '') + (offSeason ? ' wr-item-offseason' : '') + '" data-id="' + i.id + '" tabindex="0" role="button">' +
             '<img src="' + i.image_url + '" alt="' + (cat ? cat.label : '') + '" loading="lazy">' +
             '<button class="wr-item-lock" data-lock="' + i.id + '" title="' + lockTitle + '" aria-label="' + lockTitle + '">' + lockIcon + '</button>' +
             '<button class="wr-item-del" data-del="' + i.id + '" aria-label="Remove">✕</button>' +
@@ -1338,6 +1343,16 @@
         '<option value="' + c.id + '"' + (c.id === it.category ? ' selected' : '') + '>' + c.icon + ' ' + c.label + '</option>').join('');
       m.querySelector('#wrItemTags').value = (it.tags || []).join(', ');
       m.querySelector('#wrItemSwatch').style.background = it.color;
+      // Surface the same Weather.suitsSeason() check the AI generator and
+      // gap analysis already run internally -- gives the modal one honest,
+      // real piece of context instead of just a bare edit form.
+      const season = Weather.activeSeason();
+      const seasonEl = m.querySelector('#wrItemSeason');
+      if (seasonEl) {
+        const fits = Weather.suitsSeason(it, season);
+        seasonEl.hidden = false;
+        seasonEl.textContent = Weather.ICON[season] + ' ' + (fits ? 'Fits ' + season : 'Not ' + season);
+      }
       document.getElementById('wrItemModalBg').classList.add('show');
     }
     function saveItem() {
@@ -1378,8 +1393,15 @@
       const slots = o.pieces.map((p) =>
         '<div class="wr-of-slot"><img src="' + p.image + '" alt="' + p.category + '"></div>').join('');
       const pal = o.pieces.map((p) => '<span style="background:' + p.color + '"></span>').join('');
+      // A generated card that's already been saved gets a lasting badge
+      // instead of a re-clickable Save button -- previously the only
+      // acknowledgment was a toast that fades in ~2s, so a saved look was
+      // visually indistinguishable from an unsaved one moments later.
+      const alreadySaved = mode === 'generated' && Store.savedOutfits().some((s) => s.id === o.id);
       const action = mode === 'saved'
         ? '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-remove" data-remove="' + o.id + '" type="button">🗑 Remove</button>'
+        : alreadySaved
+        ? '<span class="wr-outfit-saved-badge">✓ Saved</span>'
         : '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-save" data-save="' + o.id + '" type="button">＋ Save Outfit</button>';
       return (
         '<div class="wr-outfit-card">' +
@@ -1416,7 +1438,7 @@
       if (!o) return;
       const added = Store.addSavedOutfit(o);
       Toast.show(added ? 'Outfit saved' : 'Already saved');
-      if (added) renderSaved();
+      if (added) { renderSaved(); renderOutfits(currentOutfits); }
     }
 
     function renderSaved() {
@@ -1429,7 +1451,14 @@
       }
       wrap.innerHTML = saved.map((o) => outfitCard(o, 'saved')).join('');
       wrap.querySelectorAll('[data-remove]').forEach((b) =>
-        b.addEventListener('click', () => { Store.removeSavedOutfit(b.dataset.remove); renderSaved(); Toast.show('Removed'); }));
+        b.addEventListener('click', () => {
+          Store.removeSavedOutfit(b.dataset.remove);
+          renderSaved();
+          // If the removed outfit is still showing in the generator, flip
+          // its badge back to a re-clickable Save button.
+          renderOutfits(currentOutfits);
+          Toast.show('Removed');
+        }));
     }
 
     function renderRecs(recs) {
@@ -1532,6 +1561,15 @@
       document.getElementById('wrUploadConfirm').addEventListener('click', confirmUpload);
       document.getElementById('wrUploadCancel').addEventListener('click', closeUpload);
       document.getElementById('wrUploadModalBg').addEventListener('click', (e) => { if (e.target.id === 'wrUploadModalBg') closeUpload(); });
+      // Escape closes whichever modal is open — matches the standard modal
+      // convention every other dialog in the app already gets for free
+      // (native <select>/browser affordances aside, click-outside was the
+      // only escape hatch here before).
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('wrUploadModalBg').classList.contains('show')) closeUpload();
+        else if (document.getElementById('wrItemModalBg').classList.contains('show')) closeItem();
+      });
     }
 
     function renderAll() {

@@ -42,7 +42,11 @@ const get = (keys) => page.evaluate((ks) => {
 try {
   await page.goto(`http://localhost:${PORT}/index.html`, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-  // ── 1. First-ever run on a browser: grandfather, don't clear ──
+  // ── 1. First-ever run on a browser (ADR-025, supersedes ADR-024's
+  //      grandfather clause): a never-before-reconciled browser is
+  //      indistinguishable from a stale/contaminated one, so it clears
+  //      too — closing the recurring cross-account leak ADR-024's
+  //      grandfather exception left open. ──
   await clearAll();
   await set({
     aptron_profile_v1: JSON.stringify({ name: 'admin', theme: 'neon' }),
@@ -58,12 +62,13 @@ try {
       routinesKept: localStorage.getItem('rb_routines_v1') !== null,
     };
   });
-  ok('1a. first-ever run does not clear (grandfather)', r1.changed === false);
+  ok('1a. first-ever run on an unreconciled browser clears (ADR-025)', r1.changed === true);
   ok('1b. first-ever run records the uid', r1.lastUid === 'uidA');
-  ok('1c. first-ever run preserves existing profile', r1.profileKept === true);
-  ok('1d. first-ever run preserves existing routines', r1.routinesKept === true);
+  ok('1c. first-ever run removes pre-existing profile — no grandfathering', r1.profileKept === false);
+  ok('1d. first-ever run removes pre-existing routines — no grandfathering', r1.routinesKept === false);
 
   // ── 2. Same user returns: no clear ──
+  await set({ aptron_profile_v1: JSON.stringify({ name: 'uidA-own-profile' }) });
   const r2 = await page.evaluate(async () => {
     const mod = await import('/js/auth/user_scope.js');
     const changed = mod.reconcileUserScope('uidA');
@@ -147,6 +152,16 @@ try {
   const r6 = await get(['po_cloud_backfilled_v1', 'po_cloud_backfilled_v1:uidA']);
   ok('6a. bare pre-fix backfill flag survives a user-scope clear (migration path)', r6.po_cloud_backfilled_v1 === '1');
   ok('6b. per-uid backfill flag from the OLD user is cleared for the new one', r6['po_cloud_backfilled_v1:uidA'] === null);
+
+  // ── 6c-6d. Genuinely fresh browser (nothing pre-existing) — ADR-025
+  //      still clears (nothing to lose) and records the uid normally. ──
+  await clearAll();
+  const r6c = await page.evaluate(async () => {
+    const mod = await import('/js/auth/user_scope.js');
+    return { changed: mod.reconcileUserScope('uidFresh'), lastUid: localStorage.getItem('aptron_last_uid') };
+  });
+  ok('6c. genuinely fresh browser records the uid', r6c.lastUid === 'uidFresh');
+  ok('6d. genuinely fresh browser reports a clear even with nothing to lose', r6c.changed === true);
 
   // ── 7. Structural guard: main.js gates APP_AUTH_READY behind the
   //      reconcile, and appSignOut clears before signOut() — regression
