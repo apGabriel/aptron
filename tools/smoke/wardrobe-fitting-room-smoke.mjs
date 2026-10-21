@@ -42,14 +42,14 @@ await new Promise(r => server.listen(PORT, r));
 const results = [];
 const ok = (name, cond, detail) => results.push({ name, pass: !!cond, detail: detail || '' });
 
-async function seedItem(page, color, category) {
-  await page.evaluate(async ({ color, category }) => {
+async function seedItem(page, color, category, style) {
+  await page.evaluate(async ({ color, category, style }) => {
     const c = document.createElement('canvas'); c.width = 200; c.height = 260;
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#eeeeee'; ctx.fillRect(0, 0, 200, 260);
     ctx.fillStyle = color; ctx.fillRect(40, 40, 120, 180);
-    await window.Wardrobe.Closet.addFromImage(c.toDataURL('image/jpeg', 0.85), category);
-  }, { color, category });
+    await window.Wardrobe.Closet.addFromImage(c.toDataURL('image/jpeg', 0.85), category, style);
+  }, { color, category, style });
 }
 
 async function runMainPass() {
@@ -324,18 +324,133 @@ async function runWebglFailPass() {
   await browser.close();
 }
 
+// Tier 1 garment-fidelity fix: bottomStyle/footwearStyle are optional,
+// user-set signals the viewer uses to honestly disclose a shape mismatch
+// (e.g. shorts rendered via the shared trousers-colored mesh, sneakers
+// rendered via the one boots.glb model) instead of silently implying the
+// wrong shape is correct. No new geometry exists yet, so this only checks
+// the disclosure text, never "looks right" -- that's the documented Tier 1
+// ceiling (see the plan this fix was built from).
+async function runGarmentSubtypePass() {
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext();
+  await ctx.route('**://*.supabase.co/**', r => r.abort());
+  await ctx.route('**/@supabase/**', r => r.abort());
+
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  function noticeText(page) {
+    return page.evaluate(() => {
+      const n = document.getElementById('wrFitRoomNotice');
+      return n && !n.hidden ? n.textContent : '';
+    });
+  }
+
+  try {
+    await page.goto(`http://localhost:${PORT}/wardrobe.html`, { waitUntil: 'load', timeout: 15000 });
+    await page.waitForFunction(() => window.Wardrobe && window.AptTheme, { timeout: 8000 });
+
+    // Outfit A: explicit shorts + explicit sneakers -- both disclosures expected.
+    await seedItem(page, '#2b3a55', 'tops');
+    await seedItem(page, '#7a7a7a', 'bottoms', 'shorts');
+    await seedItem(page, '#e8e8e8', 'footwear', 'sneakers');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+    await page.waitForSelector('.wr-item[data-id]');
+    await page.click('#wrGenBtn');
+    await page.waitForSelector('#wrOutfits .wr-outfit-card', { timeout: 8000 });
+
+    const outfitA = await page.evaluate(() => JSON.parse(localStorage.getItem('wardrobe:outfits') || '[]')[0]);
+    ok('generated outfit carries bottomStyle/footwearStyle through to pieces',
+      outfitA && outfitA.pieces.some(p => p.bottomStyle === 'shorts') && outfitA.pieces.some(p => p.footwearStyle === 'sneakers'),
+      JSON.stringify(outfitA && outfitA.pieces));
+
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(400);
+
+    let text = await noticeText(page);
+    ok('shorts item: viewer discloses it can\'t show the real shape (not silently shown as trousers)',
+      /shorts.*can.t be changed|isn.t trousers/i.test(text), text);
+    ok('sneakers item: viewer discloses the boots model is a placeholder (not silently shown as accurate)',
+      /isn.t boot-shaped|generic boot placeholder/i.test(text), text);
+
+    await page.click('.wr-fitroom-close');
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+
+    // Outfit B, same session: default/unset style on a fresh pair of items --
+    // must render with NO new disclosure text (backward-compat default), and
+    // must not carry over Outfit A's stale shorts/sneakers notices.
+    await page.evaluate(() => window.Wardrobe.Closet.remove(JSON.parse(localStorage.getItem('wardrobe:items'))[0].id));
+    await seedItem(page, '#333333', 'bottoms', 'trousers');
+    await seedItem(page, '#5a3d2b', 'footwear', 'boots');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+    await page.click('#wrGenBtn');
+    await page.waitForSelector('#wrOutfits .wr-outfit-card', { timeout: 8000 });
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(400);
+
+    text = await noticeText(page);
+    ok('trousers + boots outfit: no mismatch notice shown (default/explicit-match case stays silent, no cross-outfit bleed)',
+      !/shorts|boot-shaped|placeholder/i.test(text), text);
+
+    await page.click('.wr-fitroom-close');
+
+    // Defensive: a value the UI's own enum could never produce (direct
+    // Closet.update patch, bypassing the <select>) must still disclose
+    // gracefully, not throw.
+    await page.evaluate(() => {
+      const items = JSON.parse(localStorage.getItem('wardrobe:items'));
+      const shoe = items.find(i => i.category === 'footwear');
+      window.Wardrobe.Closet.update(shoe.id, { footwearStyle: 'sandals' });
+    });
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+    await page.click('#wrGenBtn');
+    await page.waitForSelector('#wrOutfits .wr-outfit-card', { timeout: 8000 });
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(400);
+    text = await noticeText(page);
+    ok('unrecognized footwearStyle value falls back to the disclosed placeholder, does not crash',
+      pageErrors.length === 0 && /generic boot placeholder/i.test(text), 'pageErrors=' + pageErrors.join('; ') + ' text=' + text);
+
+    await page.click('.wr-fitroom-close');
+  } catch (e) {
+    ok('FATAL during garment-subtype pass', false, e.message);
+  }
+
+  await browser.close();
+  return { pageErrors };
+}
+
 const main = await runMainPass();
 const cdnFail = await runCdnFailPass();
 await runConcurrentOpenPass();
 await runWebglFailPass();
+const subtype = await runGarmentSubtypePass();
 
 console.log('\n── Wardrobe fitting-room smoke results ──');
 for (const r of results) console.log(`  ${r.pass ? '✓' : '✗'} ${r.name}${r.detail ? ' — ' + r.detail : ''}`);
 if (main.pageErrors.length) { console.log('\nUncaught page errors (main pass):'); main.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (main.consoleErrors.length) { console.log('\nConsole errors (main pass, non-network):'); main.consoleErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (cdnFail.pageErrors.length) { console.log('\nUncaught page errors (CDN-fail pass):'); cdnFail.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
+if (subtype.pageErrors.length) { console.log('\nUncaught page errors (garment-subtype pass):'); subtype.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 
-const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length;
+const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length;
 console.log(`\nSMOKE: ${failed ? failed + ' failure(s)' : 'ALL PASSED ✓'}  (screenshots: tools/smoke/wardrobe-fitting-room-smoke-*.png)`);
 
 server.close();

@@ -96,11 +96,11 @@
   // arrive later, asynchronously) -- a single shared string would let
   // whichever resolves last silently clobber the others. Each source owns
   // its own slot; the DOM always reflects the join of whatever is active.
-  var notices = { outerwear: null, boots: null, backpack: null };
+  var notices = { outerwear: null, bottoms: null, boots: null, backpack: null };
   function setNotice(key, message) {
     notices[key] = message || null;
     if (!dom) return;
-    var text = ['outerwear', 'boots', 'backpack']
+    var text = ['outerwear', 'bottoms', 'boots', 'backpack']
       .map(function (k) { return notices[k]; })
       .filter(Boolean)
       .join(' ');
@@ -108,7 +108,7 @@
     dom.notice.hidden = !text;
   }
   function clearNotices() {
-    notices = { outerwear: null, boots: null, backpack: null };
+    notices = { outerwear: null, bottoms: null, boots: null, backpack: null };
     if (dom) { dom.notice.textContent = ''; dom.notice.hidden = true; }
   }
 
@@ -318,7 +318,14 @@
       Object.keys(state.materials).forEach(function (name) {
         safeSetColor(state.materials[name], piece.color);
       });
-      setNotice('boots', null);
+      // Only one footwear model exists today -- a real boots item is shown
+      // accurately, but anything else (sneakers, sandals, ...) is this same
+      // model recolored. Disclose that rather than silently implying it's
+      // the right shape; see fitting-room's Tier 1 garment-fidelity pass.
+      var style = piece.footwearStyle || 'boots';
+      setNotice('boots', style !== 'boots'
+        ? 'This item isn’t boot-shaped — showing a generic boot placeholder since a matching shoe model isn’t available yet.'
+        : null);
     }).catch(function () {
       setNotice('boots', 'Footwear preview couldn’t be loaded — showing the rest of the outfit.');
     });
@@ -359,6 +366,13 @@
     updateBoots(shoe);
     updateBackpack(acc);
     setNotice('outerwear', outer ? 'Outerwear is not visualized yet — shown without the rest of the outfit’s jacket/coat piece.' : null);
+    // The mannequin's "Pants" is a material on its single fused body mesh,
+    // not a separate garment piece -- there's no shorter/longer geometry to
+    // swap to, so a shorts item can only be disclosed, never shown correctly.
+    var bottomStyle = bottom && (bottom.bottomStyle || 'trousers');
+    setNotice('bottoms', bottomStyle === 'shorts'
+      ? 'This item is shorts, not trousers — the mannequin’s pants shape can’t be changed yet, so only its color is shown.'
+      : null);
   }
 
   // ---------------------------------------------------------------
