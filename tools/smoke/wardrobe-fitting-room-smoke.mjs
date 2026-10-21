@@ -377,8 +377,13 @@ async function runGarmentSubtypePass() {
     let text = await noticeText(page);
     ok('shorts item: viewer discloses it can\'t show the real shape (not silently shown as trousers)',
       /shorts.*can.t be changed|isn.t trousers/i.test(text), text);
-    ok('sneakers item: viewer discloses the boots model is a placeholder (not silently shown as accurate)',
-      /isn.t boot-shaped|generic boot placeholder/i.test(text), text);
+    // Tier 2: sneakers now have real geometry (models/sneakers.glb), so the
+    // Tier 1 "generic boot placeholder" disclosure must NOT appear for them
+    // anymore -- that was only ever a stand-in for the missing asset.
+    ok('sneakers item: no placeholder disclosure now that real sneaker geometry exists',
+      !/isn.t boot-shaped|generic boot placeholder/i.test(text), text);
+    ok('sneakers.glb was actually fetched (real asset loaded, not inferred from absent disclosure alone)',
+      await page.evaluate(() => performance.getEntriesByType('resource').some(e => /sneakers\.glb/.test(e.name))));
 
     await page.click('.wr-fitroom-close');
     await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));

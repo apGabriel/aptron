@@ -28,6 +28,7 @@
   var MODEL_URLS = {
     mannequin: 'models/quat-man.glb',
     boots: 'models/boots.glb',
+    sneakers: 'models/sneakers.glb',
     backpack: 'models/backpack.glb'
   };
 
@@ -36,6 +37,10 @@
   // runtime, rather than hardcoding axis-fragile numbers derived
   // from the raw files' own coordinate conventions.
   var BOOT_HEIGHT_RATIO = 0.12;
+  // Tuned independently of BOOT_HEIGHT_RATIO -- visually verified against
+  // real renders (same process ADR-027's boot/backpack ratios went
+  // through), not shared with boots even though the value happens to match.
+  var SNEAKER_HEIGHT_RATIO = 0.12;
   var BACKPACK_HEIGHT_RATIO = 0.34;
   var BACKPACK_BACK_OFFSET_RATIO = 0.62; // fraction of mannequin depth, pushed behind center
 
@@ -310,20 +315,27 @@
   function updateBoots(piece) {
     if (!piece) {
       if (viewer.props.boots.root) viewer.props.boots.root.visible = false;
+      if (viewer.props.sneakers.root) viewer.props.sneakers.root.visible = false;
       setNotice('boots', null);
       return;
     }
-    ensureProp('boots', BOOT_HEIGHT_RATIO, 0).then(function (state) {
+    // Two real footwear models exist now (Tier 2): boots and sneakers,
+    // selected by the item's own footwearStyle. Anything else (sandals,
+    // heels, ... -- no asset exists) falls back to the boots model as a
+    // disclosed placeholder, same as ALL footwear did before sneakers got
+    // real geometry; see fitting-room's Tier 1/Tier 2 passes.
+    var style = piece.footwearStyle || 'boots';
+    var key = style === 'sneakers' ? 'sneakers' : 'boots';
+    var otherKey = key === 'sneakers' ? 'boots' : 'sneakers';
+    var ratio = key === 'sneakers' ? SNEAKER_HEIGHT_RATIO : BOOT_HEIGHT_RATIO;
+    if (viewer.props[otherKey].root) viewer.props[otherKey].root.visible = false;
+
+    ensureProp(key, ratio, 0).then(function (state) {
       state.root.visible = true;
       Object.keys(state.materials).forEach(function (name) {
         safeSetColor(state.materials[name], piece.color);
       });
-      // Only one footwear model exists today -- a real boots item is shown
-      // accurately, but anything else (sneakers, sandals, ...) is this same
-      // model recolored. Disclose that rather than silently implying it's
-      // the right shape; see fitting-room's Tier 1 garment-fidelity pass.
-      var style = piece.footwearStyle || 'boots';
-      setNotice('boots', style !== 'boots'
+      setNotice('boots', (style !== 'boots' && style !== 'sneakers')
         ? 'This item isn’t boot-shaped — showing a generic boot placeholder since a matching shoe model isn’t available yet.'
         : null);
     }).catch(function () {
@@ -427,7 +439,7 @@
         ready: false,
         rafId: null,
         materials: {},
-        props: { boots: {}, backpack: {} }
+        props: { boots: {}, sneakers: {}, backpack: {} }
       };
       return buildViewer();
     }, function (err) {
