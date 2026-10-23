@@ -8,6 +8,21 @@
 <title>Smart Wardrobe</title>
 <link rel="icon" href="img/logo.ico" type="image/x-icon">
 <link rel="stylesheet" href="css/wardrobe.css">
+<link rel="stylesheet" href="css/wardrobe-fitting-room.css">
+<!-- Three.js (fitting room) is lazy-loaded only when "Try in 3D" is
+     clicked -- see js/wardrobe-fitting-room/fitting-room.js. Modern
+     Three.js ships ESM-only, and its example modules import the core
+     library via the bare "three" specifier, so this import map must
+     be declared before any module script runs (none may be inserted
+     later). Declaring it costs nothing at page load -- it's just a
+     resolution hint, not a fetch. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js"
+  }
+}
+</script>
 <script src="js/theme.js"></script>
 <script src="js/config.js" defer></script>
 <script src="js/topbar.js" defer></script>
@@ -143,6 +158,8 @@
     </div>
     <label class="wr-modal-label" for="wrItemCat">Category</label>
     <select class="wr-select" id="wrItemCat"></select>
+    <label class="wr-modal-label" for="wrItemStyle" id="wrItemStyleLabel" hidden>Style</label>
+    <select class="wr-select" id="wrItemStyle" hidden></select>
     <label class="wr-modal-label" for="wrItemTags">Tags (comma separated)</label>
     <input class="wr-input" id="wrItemTags" type="text" placeholder="e.g. casual, summer, linen" autocomplete="off">
     <div class="wr-modal-actions">
@@ -161,6 +178,8 @@
     <div class="wr-detect-note" id="wrDetectNote">Analyzing garment…</div>
     <label class="wr-modal-label" for="wrUploadCats">Category</label>
     <div class="wr-chip-row" id="wrUploadCats"></div>
+    <label class="wr-modal-label" for="wrUploadStyle" id="wrUploadStyleLabel" hidden>Style</label>
+    <div class="wr-chip-row" id="wrUploadStyle" hidden></div>
     <div class="wr-modal-actions">
       <button class="wr-btn wr-btn-ghost" id="wrUploadCancel" type="button">Cancel</button>
       <button class="wr-btn wr-btn-primary" id="wrUploadConfirm" type="button">Add item</button>
@@ -177,6 +196,7 @@
      topbar.js (head), which injects #acctBtn for this page. -->
 <script src="js/account.js" defer></script>
 <script src="sync.js" defer></script>
+<script src="js/wardrobe-fitting-room/fitting-room.js" defer></script>
 <script src="js/wardrobe.js" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {

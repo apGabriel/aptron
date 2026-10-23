@@ -37,6 +37,22 @@
   // Which categories carry "warmth" — used by the seasonality vector.
   const WARMTH = { tops: 1, bottoms: 1, outerwear: 3, footwear: 1, accessories: 0.5 };
 
+  // Optional, category-scoped silhouette hints — let the 3D fitting-room
+  // viewer honestly disclose a shape mismatch (e.g. shorts vs. trousers)
+  // instead of silently showing the wrong one. Unset means "unknown",
+  // which the viewer treats as its own pre-existing default (trousers /
+  // boots) so items created before this field existed render unchanged.
+  const BOTTOM_STYLES = [
+    { id: 'trousers', label: 'Trousers / Long' },
+    { id: 'shorts',   label: 'Shorts' },
+  ];
+  const FOOTWEAR_STYLES = [
+    { id: 'boots',    label: 'Boots' },
+    { id: 'sneakers', label: 'Sneakers / Other' },
+  ];
+  const STYLE_KEY_BY_CATEGORY = { bottoms: 'bottomStyle', footwear: 'footwearStyle' };
+  const STYLE_OPTIONS_BY_CATEGORY = { bottoms: BOTTOM_STYLES, footwear: FOOTWEAR_STYLES };
+
   const KEYS = {
     items:    'wardrobe:items',
     profile:  'wardrobe:profile',
@@ -903,7 +919,11 @@
           harmony,
           season: payload.season,
           warmth: pieces.reduce((s, p) => s + (WARMTH[p.category] || 0), 0),
-          pieces: pieces.map((p) => ({ id: p.id, image: p.image_url, color: p.color, category: p.category })),
+          pieces: pieces.map((p) => ({
+            id: p.id, image: p.image_url, color: p.color, category: p.category,
+            bottomStyle: p.bottomStyle || null,
+            footwearStyle: p.footwearStyle || null,
+          })),
           why: rationale(harmony, payload.profile.undertone, payload.season, !!layer),
         });
         if (outfits.length >= 4) break;
@@ -1003,13 +1023,20 @@
     }
 
     // Add an already-ingested (downscaled) base64 image to the closet.
-    async function addFromImage(image_url, category) {
+    // `style` is the optional bottomStyle/footwearStyle pick from the
+    // upload modal -- stored under whichever key matches `category`,
+    // so an unrelated category's style field is never set.
+    async function addFromImage(image_url, category, style) {
       const color = await Color.dominant(image_url);
       const items = Store.items();
-      items.unshift({
-        id: uid(), image_url, category: category || 'tops',
+      const cat = category || 'tops';
+      const styleKey = STYLE_KEY_BY_CATEGORY[cat] || null;
+      const item = {
+        id: uid(), image_url, category: cat,
         color, tags: [], lock: null, createdAt: Date.now(),
-      });
+      };
+      if (styleKey && style) item[styleKey] = style;
+      items.unshift(item);
       // setItems persists locally AND kicks off an immediate upstream push.
       // false means the local write failed (quota) — bail without a success toast.
       const pushed = Store.setItems(items);
@@ -1262,6 +1289,7 @@
     let openItemId = null;
     let pendingUpload = null;        // { image_url } awaiting category confirm
     let uploadSelectedCat = 'tops';  // chip selected in the upload modal
+    let uploadSelectedStyle = null;  // bottomStyle/footwearStyle chip, when the category has one
     let currentOutfits = [];         // outfits currently shown (for save action)
 
     // ---- file inputs (one for items, one for portrait) ----
@@ -1287,6 +1315,7 @@
       catch (e) { Toast.show('Could not read that image'); return; }
       pendingUpload = { image_url };
       uploadSelectedCat = uploadTargetCat;
+      uploadSelectedStyle = null;
       const note = document.getElementById('wrDetectNote');
       document.getElementById('wrUploadImg').src = image_url;
       if (note) note.textContent = 'Analyzing garment…';
@@ -1297,6 +1326,7 @@
         const detected = await Detector.detect(image_url);
         if (!pendingUpload) return;                  // modal already closed
         uploadSelectedCat = detected;
+        uploadSelectedStyle = null;
         const c = CATEGORIES.find((x) => x.id === detected);
         if (note) note.textContent = '✨ Auto-detected: ' + (c ? c.label : detected);
         renderUploadChips();
@@ -1314,7 +1344,29 @@
       wrap.querySelectorAll('[data-upcat]').forEach((b) =>
         b.addEventListener('click', () => {
           uploadSelectedCat = b.dataset.upcat;
+          uploadSelectedStyle = null;  // switching category invalidates any prior style pick
           renderUploadChips();
+          renderUploadStyleChips();
+        }));
+      renderUploadStyleChips();
+    }
+
+    // Shows a second chip row only for categories with a style distinction
+    // (bottoms/footwear) — mirrors renderUploadChips()'s own pattern.
+    function renderUploadStyleChips() {
+      const label = document.getElementById('wrUploadStyleLabel');
+      const wrap = document.getElementById('wrUploadStyle');
+      if (!wrap || !label) return;
+      const options = STYLE_OPTIONS_BY_CATEGORY[uploadSelectedCat];
+      if (!options) { label.hidden = true; wrap.hidden = true; wrap.innerHTML = ''; return; }
+      label.hidden = false; wrap.hidden = false;
+      wrap.innerHTML = options.map((s) =>
+        '<button type="button" class="wr-cat-chip' + (s.id === uploadSelectedStyle ? ' active' : '') +
+        '" data-upstyle="' + s.id + '">' + s.label + '</button>').join('');
+      wrap.querySelectorAll('[data-upstyle]').forEach((b) =>
+        b.addEventListener('click', () => {
+          uploadSelectedStyle = b.dataset.upstyle;
+          renderUploadStyleChips();
         }));
     }
 
@@ -1322,8 +1374,9 @@
       if (!pendingUpload) return;
       const img = pendingUpload.image_url;
       const cat = uploadSelectedCat;
+      const style = uploadSelectedStyle;
       closeUpload();
-      Closet.addFromImage(img, cat);
+      Closet.addFromImage(img, cat, style);
     }
 
     function closeUpload() {
@@ -1332,6 +1385,22 @@
     }
 
     // ---- item detail modal ----
+    // Shows the bottomStyle/footwearStyle <select> only for the categories
+    // that have one, defaulting to the option matching the viewer's own
+    // backward-compatible default (see fitting-room.js) so an unset item
+    // doesn't look "wrong" just because the field was added later.
+    function renderItemStyleSelect(category, currentValue) {
+      const label = document.getElementById('wrItemStyleLabel');
+      const sel = document.getElementById('wrItemStyle');
+      if (!label || !sel) return;
+      const options = STYLE_OPTIONS_BY_CATEGORY[category];
+      if (!options) { label.hidden = true; sel.hidden = true; sel.innerHTML = ''; return; }
+      const value = currentValue || options[0].id;
+      label.hidden = false; sel.hidden = false;
+      sel.innerHTML = options.map((s) =>
+        '<option value="' + s.id + '"' + (s.id === value ? ' selected' : '') + '>' + s.label + '</option>').join('');
+    }
+
     function openItem(id) {
       const it = Store.items().find((x) => x.id === id);
       if (!it) return;
@@ -1341,6 +1410,7 @@
       const catSel = m.querySelector('#wrItemCat');
       catSel.innerHTML = CATEGORIES.map((c) =>
         '<option value="' + c.id + '"' + (c.id === it.category ? ' selected' : '') + '>' + c.icon + ' ' + c.label + '</option>').join('');
+      renderItemStyleSelect(it.category, it.bottomStyle || it.footwearStyle || null);
       m.querySelector('#wrItemTags').value = (it.tags || []).join(', ');
       m.querySelector('#wrItemSwatch').style.background = it.color;
       // Surface the same Weather.suitsSeason() check the AI generator and
@@ -1359,7 +1429,11 @@
       if (!openItemId) return;
       const m = document.getElementById('wrItemModal');
       const tags = m.querySelector('#wrItemTags').value.split(',').map((t) => t.trim()).filter(Boolean);
-      Closet.update(openItemId, { category: m.querySelector('#wrItemCat').value, tags });
+      const category = m.querySelector('#wrItemCat').value;
+      const patch = { category, tags, bottomStyle: null, footwearStyle: null };
+      const styleKey = STYLE_KEY_BY_CATEGORY[category];
+      if (styleKey) patch[styleKey] = m.querySelector('#wrItemStyle').value;
+      Closet.update(openItemId, patch);
       closeItem(); Toast.show('Saved');
     }
     function closeItem() { document.getElementById('wrItemModalBg').classList.remove('show'); openItemId = null; }
@@ -1403,6 +1477,11 @@
         : alreadySaved
         ? '<span class="wr-outfit-saved-badge">✓ Saved</span>'
         : '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-save" data-save="' + o.id + '" type="button">＋ Save Outfit</button>';
+      // 3D Outfit Visualization entry point (pre-Shelron stopgap,
+      // see js/wardrobe-fitting-room/fitting-room.js) -- passes the
+      // outfit's existing pieces array straight through, no new
+      // selection state.
+      const try3d = '<button class="wr-btn wr-btn-ghost wr-btn-sm wr-of-3d" data-try3d="' + o.id + '" type="button">🧍 Try in 3D</button>';
       return (
         '<div class="wr-outfit-card">' +
           '<div class="wr-outfit-strip">' + slots + '</div>' +
@@ -1417,9 +1496,17 @@
               '<span><b>' + o.pieces.length + '</b> pieces</span>' +
               '<span><b>' + Weather.ICON[o.season] + '</b> ' + o.season + '</span>' +
             '</div>' +
-            '<div class="wr-outfit-actions">' + action + '</div>' +
+            '<div class="wr-outfit-actions">' + try3d + action + '</div>' +
           '</div>' +
         '</div>');
+    }
+
+    function openFittingRoom(o) {
+      if (window.WardrobeFittingRoom && typeof window.WardrobeFittingRoom.open === 'function') {
+        window.WardrobeFittingRoom.open(o.pieces);
+      } else {
+        Toast.show('3D viewer unavailable');
+      }
     }
 
     function renderOutfits(outfits) {
@@ -1431,6 +1518,11 @@
       out.innerHTML = currentOutfits.map((o) => outfitCard(o, 'generated')).join('');
       out.querySelectorAll('[data-save]').forEach((b) =>
         b.addEventListener('click', () => saveOutfit(b.dataset.save)));
+      out.querySelectorAll('[data-try3d]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const o = currentOutfits.find((x) => x.id === b.dataset.try3d);
+          if (o) openFittingRoom(o);
+        }));
     }
 
     function saveOutfit(id) {
@@ -1458,6 +1550,11 @@
           // its badge back to a re-clickable Save button.
           renderOutfits(currentOutfits);
           Toast.show('Removed');
+        }));
+      wrap.querySelectorAll('[data-try3d]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const o = saved.find((x) => x.id === b.dataset.try3d);
+          if (o) openFittingRoom(o);
         }));
     }
 
@@ -1553,6 +1650,7 @@
           });
         });
       // item modal
+      document.getElementById('wrItemCat').addEventListener('change', (e) => renderItemStyleSelect(e.target.value, null));
       document.getElementById('wrItemSave').addEventListener('click', saveItem);
       document.getElementById('wrItemDelete').addEventListener('click', () => { if (openItemId) { Closet.remove(openItemId); closeItem(); } });
       document.getElementById('wrItemClose').addEventListener('click', closeItem);

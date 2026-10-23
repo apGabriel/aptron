@@ -1,0 +1,95 @@
+/* =============================================================
+   Wardrobe — 3D Outfit Visualization (fitting room)
+
+   Isolated stylesheet for the lazy-loaded 3D viewer modal. Reuses
+   the existing .wr-modal-bg/.wr-modal base rules from wardrobe.css
+   (same backdrop, same show/hide convention, same scroll-lock via
+   topbar.js's MODAL_SELECTORS, which already matches .wr-modal-bg)
+   and only adds what's specific to this feature.
+   ============================================================= */
+
+.wr-fitroom-modal {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+}
+
+.wr-fitroom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.wr-fitroom-head h3 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+.wr-fitroom-close {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.wr-fitroom-close:hover { background: rgba(255, 255, 255, 0.07); }
+.wr-fitroom-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.wr-fitroom-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-height: 60vh;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  touch-action: none;
+}
+.wr-fitroom-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.wr-fitroom-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+}
+/* The [hidden] attribute alone loses to the class rule above (equal/higher
+   specificity than the UA stylesheet's [hidden]{display:none}) -- without
+   this, "Loading viewer..." stays visibly stuck over the rendered scene. */
+.wr-fitroom-state[hidden] { display: none; }
+
+.wr-fitroom-notice {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+}
+.wr-fitroom-notice[hidden] { display: none; }
+
+.wr-fitroom-disclosure {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  text-align: center;
+}
