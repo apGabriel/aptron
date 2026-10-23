@@ -29,7 +29,8 @@
     mannequin: 'models/quat-man.glb',
     boots: 'models/boots.glb',
     sneakers: 'models/sneakers.glb',
-    backpack: 'models/backpack.glb'
+    backpack: 'models/backpack.glb',
+    trousers: 'models/trousers.glb'
   };
 
   // Proportions used to fit the standalone props to whatever the
@@ -43,6 +44,21 @@
   var SNEAKER_HEIGHT_RATIO = 0.12;
   var BACKPACK_HEIGHT_RATIO = 0.34;
   var BACKPACK_BACK_OFFSET_RATIO = 0.62; // fraction of mannequin depth, pushed behind center
+  // Trousers overlay prop (bottomStyle === 'trousers'), added after an
+  // isolated CC0-candidate validation pass (see Third-Party Models.md).
+  // Height ratio is empirically tuned against real renders, like every
+  // other prop here -- not derived from the garment's own native proportions,
+  // since (unlike a full-character extraction) there's no "whole source
+  // body" to compute a fraction against. verticalY in ensureProp() anchors
+  // the prop's BOTTOM, so TROUSERS_VERTICAL_RATIO = 0.58 - 0.50 = 0.08
+  // reproduces the validated waist-top anchor (0.58) given this height (0.50).
+  var TROUSERS_HEIGHT_RATIO = 0.50;
+  var TROUSERS_VERTICAL_RATIO = 0.08;
+  // Positive, same sign convention as BACKPACK_BACK_OFFSET_RATIO: ensureProp
+  // subtracts this fraction of mannequin depth from Z, pushing the prop
+  // toward the mannequin's back. A small push here closes most of the
+  // rear-seam exposure found during validation; do not negate this sign.
+  var TROUSERS_BACK_OFFSET_RATIO = 0.05;
 
   var dom = null;          // { bg, modal, viewport, state, notice, closeBtn }
   var runtimePromise = null; // Promise<{THREE, GLTFLoader, OrbitControls}>
@@ -343,6 +359,31 @@
     });
   }
 
+  function updateTrousers(piece) {
+    if (!piece) {
+      if (viewer.props.trousers.root) viewer.props.trousers.root.visible = false;
+      return;
+    }
+    // Only an explicit/default 'trousers' bottomStyle has matching geometry.
+    // 'shorts' (or any future unrecognized value) has none -- same as every
+    // bottoms item before this prop existed -- so it falls back to just the
+    // mannequin's own recolored Pants material, with the existing shape
+    // disclosure notice (set separately in applyOutfit, unchanged).
+    var bottomStyle = piece.bottomStyle || 'trousers';
+    if (bottomStyle !== 'trousers') {
+      if (viewer.props.trousers.root) viewer.props.trousers.root.visible = false;
+      return;
+    }
+    ensureProp('trousers', TROUSERS_HEIGHT_RATIO, TROUSERS_VERTICAL_RATIO, TROUSERS_BACK_OFFSET_RATIO).then(function (state) {
+      state.root.visible = true;
+      Object.keys(state.materials).forEach(function (name) {
+        safeSetColor(state.materials[name], piece.color);
+      });
+    }).catch(function () {
+      setNotice('bottoms', 'Trousers preview couldn’t be loaded — showing the rest of the outfit.');
+    });
+  }
+
   function updateBackpack(piece) {
     if (!piece) {
       if (viewer.props.backpack.root) viewer.props.backpack.root.visible = false;
@@ -377,10 +418,12 @@
 
     updateBoots(shoe);
     updateBackpack(acc);
+    updateTrousers(bottom);
     setNotice('outerwear', outer ? 'Outerwear is not visualized yet — shown without the rest of the outfit’s jacket/coat piece.' : null);
-    // The mannequin's "Pants" is a material on its single fused body mesh,
-    // not a separate garment piece -- there's no shorter/longer geometry to
-    // swap to, so a shorts item can only be disclosed, never shown correctly.
+    // 'trousers' (default/explicit) now has real overlay geometry via
+    // updateTrousers() above. 'shorts' still has none -- the mannequin's
+    // "Pants" material region can't become shorter geometry, so it can only
+    // be disclosed, never shown correctly.
     var bottomStyle = bottom && (bottom.bottomStyle || 'trousers');
     setNotice('bottoms', bottomStyle === 'shorts'
       ? 'This item is shorts, not trousers — the mannequin’s pants shape can’t be changed yet, so only its color is shown.'
@@ -439,7 +482,7 @@
         ready: false,
         rafId: null,
         materials: {},
-        props: { boots: {}, sneakers: {}, backpack: {} }
+        props: { boots: {}, sneakers: {}, backpack: {}, trousers: {} }
       };
       return buildViewer();
     }, function (err) {

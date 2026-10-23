@@ -442,11 +442,183 @@ async function runGarmentSubtypePass() {
   return { pageErrors };
 }
 
+// Tier 11: trousers overlay prop (bottomStyle === 'trousers') gained real
+// geometry (models/trousers.glb -- CC0, Teh_Bucket/OpenGameArt, see
+// Third-Party Models.md). The module exposes only {open, close} on
+// window.WardrobeFittingRoom, so there is no runtime hook to read the live
+// Three.js material's .emissive/.color off viewer.props.trousers directly
+// from a black-box test. The emissive fix instead lives in the committed
+// asset itself (corrected at conversion time, not patched at runtime), so
+// the one deterministic, pixel-independent way to verify it is a static,
+// Node-side read of the committed GLB's own material JSON -- the actual
+// shipped fact, not a runtime-mutated copy.
+function checkTrousersGlbMaterial() {
+  const buf = fs.readFileSync(path.join(ROOT, 'models/trousers.glb'));
+  const jsonChunkLength = buf.readUInt32LE(12);
+  const json = JSON.parse(buf.slice(20, 20 + jsonChunkLength).toString('utf8'));
+  const mat = json.materials && json.materials[0];
+  const emissiveOk = !!mat && Array.isArray(mat.emissiveFactor) &&
+    mat.emissiveFactor[0] === 0 && mat.emissiveFactor[1] === 0 && mat.emissiveFactor[2] === 0;
+  const hasTexture = !!mat && !!mat.pbrMetallicRoughness && !!mat.pbrMetallicRoughness.baseColorTexture;
+  const hasEmbeddedImage = !!(json.images && json.images[0] && json.images[0].bufferView !== undefined && !json.images[0].uri);
+  ok('models/trousers.glb material has zero emissive contribution (committed asset, not a runtime patch)',
+    emissiveOk, JSON.stringify(mat && mat.emissiveFactor));
+  ok('models/trousers.glb material keeps its base-color texture reference (tintable via material.color)',
+    hasTexture);
+  ok('models/trousers.glb texture is embedded (no external texture URI required)',
+    hasEmbeddedImage, JSON.stringify(json.images));
+}
+
+// Tier 11: trousers prop load, recolor caching, and coexistence with both
+// existing footwear props. Does not duplicate the shorts-disclosure checks
+// already covered by runGarmentSubtypePass above -- only re-exercises the
+// shorts path once, to confirm it still works unchanged alongside the new
+// trousers geometry, not in isolation.
+async function runTrousersPass() {
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext();
+  await ctx.route('**://*.supabase.co/**', r => r.abort());
+  await ctx.route('**/@supabase/**', r => r.abort());
+
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  function noticeText(page) {
+    return page.evaluate(() => {
+      const n = document.getElementById('wrFitRoomNotice');
+      return n && !n.hidden ? n.textContent : '';
+    });
+  }
+
+  try {
+    await page.goto(`http://localhost:${PORT}/wardrobe.html`, { waitUntil: 'load', timeout: 15000 });
+    await page.waitForFunction(() => window.Wardrobe && window.AptTheme, { timeout: 8000 });
+
+    // Outfit A: explicit trousers + boots.
+    await seedItem(page, '#2b3a55', 'tops');
+    await seedItem(page, '#2a3f6b', 'bottoms', 'trousers');
+    await seedItem(page, '#5a3d2b', 'footwear', 'boots');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+    await page.waitForSelector('.wr-item[data-id]');
+    await page.click('#wrGenBtn');
+    await page.waitForSelector('#wrOutfits .wr-outfit-card', { timeout: 8000 });
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(600); // let the async trousers/boots prop loads settle
+
+    ok('trousers.glb actually fetched for bottomStyle "trousers"',
+      await page.evaluate(() => performance.getEntriesByType('resource').some(e => /trousers\.glb/.test(e.name))));
+
+    let text = await noticeText(page);
+    ok('trousers + boots: no shorts/shape-mismatch notice shown (trousers has real geometry now)',
+      !/shorts|boot-shaped|placeholder|trousers preview/i.test(text), text);
+
+    // Supplementary rendered-output evidence (not the primary tint check,
+    // which is the static GLB-material assertion above): a full-page
+    // screenshot for manual/visual review, same pattern as the existing
+    // wardrobe-fitting-room-smoke-{open,final}.png artifacts. A direct
+    // in-page canvas pixel sample was tried and discarded here -- the real
+    // viewer's renderer is constructed without preserveDrawingBuffer (see
+    // buildViewer()), so by the time a separate page.evaluate() round-trip
+    // reads the canvas, the browser has already presented and cleared the
+    // drawing buffer, yielding all-zero/transparent pixels regardless of
+    // what was actually rendered. That read would be a false positive, not
+    // a real check, so it is not included as an assertion.
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-trousers-boots.png') });
+
+    await page.click('.wr-fitroom-close');
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+
+    // Close/reopen: trousers.glb must not be re-fetched a second time.
+    const trousersFetchCountBeforeReopen = await page.evaluate(() =>
+      performance.getEntriesByType('resource').filter(e => /trousers\.glb/.test(e.name)).length);
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForTimeout(400);
+    const trousersFetchCountAfterReopen = await page.evaluate(() =>
+      performance.getEntriesByType('resource').filter(e => /trousers\.glb/.test(e.name)).length);
+    ok('close/reopen reuses the cached trousers prop (no duplicate fetch)',
+      trousersFetchCountAfterReopen === trousersFetchCountBeforeReopen,
+      `before=${trousersFetchCountBeforeReopen} after=${trousersFetchCountAfterReopen}`);
+    const canvasCount = await page.evaluate(() => document.querySelectorAll('#wrFitRoomViewport canvas').length);
+    ok('close/reopen does not duplicate the canvas', canvasCount === 1, 'canvasCount=' + canvasCount);
+
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-trousers-boots-reopened.png') });
+
+    await page.click('.wr-fitroom-close');
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+
+    // Outfit B, same session: trousers + sneakers instead of boots -- must
+    // coexist independently, no notice bleed from Outfit A.
+    await page.evaluate(() => {
+      const items = JSON.parse(localStorage.getItem('wardrobe:items'));
+      const shoe = items.find(i => i.category === 'footwear');
+      window.Wardrobe.Closet.update(shoe.id, { footwearStyle: 'sneakers' });
+    });
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+    await page.click('#wrGenBtn');
+    await page.waitForSelector('#wrOutfits .wr-outfit-card', { timeout: 8000 });
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(600);
+
+    ok('sneakers.glb also fetched alongside trousers in the same outfit',
+      await page.evaluate(() => performance.getEntriesByType('resource').some(e => /sneakers\.glb/.test(e.name))));
+    text = await noticeText(page);
+    ok('trousers + sneakers: no notice bleed from the previous boots outfit', text === '', JSON.stringify(text));
+
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-trousers-sneakers.png') });
+
+    await page.click('.wr-fitroom-close');
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+
+    // Outfit C: explicit shorts -- the unchanged disclosure notice must
+    // still show, and the trousers prop must be hidden (not visible
+    // underneath/alongside the shorts-colored mannequin Pants material).
+    await page.evaluate(() => {
+      const items = JSON.parse(localStorage.getItem('wardrobe:items'));
+      const bottomItem = items.find(i => i.category === 'bottoms');
+      window.Wardrobe.Closet.update(bottomItem.id, { bottomStyle: 'shorts' });
+    });
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+    await page.click('#wrGenBtn');
+    await page.waitForSelector('#wrOutfits .wr-outfit-card', { timeout: 8000 });
+    await page.locator('#wrOutfits .wr-outfit-card').first().locator('[data-try3d]').click();
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(400);
+    text = await noticeText(page);
+    ok('shorts item still shows the unchanged shape-disclosure notice alongside real trousers geometry existing elsewhere',
+      /shorts.*can.t be changed/i.test(text), text);
+
+    await page.click('.wr-fitroom-close');
+  } catch (e) {
+    ok('FATAL during trousers pass', false, e.message);
+  }
+
+  await browser.close();
+  return { pageErrors };
+}
+
+checkTrousersGlbMaterial();
 const main = await runMainPass();
 const cdnFail = await runCdnFailPass();
 await runConcurrentOpenPass();
 await runWebglFailPass();
 const subtype = await runGarmentSubtypePass();
+const trousers = await runTrousersPass();
 
 console.log('\n── Wardrobe fitting-room smoke results ──');
 for (const r of results) console.log(`  ${r.pass ? '✓' : '✗'} ${r.name}${r.detail ? ' — ' + r.detail : ''}`);
@@ -454,8 +626,9 @@ if (main.pageErrors.length) { console.log('\nUncaught page errors (main pass):')
 if (main.consoleErrors.length) { console.log('\nConsole errors (main pass, non-network):'); main.consoleErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (cdnFail.pageErrors.length) { console.log('\nUncaught page errors (CDN-fail pass):'); cdnFail.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (subtype.pageErrors.length) { console.log('\nUncaught page errors (garment-subtype pass):'); subtype.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
+if (trousers.pageErrors.length) { console.log('\nUncaught page errors (trousers pass):'); trousers.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 
-const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length;
+const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length + trousers.pageErrors.length;
 console.log(`\nSMOKE: ${failed ? failed + ' failure(s)' : 'ALL PASSED ✓'}  (screenshots: tools/smoke/wardrobe-fitting-room-smoke-*.png)`);
 
 server.close();
