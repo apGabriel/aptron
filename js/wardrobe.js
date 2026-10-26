@@ -1291,6 +1291,12 @@
     let uploadSelectedCat = 'tops';  // chip selected in the upload modal
     let uploadSelectedStyle = null;  // bottomStyle/footwearStyle chip, when the category has one
     let currentOutfits = [];         // outfits currently shown (for save action)
+    // Item-edit modal: whether the user actually interacted with #wrItemStyle
+    // during the current openItem()/saveItem() session, and the item's style
+    // fields exactly as stored when the modal opened. Both reset on every
+    // openItem() and on an in-modal category change -- see saveItem().
+    let itemStyleTouched = false;
+    let itemOriginalStyle = { bottomStyle: null, footwearStyle: null };
 
     // ---- file inputs (one for items, one for portrait) ----
     function fileInput(onPick, capture) {
@@ -1388,7 +1394,10 @@
     // Shows the bottomStyle/footwearStyle <select> only for the categories
     // that have one, defaulting to the option matching the viewer's own
     // backward-compatible default (see fitting-room.js) so an unset item
-    // doesn't look "wrong" just because the field was added later.
+    // doesn't look "wrong" just because the field was added later. This
+    // auto-fill is DISPLAY ONLY -- saveItem() never trusts it by itself (see
+    // itemStyleTouched there); it only reflects a real choice once the user
+    // actually changes the control.
     function renderItemStyleSelect(category, currentValue) {
       const label = document.getElementById('wrItemStyleLabel');
       const sel = document.getElementById('wrItemStyle');
@@ -1411,6 +1420,8 @@
       catSel.innerHTML = CATEGORIES.map((c) =>
         '<option value="' + c.id + '"' + (c.id === it.category ? ' selected' : '') + '>' + c.icon + ' ' + c.label + '</option>').join('');
       renderItemStyleSelect(it.category, it.bottomStyle || it.footwearStyle || null);
+      itemStyleTouched = false;
+      itemOriginalStyle = { bottomStyle: it.bottomStyle || null, footwearStyle: it.footwearStyle || null };
       m.querySelector('#wrItemTags').value = (it.tags || []).join(', ');
       m.querySelector('#wrItemSwatch').style.background = it.color;
       // Surface the same Weather.suitsSeason() check the AI generator and
@@ -1432,7 +1443,16 @@
       const category = m.querySelector('#wrItemCat').value;
       const patch = { category, tags, bottomStyle: null, footwearStyle: null };
       const styleKey = STYLE_KEY_BY_CATEGORY[category];
-      if (styleKey) patch[styleKey] = m.querySelector('#wrItemStyle').value;
+      if (styleKey) {
+        // renderItemStyleSelect() pre-fills #wrItemStyle with options[0] purely
+        // for display when the item has no style yet (see its own comment) --
+        // reading that value unconditionally here turned "opened the modal,
+        // saved for an unrelated reason" into a silent, invented style choice
+        // (Tier 42: an unset footwearStyle became 'boots' on any save). Only
+        // trust the control once the user has actually changed it; otherwise
+        // keep this item's style exactly as it was when the modal opened.
+        patch[styleKey] = itemStyleTouched ? m.querySelector('#wrItemStyle').value : itemOriginalStyle[styleKey];
+      }
       Closet.update(openItemId, patch);
       closeItem(); Toast.show('Saved');
     }
@@ -1650,7 +1670,29 @@
           });
         });
       // item modal
-      document.getElementById('wrItemCat').addEventListener('change', (e) => renderItemStyleSelect(e.target.value, null));
+      // A category change re-renders the style row for a DIFFERENT style key
+      // (or hides it) -- any earlier touch applied to the old category's
+      // field, so it must not carry over and silently count as a choice for
+      // the new one.
+      document.getElementById('wrItemCat').addEventListener('change', (e) => {
+        itemStyleTouched = false;
+        const newCategory = e.target.value;
+        // Redisplay THIS item's own stored value for whichever category is
+        // now selected, not always the bare default -- itemOriginalStyle
+        // holds both fields exactly as they were when the modal opened, and
+        // saveItem() below guarantees only the item's actual category's
+        // field is ever non-null, so a non-original category correctly
+        // yields null here (no borrowing another category's style) while
+        // toggling back to the item's original category correctly restores
+        // its real value instead of silently redisplaying options[0] (Tier
+        // 44: this was previously hardcoded to null, so toggling back to the
+        // original category could show the wrong default -- if the user then
+        // clicked that visibly-selected-but-wrong option, it would overwrite
+        // the real stored style without them realizing it had drifted).
+        const styleKey = STYLE_KEY_BY_CATEGORY[newCategory];
+        renderItemStyleSelect(newCategory, styleKey ? itemOriginalStyle[styleKey] : null);
+      });
+      document.getElementById('wrItemStyle').addEventListener('change', () => { itemStyleTouched = true; });
       document.getElementById('wrItemSave').addEventListener('click', saveItem);
       document.getElementById('wrItemDelete').addEventListener('click', () => { if (openItemId) { Closet.remove(openItemId); closeItem(); } });
       document.getElementById('wrItemClose').addEventListener('click', closeItem);

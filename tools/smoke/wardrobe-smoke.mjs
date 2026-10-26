@@ -69,14 +69,16 @@ const bodyLocked = () => page.evaluate(() => ({
 // of synthetic garment image used during the real-browser manual audit, and
 // enough for Vision's background-isolation + Color's k-means to run without
 // throwing (both require a genuinely decodable image, not a 1x1 pixel).
-async function seedItem(page, color, category) {
-  await page.evaluate(async ({ color, category }) => {
+// `style` is optional (bottomStyle/footwearStyle) -- omitted, it matches real
+// unstyled ingestion (addFromImage() only sets the field when one is passed).
+async function seedItem(page, color, category, style) {
+  await page.evaluate(async ({ color, category, style }) => {
     const c = document.createElement('canvas'); c.width = 200; c.height = 260;
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#eeeeee'; ctx.fillRect(0, 0, 200, 260);
     ctx.fillStyle = color; ctx.fillRect(40, 40, 120, 180);
-    await window.Wardrobe.Closet.addFromImage(c.toDataURL('image/jpeg', 0.85), category);
-  }, { color, category });
+    await window.Wardrobe.Closet.addFromImage(c.toDataURL('image/jpeg', 0.85), category, style);
+  }, { color, category, style });
 }
 
 try {
@@ -166,6 +168,216 @@ try {
   ok('Saved Outfits panel returns to empty state', await page.locator('#wrSaved .wr-empty').count() === 1);
   ok('generated card reverts from badge to a re-clickable Save button',
     await page.locator('#wrOutfits [data-save]').count() === outfitCount);
+
+  // 10. Tier 43 regression: item-edit Save must never invent a garment
+  // style. Root cause (Tier 42 audit): #wrItemStyle is pre-filled with
+  // options[0] purely for DISPLAY when an item has no style yet
+  // (renderItemStyleSelect()), and the old saveItem() trusted that displayed
+  // value unconditionally -- so opening an unstyled footwear/bottoms item
+  // and saving for ANY unrelated reason silently persisted 'boots'/
+  // 'trousers' with no user choice behind it. Fixed via itemStyleTouched in
+  // js/wardrobe.js.
+  await seedItem(page, '#1b1b1b', 'footwear');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+  await page.waitForFunction(() => document.querySelectorAll('.wr-item[data-id]').length === 4);
+
+  const shoeId = await page.evaluate(() =>
+    window.Wardrobe.Store.items().find((i) => i.category === 'footwear').id);
+  const bottomsId2 = await page.evaluate(() =>
+    window.Wardrobe.Store.items().find((i) => i.category === 'bottoms').id);
+  const getItem = (id) => page.evaluate((itemId) => {
+    const items = JSON.parse(localStorage.getItem('wardrobe:items') || '[]');
+    return items.find((i) => i.id === itemId);
+  }, id);
+
+  // 10a. Unstyled footwear item: open, edit an unrelated field, save ->
+  // footwearStyle must stay unset (not silently become 'boots').
+  await page.click(`.wr-item[data-id="${shoeId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.fill('#wrItemTags', 'everyday');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  let shoe = await getItem(shoeId);
+  ok('unstyled footwear: unrelated edit+Save leaves footwearStyle unset', !shoe.footwearStyle,
+    'footwearStyle=' + JSON.stringify(shoe.footwearStyle));
+  ok('unstyled footwear: the unrelated edit itself WAS saved', (shoe.tags || []).includes('everyday'));
+
+  // 10b. Unstyled bottoms item: same sequence -> bottomStyle stays unset.
+  await page.click(`.wr-item[data-id="${bottomsId2}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.fill('#wrItemTags', 'weekend');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  let bottoms = await getItem(bottomsId2);
+  ok('unstyled bottoms: unrelated edit+Save leaves bottomStyle unset', !bottoms.bottomStyle,
+    'bottomStyle=' + JSON.stringify(bottoms.bottomStyle));
+
+  // 10c. Explicitly selecting a footwear style IS persisted.
+  await page.click(`.wr-item[data-id="${shoeId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemStyle', 'sneakers');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  shoe = await getItem(shoeId);
+  ok('explicit footwear style selection is persisted', shoe.footwearStyle === 'sneakers',
+    'footwearStyle=' + shoe.footwearStyle);
+
+  // 10d. Explicitly selecting a bottoms style IS persisted.
+  await page.click(`.wr-item[data-id="${bottomsId2}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemStyle', 'shorts');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  bottoms = await getItem(bottomsId2);
+  ok('explicit bottoms style selection is persisted', bottoms.bottomStyle === 'shorts',
+    'bottomStyle=' + bottoms.bottomStyle);
+
+  // 10e. Item that already has a style: an unrelated edit+Save must not
+  // disturb it (this already worked by coincidence before the fix; locking
+  // it in so the fix doesn't regress it the other direction).
+  await page.click(`.wr-item[data-id="${shoeId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.fill('#wrItemTags', 'everyday, sneakers');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  shoe = await getItem(shoeId);
+  ok('existing footwear style survives an unrelated edit+Save', shoe.footwearStyle === 'sneakers',
+    'footwearStyle=' + shoe.footwearStyle);
+
+  // 11. Tier 45 regression: category-round-trip style display/persistence.
+  // Root cause (Tier 44 audit): the #wrItemCat 'change' handler always
+  // re-rendered #wrItemStyle with a hardcoded null "current value", even
+  // when the newly-picked category was the item's own original one -- so
+  // toggling category away and back redisplayed the bare default
+  // (options[0]) instead of the item's real stored style, and clicking that
+  // visibly-wrong default would silently overwrite the real value. Fixed in
+  // js/wardrobe.js by having that handler look up itemOriginalStyle for the
+  // newly-selected category instead of always passing null.
+
+  // 11a. Already-styled BOTTOMS item: unrelated edit+Save preserves it.
+  // (The footwear equivalent is already covered by 10e above.)
+  await page.click(`.wr-item[data-id="${bottomsId2}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.fill('#wrItemTags', 'weekend, shorts');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  bottoms = await getItem(bottomsId2);
+  ok('existing bottoms style survives an unrelated edit+Save', bottoms.bottomStyle === 'shorts',
+    'bottomStyle=' + bottoms.bottomStyle);
+
+  // 11b. Changing an EXISTING style to a DIFFERENT valid style persists the
+  // new choice (10c/10d only covered unstyled -> styled).
+  await page.click(`.wr-item[data-id="${shoeId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  const styleBeforeChange = await page.evaluate(() => document.getElementById('wrItemStyle').value);
+  await page.selectOption('#wrItemStyle', 'boots');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  shoe = await getItem(shoeId);
+  ok('changing an existing style to a different one persists the new choice',
+    styleBeforeChange === 'sneakers' && shoe.footwearStyle === 'boots',
+    'before=' + styleBeforeChange + ' after=' + shoe.footwearStyle);
+
+  // Dedicated, explicitly-styled fixture for the category-transition
+  // scenarios below. Captured by the exact id of the just-unshifted item
+  // (Closet.addFromImage() has no return value; Store.items()[0] is always
+  // the newest) rather than a category-only lookup, which is now ambiguous
+  // -- two footwear items (shoeId + this one) exist at this point.
+  await seedItem(page, '#2244aa', 'footwear', 'sneakers');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+  await page.waitForFunction(() => document.querySelectorAll('.wr-item[data-id]').length === 5);
+  const catTestId = await page.evaluate(() => window.Wardrobe.Store.items()[0].id);
+  ok('category-transition fixture seeded with the expected starting style',
+    (await getItem(catTestId)).footwearStyle === 'sneakers');
+
+  // 11c. Category away from the original (footwear -> bottoms), then back
+  // to the original -- the selector must redisplay the item's real stored
+  // style ('sneakers'), not the bare default ('boots').
+  await page.click(`.wr-item[data-id="${catTestId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemCat', 'bottoms');
+  await page.selectOption('#wrItemCat', 'footwear');
+  const restoredValue = await page.evaluate(() => document.getElementById('wrItemStyle').value);
+  ok('category round-trip restores the original style in the selector', restoredValue === 'sneakers',
+    'restoredValue=' + restoredValue);
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  let catTestItem = await getItem(catTestId);
+  ok('category round-trip, untouched selector, Save preserves the original style',
+    catTestItem.footwearStyle === 'sneakers', 'footwearStyle=' + catTestItem.footwearStyle);
+
+  // 11d. Category change away, Save WITHOUT returning and WITHOUT touching
+  // the newly-shown (bottoms) selector -- must not invent a bottomStyle,
+  // and must clear footwearStyle (no longer a footwear item).
+  await page.click(`.wr-item[data-id="${catTestId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemCat', 'bottoms');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  catTestItem = await getItem(catTestId);
+  ok('category change + untouched new selector + Save does not invent a bottomStyle',
+    !catTestItem.bottomStyle, 'bottomStyle=' + JSON.stringify(catTestItem.bottomStyle));
+  ok('category change clears the no-longer-applicable footwearStyle',
+    !catTestItem.footwearStyle, 'footwearStyle=' + JSON.stringify(catTestItem.footwearStyle));
+  ok('category change itself was saved', catTestItem.category === 'bottoms');
+
+  // 11e. From this new bottoms category, explicitly selecting a style and
+  // saving persists the correct field/value.
+  await page.click(`.wr-item[data-id="${catTestId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemStyle', 'shorts');
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  catTestItem = await getItem(catTestId);
+  ok('explicit style selection after a category change persists correctly',
+    catTestItem.bottomStyle === 'shorts', 'bottomStyle=' + catTestItem.bottomStyle);
+
+  // 11f. Category changed multiple times (bottoms -> footwear -> outerwear
+  // -> footwear) before saving, style selector never touched -- no style
+  // may bleed across categories, and the selector itself must show the bare
+  // default for footwear (this item's true original category is bottoms,
+  // not footwear, so there is nothing of its own to restore there).
+  await page.click(`.wr-item[data-id="${catTestId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemCat', 'footwear');
+  await page.selectOption('#wrItemCat', 'outerwear');
+  await page.selectOption('#wrItemCat', 'footwear');
+  const multiToggleValue = await page.evaluate(() => document.getElementById('wrItemStyle').value);
+  ok('multiple category changes: non-original category still shows the bare default, not a bled-over style',
+    multiToggleValue === 'boots', 'multiToggleValue=' + multiToggleValue);
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  catTestItem = await getItem(catTestId);
+  ok('multiple category changes: no style bleed, footwearStyle not invented',
+    !catTestItem.footwearStyle, 'footwearStyle=' + JSON.stringify(catTestItem.footwearStyle));
+  ok('multiple category changes: previous bottoms style correctly cleared',
+    !catTestItem.bottomStyle, 'bottomStyle=' + JSON.stringify(catTestItem.bottomStyle));
+
+  // 11g. Close WITHOUT saving after touching the style selector, then
+  // reopen -- the earlier touch must not leak into the next session (a
+  // stale itemStyleTouched would otherwise persist an unconfirmed pick).
+  await seedItem(page, '#335577', 'footwear'); // fresh, unstyled
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('wardrobe-changed')));
+  await page.waitForFunction(() => document.querySelectorAll('.wr-item[data-id]').length === 6);
+  const closeTestId = await page.evaluate(() => window.Wardrobe.Store.items()[0].id);
+
+  await page.click(`.wr-item[data-id="${closeTestId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.selectOption('#wrItemStyle', 'boots'); // touch it, but never save
+  await page.click('#wrItemClose');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  let closeTestItem = await getItem(closeTestId);
+  ok('closing without saving leaves the item completely unchanged', !closeTestItem.footwearStyle,
+    'footwearStyle=' + JSON.stringify(closeTestItem.footwearStyle));
+
+  await page.click(`.wr-item[data-id="${closeTestId}"]`);
+  await page.waitForSelector('#wrItemModalBg.show');
+  await page.fill('#wrItemTags', 'reopened'); // unrelated edit; style selector untouched this time
+  await page.click('#wrItemSave');
+  await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
+  closeTestItem = await getItem(closeTestId);
+  ok('reopening after an unsaved close does not retain the earlier (never-saved) touch',
+    !closeTestItem.footwearStyle, 'footwearStyle=' + JSON.stringify(closeTestItem.footwearStyle));
 
   await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-smoke.png'), fullPage: true });
 } catch (e) {
