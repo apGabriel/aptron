@@ -413,7 +413,14 @@ async function runGarmentSubtypePass() {
 
     // Defensive: a value the UI's own enum could never produce (direct
     // Closet.update patch, bypassing the <select>) must still disclose
-    // gracefully, not throw.
+    // gracefully, not throw. Tier 43: this no longer falls back to the
+    // boots model (see fitting-room.js updateBoots()) -- it now gets the
+    // same neutral "no footwear" treatment as an unset style, so boots.glb
+    // must NOT gain a new fetch from this step (it was already fetched
+    // earlier in this same pass, by the explicit-'boots' Outfit B case
+    // above, so the assertion is "no additional fetch", not "zero ever").
+    const bootsFetchCountBeforeSandals = await page.evaluate(() =>
+      performance.getEntriesByType('resource').filter(e => /boots\.glb/.test(e.name)).length);
     await page.evaluate(() => {
       const items = JSON.parse(localStorage.getItem('wardrobe:items'));
       const shoe = items.find(i => i.category === 'footwear');
@@ -430,8 +437,13 @@ async function runGarmentSubtypePass() {
     }, { timeout: 20000 });
     await page.waitForTimeout(400);
     text = await noticeText(page);
-    ok('unrecognized footwearStyle value falls back to the disclosed placeholder, does not crash',
-      pageErrors.length === 0 && /generic boot placeholder/i.test(text), 'pageErrors=' + pageErrors.join('; ') + ' text=' + text);
+    ok('unrecognized footwearStyle value ("sandals") discloses gracefully, does not crash, and does not guess a shoe model',
+      pageErrors.length === 0 && /shoe shape.*isn.t set yet/i.test(text), 'pageErrors=' + pageErrors.join('; ') + ' text=' + text);
+    const bootsFetchCountAfterSandals = await page.evaluate(() =>
+      performance.getEntriesByType('resource').filter(e => /boots\.glb/.test(e.name)).length);
+    ok('unrecognized footwearStyle value ("sandals") does not trigger a new boots.glb fetch',
+      bootsFetchCountAfterSandals === bootsFetchCountBeforeSandals,
+      `before=${bootsFetchCountBeforeSandals} after=${bootsFetchCountAfterSandals}`);
 
     await page.click('.wr-fitroom-close');
   } catch (e) {
@@ -612,6 +624,249 @@ async function runTrousersPass() {
   return { pageErrors };
 }
 
+// Tier 40: regression test for a state-bleed bug found during review --
+// viewer.materials.Shirt/Pants are long-lived (built once in buildViewer(),
+// reused across every open()/close()), so applyOutfit() only ever WROTE a
+// color into them when that category was present in the outfit, never
+// reset them when a later outfit omitted the category -- leaving the
+// previous outfit's shirt/trousers color visibly bleeding through onto a
+// mannequin that outfit no longer has anything to say about. The fix
+// restores the mannequin's own originally-authored color (captured once,
+// at build time, before any outfit is ever applied) whenever a category is
+// absent. There is no DOM-observable signal for this (unlike the
+// notice-text checks elsewhere in this file) -- Shirt/Pants recoloring
+// produces no notice, and reading the live, continuously-re-rendered WebGL
+// canvas back via a second page.evaluate() round-trip is the same
+// unreliable readback already rejected by runTrousersPass()'s comment
+// above (no preserveDrawingBuffer, so the drawing buffer can already be
+// cleared by the time the round-trip resumes). This pass therefore only
+// asserts the automatable facts (no crash, modal opens/closes cleanly
+// through every transition) and captures a screenshot at each state for
+// direct visual review -- it does NOT claim to prove the color reset by
+// itself; that claim is made separately, from actually looking at the
+// screenshots.
+async function runStateBleedPass() {
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext();
+  await ctx.route('**://*.supabase.co/**', r => r.abort());
+  await ctx.route('**/@supabase/**', r => r.abort());
+
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  // The real outfit generator (#wrGenBtn) requires at least one top AND one
+  // bottom to ever emit a card (see js/wardrobe.js simulate(): it iterates
+  // tops, pairs each with its best-scoring bottom, and skips entirely when
+  // no bottom exists) -- it can never produce the "neither category"/
+  // "one category only" combinations this regression needs. Calling
+  // window.WardrobeFittingRoom.open() directly with hand-built pieces is
+  // the same technique runConcurrentOpenPass already uses above (passing
+  // outfits[0].pieces straight to open()), just with explicit category
+  // control instead of reading a real generated outfit.
+  async function openPieces(pieces) {
+    await page.evaluate((p) => { window.WardrobeFittingRoom.open(p); }, pieces);
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(500);
+  }
+
+  async function closeModal() {
+    await page.evaluate(() => window.WardrobeFittingRoom.close());
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+  }
+
+  try {
+    await page.goto(`http://localhost:${PORT}/wardrobe.html`, { waitUntil: 'load', timeout: 15000 });
+    await page.waitForFunction(() => window.Wardrobe && window.AptTheme && window.WardrobeFittingRoom, { timeout: 8000 });
+
+    // 1. Baseline outfit with a saturated, easy-to-recognize shirt AND
+    // trousers color -- both base-mannequin categories present.
+    await openPieces([
+      { category: 'tops', color: '#1b5e4f' },                       // teal
+      { category: 'bottoms', color: '#5b2c91', bottomStyle: 'trousers' } // purple
+    ]);
+    ok('state-bleed: colored baseline outfit opens cleanly', pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-state-bleed-1-colored.png') });
+    await closeModal();
+
+    // 2. New outfit with NEITHER tops nor bottoms -- only footwear/accessories.
+    await openPieces([
+      { category: 'footwear', color: '#1b1b1b', footwearStyle: 'boots' },
+      { category: 'accessories', color: '#d4a017' }
+    ]);
+    ok('state-bleed: outfit with neither tops nor bottoms opens cleanly after a colored outfit', pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-state-bleed-2-neither.png') });
+    await closeModal();
+
+    // 3. New outfit with ONLY bottoms (no tops) -- Shirt must reset to
+    // default, Pants must take the new color, not the Tier-1 purple.
+    await openPieces([
+      { category: 'bottoms', color: '#d4751c', bottomStyle: 'trousers' }, // orange
+      { category: 'footwear', color: '#1b1b1b', footwearStyle: 'boots' }
+    ]);
+    ok('state-bleed: bottoms-only outfit opens cleanly', pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-state-bleed-3-bottoms-only.png') });
+    await closeModal();
+
+    // 4. New outfit with ONLY tops (no bottoms) -- Pants must reset to
+    // default, Shirt must take the new color, not the Tier-1 teal.
+    await openPieces([
+      { category: 'tops', color: '#c23b7a' }, // pink
+      { category: 'footwear', color: '#1b1b1b', footwearStyle: 'boots' }
+    ]);
+    ok('state-bleed: tops-only outfit opens cleanly', pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-state-bleed-4-tops-only.png') });
+    await closeModal();
+  } catch (e) {
+    ok('FATAL during state-bleed pass', false, e.message);
+  }
+
+  await browser.close();
+  return { pageErrors };
+}
+
+// Tier 43: regression test for the footwear-style fallback fix in
+// updateBoots() (fitting-room.js) -- an unspecified/unrecognized
+// footwearStyle must no longer silently select either boots.glb or
+// sneakers.glb (Tier 42's audit found the real ingestion flow leaves this
+// field unset unless the user explicitly picks a style, so the old
+// `piece.footwearStyle || 'boots'` fallback misrepresented ordinary
+// sneakers as boots for most real items). Uses
+// window.WardrobeFittingRoom.open() directly, same technique as
+// runStateBleedPass() above, for exact per-case control over the style
+// value -- the real outfit generator has no way to force a specific value
+// deterministically case to case.
+//
+// What this proves: which GLB (if any) gets FETCHED for each style value
+// (a reliable, real network-level signal), and the notice text each case
+// produces. What it does NOT prove: that the mannequin's own feet/socks
+// are actually VISIBLE on screen at each step -- there is no safe way to
+// read the live, continuously-re-rendered WebGL canvas back from a second
+// page.evaluate() round-trip (no preserveDrawingBuffer; see
+// runTrousersPass()'s comment above), and the module deliberately exposes
+// only {open, close}, no internal state accessor. Screenshots are captured
+// at each step for direct visual review of that specific claim instead.
+async function runUnknownFootwearStylePass() {
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext();
+  await ctx.route('**://*.supabase.co/**', r => r.abort());
+  await ctx.route('**/@supabase/**', r => r.abort());
+
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  async function openPieces(pieces) {
+    await page.evaluate((p) => { window.WardrobeFittingRoom.open(p); }, pieces);
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(500);
+  }
+  async function closeModal() {
+    await page.evaluate(() => window.WardrobeFittingRoom.close());
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+  }
+  function noticeText() {
+    return page.evaluate(() => {
+      const n = document.getElementById('wrFitRoomNotice');
+      return n && !n.hidden ? n.textContent : '';
+    });
+  }
+  function fetchCount(pattern) {
+    return page.evaluate((p) =>
+      performance.getEntriesByType('resource').filter(e => new RegExp(p).test(e.name)).length, pattern);
+  }
+
+  try {
+    await page.goto(`http://localhost:${PORT}/wardrobe.html`, { waitUntil: 'load', timeout: 15000 });
+    await page.waitForFunction(() => window.Wardrobe && window.AptTheme && window.WardrobeFittingRoom, { timeout: 8000 });
+
+    // 1. footwearStyle field entirely absent -- the real, most common case
+    // (an item never edited through the style chip/select).
+    await openPieces([{ category: 'footwear', color: '#5a3d2b' }]);
+    ok('missing footwearStyle: boots.glb NOT fetched', (await fetchCount('boots\\.glb')) === 0);
+    ok('missing footwearStyle: sneakers.glb NOT fetched', (await fetchCount('sneakers\\.glb')) === 0);
+    let text = await noticeText();
+    ok('missing footwearStyle: neutral "shoe shape isn\'t set" notice shown, not a silent guess',
+      /shoe shape.*isn.t set yet/i.test(text), text);
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-unknown-footwear-1-missing.png') });
+    await closeModal();
+
+    // 2. footwearStyle explicitly null (what Closet.update's default patch
+    // actually stores) -- same neutral path as case 1.
+    await openPieces([{ category: 'footwear', color: '#5a3d2b', footwearStyle: null }]);
+    ok('null footwearStyle: boots.glb still not fetched', (await fetchCount('boots\\.glb')) === 0);
+    ok('null footwearStyle: sneakers.glb still not fetched', (await fetchCount('sneakers\\.glb')) === 0);
+    await closeModal();
+
+    // 3. Unrecognized explicit value -- same neutral path, not a third
+    // silent guess.
+    await openPieces([{ category: 'footwear', color: '#5a3d2b', footwearStyle: 'sandals' }]);
+    ok('unrecognized footwearStyle ("sandals"): boots.glb still not fetched', (await fetchCount('boots\\.glb')) === 0);
+    ok('unrecognized footwearStyle ("sandals"): sneakers.glb still not fetched', (await fetchCount('sneakers\\.glb')) === 0);
+    await closeModal();
+
+    // 4. Explicit 'boots' DOES fetch boots.glb, exactly once, no notice.
+    await openPieces([{ category: 'footwear', color: '#5a3d2b', footwearStyle: 'boots' }]);
+    ok('explicit "boots": boots.glb fetched exactly once', (await fetchCount('boots\\.glb')) === 1);
+    ok('explicit "boots": sneakers.glb still never fetched', (await fetchCount('sneakers\\.glb')) === 0);
+    text = await noticeText();
+    ok('explicit "boots": no footwear notice', !/shoe shape|placeholder/i.test(text), text);
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-unknown-footwear-2-explicit-boots.png') });
+    await closeModal();
+
+    // 5. Explicit 'sneakers' DOES fetch sneakers.glb, no notice.
+    await openPieces([{ category: 'footwear', color: '#5a3d2b', footwearStyle: 'sneakers' }]);
+    ok('explicit "sneakers": sneakers.glb fetched exactly once', (await fetchCount('sneakers\\.glb')) === 1);
+    text = await noticeText();
+    ok('explicit "sneakers": no footwear notice', !/shoe shape|placeholder/i.test(text), text);
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-unknown-footwear-3-explicit-sneakers.png') });
+    await closeModal();
+
+    // 6. Boots, then an unknown-style outfit right after -- the notice
+    // must switch to the neutral explanation (proving this code path ran
+    // again, not stuck showing the previous boots state); no safe
+    // automated readback of the boots prop's actual .visible exists (see
+    // function-level comment above), so the "not left stale-visible" claim
+    // itself rests on the screenshot, reviewed directly, not on this
+    // assertion alone.
+    await openPieces([{ category: 'footwear', color: '#5a3d2b', footwearStyle: 'boots' }]);
+    await closeModal();
+    await openPieces([{ category: 'footwear', color: '#5a3d2b' }]);
+    text = await noticeText();
+    ok('boots outfit immediately followed by unknown-style outfit: notice switches to the neutral explanation',
+      /shoe shape.*isn.t set yet/i.test(text), text);
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-unknown-footwear-4-boots-then-unknown.png') });
+    await closeModal();
+
+    // 7. Unrelated categories (tops/trousers/accessories) alongside an
+    // unknown-style footwear piece in the SAME outfit -- no cross-category
+    // regression from this fix.
+    await openPieces([
+      { category: 'tops', color: '#2b3a55' },
+      { category: 'bottoms', color: '#2a3f6b', bottomStyle: 'trousers' },
+      { category: 'footwear', color: '#5a3d2b' },
+      { category: 'accessories', color: '#d4a017' }
+    ]);
+    ok('unrelated categories (tops/trousers/accessories) unaffected alongside unknown-style footwear in the same outfit',
+      pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-unknown-footwear-5-mixed-outfit.png') });
+    await closeModal();
+  } catch (e) {
+    ok('FATAL during unknown-footwear-style pass', false, e.message);
+  }
+
+  await browser.close();
+  return { pageErrors };
+}
+
 checkTrousersGlbMaterial();
 const main = await runMainPass();
 const cdnFail = await runCdnFailPass();
@@ -619,6 +874,8 @@ await runConcurrentOpenPass();
 await runWebglFailPass();
 const subtype = await runGarmentSubtypePass();
 const trousers = await runTrousersPass();
+const stateBleed = await runStateBleedPass();
+const unknownFootwear = await runUnknownFootwearStylePass();
 
 console.log('\n── Wardrobe fitting-room smoke results ──');
 for (const r of results) console.log(`  ${r.pass ? '✓' : '✗'} ${r.name}${r.detail ? ' — ' + r.detail : ''}`);
@@ -627,8 +884,10 @@ if (main.consoleErrors.length) { console.log('\nConsole errors (main pass, non-n
 if (cdnFail.pageErrors.length) { console.log('\nUncaught page errors (CDN-fail pass):'); cdnFail.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (subtype.pageErrors.length) { console.log('\nUncaught page errors (garment-subtype pass):'); subtype.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (trousers.pageErrors.length) { console.log('\nUncaught page errors (trousers pass):'); trousers.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
+if (stateBleed.pageErrors.length) { console.log('\nUncaught page errors (state-bleed pass):'); stateBleed.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
+if (unknownFootwear.pageErrors.length) { console.log('\nUncaught page errors (unknown-footwear-style pass):'); unknownFootwear.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 
-const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length + trousers.pageErrors.length;
+const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length + trousers.pageErrors.length + stateBleed.pageErrors.length + unknownFootwear.pageErrors.length;
 console.log(`\nSMOKE: ${failed ? failed + ' failure(s)' : 'ALL PASSED ✓'}  (screenshots: tools/smoke/wardrobe-fitting-room-smoke-*.png)`);
 
 server.close();

@@ -177,9 +177,103 @@
     return map;
   }
 
+  // Companion to collectMaterialsByName(), keyed the same way but holding
+  // the actual mesh objects instead of their materials -- needed so a
+  // specific named region of the mannequin (its own feet) can be hidden by
+  // visibility rather than recolored, which collectMaterialsByName()'s
+  // output can't do.
+  function collectMeshesByMaterialName(root) {
+    var map = {};
+    root.traverse(function (obj) {
+      if (!obj.isMesh) return;
+      var mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(function (m) {
+        if (!m || !m.name) return;
+        (map[m.name] = map[m.name] || []).push(obj);
+      });
+    });
+    return map;
+  }
+
   function safeSetColor(material, colorStr) {
     if (!material || !colorStr) return;
     try { material.color.set(colorStr); } catch (e) { /* malformed color string -- leave material as-is */ }
+  }
+
+  // Prop base-color textures (boots/sneakers/trousers) are not neutral
+  // shading maps -- inspection of the committed GLBs found boots.glb uses a
+  // multi-hue UV "palette atlas" (many fully-saturated swatches) and
+  // trousers.glb bakes its own tan colorway directly into the texture.
+  // safeSetColor()'s material.color multiply was therefore tinting an
+  // already-colored image, producing a blend of the garment's stored color
+  // and whatever hue happened to sit under each UV island rather than the
+  // garment's actual color. Converting the map to luminance once, before
+  // any tint is ever applied, turns it into what it should have been used
+  // as all along: a plain light/shadow (AO-style) mask that a flat color
+  // multiplies cleanly, the same role sneakers.glb's already-neutral
+  // texture plays. Runs once per prop load; failures (e.g. a tainted
+  // canvas) just leave the original texture in place.
+  function desaturateMaterialMaps(materials) {
+    // Keyed by the ORIGINAL texture's uuid, not the material name -- glTF
+    // lets more than one named material reference the same Texture object
+    // (e.g. several mesh regions sharing one palette atlas). Tier 40 checked
+    // this: neither boots.glb/sneakers.glb/trousers.glb currently share a
+    // texture across differently-named materials, but the format allows it
+    // and nothing here should assume today's asset layout. Cloning and
+    // disposing per-MATERIAL instead of per-TEXTURE would double-clone (fine,
+    // just wasteful) but ALSO double-dispose the shared original, which
+    // would be unsafe to do before every sharer has already switched off it
+    // -- so disposal happens in a second pass, once per unique original,
+    // after every material referencing it has its own clone installed.
+    var grayByOriginalId = {};
+    var originals = [];
+    Object.keys(materials).forEach(function (name) {
+      var m = materials[name];
+      if (!m || !m.map || !m.map.image) return;
+      var original = m.map;
+      var existingClone = grayByOriginalId[original.uuid];
+      if (existingClone) {
+        m.map = existingClone;
+        m.needsUpdate = true;
+        return;
+      }
+      var img = original.image;
+      var w = img.width, h = img.height;
+      if (!w || !h) return;
+      try {
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        var frame = ctx.getImageData(0, 0, w, h);
+        var px = frame.data;
+        for (var i = 0; i < px.length; i += 4) {
+          var l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+          px[i] = px[i + 1] = px[i + 2] = l;
+        }
+        ctx.putImageData(frame, 0, 0);
+        var gray = original.clone();
+        gray.image = canvas;
+        gray.colorSpace = original.colorSpace; // clone() already copies this; set explicitly so intent isn't implicit
+        gray.needsUpdate = true;
+        grayByOriginalId[original.uuid] = gray;
+        originals.push(original);
+        m.map = gray;
+        m.needsUpdate = true;
+      } catch (e) { /* tainted/unreadable source canvas -- leave texture as-authored */ }
+    });
+    // Only now, after every material that pointed at a given original has
+    // been switched to its (single, shared) gray clone, is it safe to free
+    // that original -- clone() doesn't transfer GPU ownership, so leaving it
+    // un-disposed would leak it, but disposing inside the loop above could
+    // free it out from under a not-yet-processed sharer. Each original was
+    // never rendered before being replaced (this runs synchronously right
+    // after the prop is added, before the next render), so there's nothing
+    // to free on the GPU yet in practice, but dispose() is correct
+    // regardless of upload state and prevents a real leak if that timing
+    // assumption ever stops holding.
+    originals.forEach(function (t) { t.dispose(); });
   }
 
   function fitAndPlace(THREE, obj, mannequinBox, heightRatio, verticalY) {
@@ -250,6 +344,17 @@
       viewer.mannequin = mannequin;
       viewer.mannequinBox = box;
       viewer.materials = collectMaterialsByName(mannequin);
+      viewer.meshesByMaterial = collectMeshesByMaterialName(mannequin);
+      // Captured once, here, before any outfit is ever applied -- the
+      // mannequin's own authored colors, so a later outfit that omits a
+      // category (no shirt/no trousers piece) has something deterministic
+      // to go back to instead of leaving whatever the previous outfit left
+      // behind (viewer/its materials are built once and reused across every
+      // open(), per ensureViewerBuilt()'s memoization).
+      viewer.baseColors = {};
+      Object.keys(viewer.materials).forEach(function (name) {
+        viewer.baseColors[name] = viewer.materials[name].color.clone();
+      });
       viewer.ready = true;
 
       startRenderLoop();
@@ -319,6 +424,7 @@
 
       state.root = root;
       state.materials = collectMaterialsByName(root);
+      desaturateMaterialMaps(state.materials);
       state.loading = null;
       return state;
     }, function (err) {
@@ -328,20 +434,52 @@
     return state.loading;
   }
 
+  // The mannequin's own feet are modeled as a separate "Socks" region (own
+  // material, confirmed by inspecting quat-man.glb) under whatever shoe is
+  // layered on top. Production browser validation showed this sock/ankle
+  // geometry visibly poking out above both boot and sneaker openings --
+  // footwear models fitted by fitAndPlace() cover the foot's footprint and
+  // height but nothing ever hid the mannequin's own foot underneath. No
+  // scale/position tweak closes that, since it's a second, unrelated mesh
+  // occupying the same space, not a misaligned one -- so it's hidden
+  // outright while a shoe is shown, and restored when none is.
+  function setSocksVisible(visible) {
+    var meshes = viewer.meshesByMaterial && viewer.meshesByMaterial.Socks;
+    if (meshes) meshes.forEach(function (m) { m.visible = visible; });
+  }
+
   function updateBoots(piece) {
     if (!piece) {
       if (viewer.props.boots.root) viewer.props.boots.root.visible = false;
       if (viewer.props.sneakers.root) viewer.props.sneakers.root.visible = false;
+      setSocksVisible(true);
       setNotice('boots', null);
       return;
     }
-    // Two real footwear models exist now (Tier 2): boots and sneakers,
-    // selected by the item's own footwearStyle. Anything else (sandals,
-    // heels, ... -- no asset exists) falls back to the boots model as a
-    // disclosed placeholder, same as ALL footwear did before sneakers got
-    // real geometry; see fitting-room's Tier 1/Tier 2 passes.
-    var style = piece.footwearStyle || 'boots';
-    var key = style === 'sneakers' ? 'sneakers' : 'boots';
+
+    // Two real footwear models exist (Tier 2): boots and sneakers, selected
+    // ONLY by an EXPLICIT, exact footwearStyle match. Tier 42's audit found
+    // the real ingestion flow leaves footwearStyle unset unless the user
+    // deliberately picks a style -- the old `piece.footwearStyle || 'boots'`
+    // fallback silently rendered ordinary sneakers (and anything else
+    // unset) as boots for most real items, with no disclosure at all (the
+    // disclosure only fired for an explicit-but-unrecognized value like
+    // 'sandals', never for the far more common unset/null case). An
+    // unspecified or unrecognized style now gets the SAME treatment as "no
+    // footwear piece at all" -- the mannequin's own feet, already a correct
+    // and fully-supported state -- plus a notice explaining why, instead of
+    // guessing a specific shoe shape that may well be wrong.
+    var style = piece.footwearStyle;
+    if (style !== 'boots' && style !== 'sneakers') {
+      if (viewer.props.boots.root) viewer.props.boots.root.visible = false;
+      if (viewer.props.sneakers.root) viewer.props.sneakers.root.visible = false;
+      setSocksVisible(true);
+      setNotice('boots', 'This item’s shoe shape isn’t set yet — showing the mannequin’s own feet instead of guessing boots or sneakers.');
+      return;
+    }
+
+    setSocksVisible(false);
+    var key = style; // guaranteed 'boots' or 'sneakers' by the check above
     var otherKey = key === 'sneakers' ? 'boots' : 'sneakers';
     var ratio = key === 'sneakers' ? SNEAKER_HEIGHT_RATIO : BOOT_HEIGHT_RATIO;
     if (viewer.props[otherKey].root) viewer.props[otherKey].root.visible = false;
@@ -351,10 +489,16 @@
       Object.keys(state.materials).forEach(function (name) {
         safeSetColor(state.materials[name], piece.color);
       });
-      setNotice('boots', (style !== 'boots' && style !== 'sneakers')
-        ? 'This item isn’t boot-shaped — showing a generic boot placeholder since a matching shoe model isn’t available yet.'
-        : null);
+      setNotice('boots', null);
     }).catch(function () {
+      // setSocksVisible(false) above already ran on the assumption the shoe
+      // would load. Tier 39's review caught that this path never undid it --
+      // on a genuine load failure the mannequin was left with neither its
+      // own feet nor a shoe, an empty gap strictly worse than the pre-shoe
+      // behavior (bare feet, always visible). Restore the fallback here,
+      // the same recovery updateBoots(null) already gives the "no footwear
+      // selected" case.
+      setSocksVisible(true);
       setNotice('boots', 'Footwear preview couldn’t be loaded — showing the rest of the outfit.');
     });
   }
@@ -401,6 +545,23 @@
     });
   }
 
+  // Applies the piece's color to the mannequin's own named material region
+  // when that category is present in THIS outfit, otherwise restores the
+  // mannequin's originally-authored color (captured once in buildViewer())
+  // -- never leaves whatever color the previous open() call set. Must run
+  // every time applyOutfit() runs, for every base-mannequin category, since
+  // viewer.materials is long-lived across opens/closes, not rebuilt per
+  // outfit.
+  function applyBaseMaterialColor(name, piece) {
+    var material = viewer.materials[name];
+    if (!material) return;
+    if (piece && piece.color) {
+      safeSetColor(material, piece.color);
+    } else if (viewer.baseColors && viewer.baseColors[name]) {
+      material.color.copy(viewer.baseColors[name]);
+    }
+  }
+
   function applyOutfit(pieces) {
     var list = Array.isArray(pieces) ? pieces.filter(Boolean) : [];
     if (!Array.isArray(pieces) && window.console && console.debug) {
@@ -413,8 +574,8 @@
     var shoe = pickByCategory(list, 'footwear');
     var acc = pickByCategory(list, 'accessories');
 
-    if (viewer.materials.Shirt && top) safeSetColor(viewer.materials.Shirt, top.color);
-    if (viewer.materials.Pants && bottom) safeSetColor(viewer.materials.Pants, bottom.color);
+    applyBaseMaterialColor('Shirt', top);
+    applyBaseMaterialColor('Pants', bottom);
 
     updateBoots(shoe);
     updateBackpack(acc);
