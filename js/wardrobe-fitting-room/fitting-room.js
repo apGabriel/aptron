@@ -536,10 +536,15 @@
     }
     ensureProp('backpack', BACKPACK_HEIGHT_RATIO, 0.55, BACKPACK_BACK_OFFSET_RATIO).then(function (state) {
       state.root.visible = true;
-      Object.keys(state.materials).forEach(function (name) {
-        safeSetColor(state.materials[name], piece.color);
-      });
-      setNotice('backpack', null);
+      // Unlike boots/sneakers/trousers, backpack.glb has no texture -- it's
+      // built from 4 distinctly-colored named materials (body, strap,
+      // buckle, trim), confirmed by direct inspection. Forcing all 4 to the
+      // item's single stored color (the old behavior) erased that design
+      // and wasn't any more accurate than the asset's own colors, so this
+      // is shown as modeled instead, with the same kind of honest
+      // "can't be customized" disclosure already used for outerwear/shorts
+      // below -- not a bug being hidden, a representation limit being named.
+      setNotice('backpack', 'This accessory’s colors are shown as modeled — its stored color isn’t applied to the 3D preview.');
     }).catch(function () {
       setNotice('backpack', 'Accessory preview couldn’t be loaded.');
     });

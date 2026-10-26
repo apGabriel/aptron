@@ -867,6 +867,105 @@ async function runUnknownFootwearStylePass() {
   return { pageErrors };
 }
 
+// Tier 57: regression test for the backpack "shown as modeled" fix --
+// updateBackpack() no longer force-tints backpack.glb's 4 distinctly
+// authored materials to the item's single stored color (that flattened
+// the asset's own design and wasn't any more accurate anyway); it now
+// leaves them as modeled and discloses that honestly instead. Uses
+// window.WardrobeFittingRoom.open() directly, same technique as the
+// other passes above, for exact control over which categories are
+// present.
+//
+// What this proves: the backpack model is actually fetched when an
+// accessories piece is present, the exact disclosure text is shown, and
+// the notice correctly clears (does not bleed into) an outfit with no
+// accessories piece. What it does NOT prove: that the rendered backpack
+// pixels are genuinely unrecolored -- there is no safe way to read the
+// live, continuously-re-rendered WebGL canvas back (no
+// preserveDrawingBuffer; see runStateBleedPass()'s comment above), and
+// the module exposes only {open, close}. A screenshot using a
+// deliberately distinctive, un-backpack-like stored color (#ff0000, pure
+// red -- nothing in backpack.glb's own brown/green/gold palette is close
+// to it) is captured for direct visual review of that specific claim
+// instead; it is evidence for a human to look at, not an automated
+// assertion.
+async function runBackpackPass() {
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext();
+  await ctx.route('**://*.supabase.co/**', r => r.abort());
+  await ctx.route('**/@supabase/**', r => r.abort());
+
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', e => pageErrors.push(e.message));
+
+  async function openPieces(pieces) {
+    await page.evaluate((p) => { window.WardrobeFittingRoom.open(p); }, pieces);
+    await page.waitForSelector('#wrFitRoomModalBg.show', { timeout: 4000 });
+    await page.waitForFunction(() => {
+      const st = document.getElementById('wrFitRoomState');
+      return st && st.hidden === true;
+    }, { timeout: 20000 });
+    await page.waitForTimeout(500);
+  }
+  async function closeModal() {
+    await page.evaluate(() => window.WardrobeFittingRoom.close());
+    await page.waitForFunction(() => !document.getElementById('wrFitRoomModalBg').classList.contains('show'));
+  }
+  function noticeText() {
+    return page.evaluate(() => {
+      const n = document.getElementById('wrFitRoomNotice');
+      return n && !n.hidden ? n.textContent : '';
+    });
+  }
+  function fetchCount(pattern) {
+    return page.evaluate((p) =>
+      performance.getEntriesByType('resource').filter(e => new RegExp(p).test(e.name)).length, pattern);
+  }
+
+  try {
+    await page.goto(`http://localhost:${PORT}/wardrobe.html`, { waitUntil: 'load', timeout: 15000 });
+    await page.waitForFunction(() => window.Wardrobe && window.AptTheme && window.WardrobeFittingRoom, { timeout: 8000 });
+
+    // Case A: an accessories piece with a deliberately distinctive color
+    // (#ff0000, pure red -- nothing like backpack.glb's own dark
+    // brown/green/gold palette) is present.
+    await openPieces([{ category: 'accessories', color: '#ff0000' }]);
+    ok('backpack shown: backpack.glb is fetched', (await fetchCount('backpack\\.glb')) === 1);
+    const textA = await noticeText();
+    ok('backpack shown: exact disclosure notice appears',
+      textA === 'This accessory’s colors are shown as modeled — its stored color isn’t applied to the 3D preview.',
+      textA);
+    ok('backpack shown: no page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-backpack-1-shown.png') });
+    await closeModal();
+
+    // Case B: the SAME session, now opened with an outfit that has NO
+    // accessories piece -- the notice must clear, not bleed over from
+    // Case A (same bleed-check shape as runUnknownFootwearStylePass's
+    // boots-then-unknown transition above).
+    await openPieces([{ category: 'tops', color: '#2b3a55' }]);
+    const textB = await noticeText();
+    ok('backpack hidden: notice clears when no accessories piece is present', textB === '', textB);
+    ok('backpack hidden: no page errors', pageErrors.length === 0, pageErrors.join('; '));
+    await page.screenshot({ path: path.join(ROOT, 'tools/smoke/wardrobe-fitting-room-backpack-2-hidden.png') });
+    await closeModal();
+
+    // Material-palette verification: the harness cannot read the live
+    // WebGL canvas back reliably (see this function's own header
+    // comment), so there is no further automated assertion available
+    // beyond Case A's notice/fetch checks above -- whether the backpack
+    // actually RENDERS unrecolored (not tinted red) is a visual check
+    // against wardrobe-fitting-room-backpack-1-shown.png, not an
+    // automated claim made by this function.
+  } catch (e) {
+    ok('FATAL during backpack pass', false, e.message);
+  }
+
+  await browser.close();
+  return { pageErrors };
+}
+
 checkTrousersGlbMaterial();
 const main = await runMainPass();
 const cdnFail = await runCdnFailPass();
@@ -876,6 +975,7 @@ const subtype = await runGarmentSubtypePass();
 const trousers = await runTrousersPass();
 const stateBleed = await runStateBleedPass();
 const unknownFootwear = await runUnknownFootwearStylePass();
+const backpack = await runBackpackPass();
 
 console.log('\n── Wardrobe fitting-room smoke results ──');
 for (const r of results) console.log(`  ${r.pass ? '✓' : '✗'} ${r.name}${r.detail ? ' — ' + r.detail : ''}`);
@@ -886,8 +986,9 @@ if (subtype.pageErrors.length) { console.log('\nUncaught page errors (garment-su
 if (trousers.pageErrors.length) { console.log('\nUncaught page errors (trousers pass):'); trousers.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (stateBleed.pageErrors.length) { console.log('\nUncaught page errors (state-bleed pass):'); stateBleed.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 if (unknownFootwear.pageErrors.length) { console.log('\nUncaught page errors (unknown-footwear-style pass):'); unknownFootwear.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
+if (backpack.pageErrors.length) { console.log('\nUncaught page errors (backpack pass):'); backpack.pageErrors.forEach(e => console.log('  ✗ ' + e)); }
 
-const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length + trousers.pageErrors.length + stateBleed.pageErrors.length + unknownFootwear.pageErrors.length;
+const failed = results.filter(r => !r.pass).length + main.pageErrors.length + main.consoleErrors.length + cdnFail.pageErrors.length + subtype.pageErrors.length + trousers.pageErrors.length + stateBleed.pageErrors.length + unknownFootwear.pageErrors.length + backpack.pageErrors.length;
 console.log(`\nSMOKE: ${failed ? failed + ' failure(s)' : 'ALL PASSED ✓'}  (screenshots: tools/smoke/wardrobe-fitting-room-smoke-*.png)`);
 
 server.close();
