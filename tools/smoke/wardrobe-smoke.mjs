@@ -191,9 +191,21 @@ try {
   }, id);
 
   // 10a. Unstyled footwear item: open, edit an unrelated field, save ->
-  // footwearStyle must stay unset (not silently become 'boots').
+  // footwearStyle must stay unset (not silently become 'boots'). Also
+  // verifies the display-only side of the same fix: an unstyled item's
+  // selector must show the explicit "Not set" placeholder (empty value,
+  // disabled option), not a real style pre-selected as if it were saved.
   await page.click(`.wr-item[data-id="${shoeId}"]`);
   await page.waitForSelector('#wrItemModalBg.show');
+  const unstyledDisplay = await page.evaluate(() => {
+    const sel = document.getElementById('wrItemStyle');
+    return { value: sel.value, placeholderDisabled: sel.options[0].disabled, placeholderLabel: sel.options[0].text };
+  });
+  ok('unstyled footwear: selector displays no real value (not silently "boots")',
+    unstyledDisplay.value === '', 'value=' + JSON.stringify(unstyledDisplay.value));
+  ok('unstyled footwear: selector shows a disabled "Not set" placeholder',
+    unstyledDisplay.placeholderDisabled === true && unstyledDisplay.placeholderLabel === 'Not set',
+    JSON.stringify(unstyledDisplay));
   await page.fill('#wrItemTags', 'everyday');
   await page.click('#wrItemSave');
   await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
@@ -203,8 +215,20 @@ try {
   ok('unstyled footwear: the unrelated edit itself WAS saved', (shoe.tags || []).includes('everyday'));
 
   // 10b. Unstyled bottoms item: same sequence -> bottomStyle stays unset.
+  // Mirrors 10a's display check -- the "Not set" placeholder is rendered by
+  // the same category-agnostic renderItemStyleSelect(), but verifying it
+  // only for footwear would leave the bottoms side of the fix unconfirmed.
   await page.click(`.wr-item[data-id="${bottomsId2}"]`);
   await page.waitForSelector('#wrItemModalBg.show');
+  const unstyledBottomsDisplay = await page.evaluate(() => {
+    const sel = document.getElementById('wrItemStyle');
+    return { value: sel.value, placeholderDisabled: sel.options[0].disabled, placeholderLabel: sel.options[0].text };
+  });
+  ok('unstyled bottoms: selector displays no real value (not silently "trousers")',
+    unstyledBottomsDisplay.value === '', 'value=' + JSON.stringify(unstyledBottomsDisplay.value));
+  ok('unstyled bottoms: selector shows a disabled "Not set" placeholder',
+    unstyledBottomsDisplay.placeholderDisabled === true && unstyledBottomsDisplay.placeholderLabel === 'Not set',
+    JSON.stringify(unstyledBottomsDisplay));
   await page.fill('#wrItemTags', 'weekend');
   await page.click('#wrItemSave');
   await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
@@ -334,17 +358,18 @@ try {
 
   // 11f. Category changed multiple times (bottoms -> footwear -> outerwear
   // -> footwear) before saving, style selector never touched -- no style
-  // may bleed across categories, and the selector itself must show the bare
-  // default for footwear (this item's true original category is bottoms,
-  // not footwear, so there is nothing of its own to restore there).
+  // may bleed across categories, and the selector itself must show the
+  // "Not set" placeholder for footwear (this item's true original category
+  // is bottoms, not footwear, so there is nothing of its own to restore
+  // there, and it must not look like a real "boots" selection either).
   await page.click(`.wr-item[data-id="${catTestId}"]`);
   await page.waitForSelector('#wrItemModalBg.show');
   await page.selectOption('#wrItemCat', 'footwear');
   await page.selectOption('#wrItemCat', 'outerwear');
   await page.selectOption('#wrItemCat', 'footwear');
   const multiToggleValue = await page.evaluate(() => document.getElementById('wrItemStyle').value);
-  ok('multiple category changes: non-original category still shows the bare default, not a bled-over style',
-    multiToggleValue === 'boots', 'multiToggleValue=' + multiToggleValue);
+  ok('multiple category changes: non-original category shows "Not set", not a bled-over style',
+    multiToggleValue === '', 'multiToggleValue=' + JSON.stringify(multiToggleValue));
   await page.click('#wrItemSave');
   await page.waitForFunction(() => !document.getElementById('wrItemModalBg').classList.contains('show'));
   catTestItem = await getItem(catTestId);

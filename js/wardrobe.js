@@ -1392,22 +1392,23 @@
 
     // ---- item detail modal ----
     // Shows the bottomStyle/footwearStyle <select> only for the categories
-    // that have one, defaulting to the option matching the viewer's own
-    // backward-compatible default (see fitting-room.js) so an unset item
-    // doesn't look "wrong" just because the field was added later. This
-    // auto-fill is DISPLAY ONLY -- saveItem() never trusts it by itself (see
-    // itemStyleTouched there); it only reflects a real choice once the user
-    // actually changes the control.
+    // that have one. An item with no saved style shows an explicit, disabled
+    // "Not set" placeholder rather than visually pre-selecting the first real
+    // option -- a prior version defaulted display to options[0] ('Boots'),
+    // which made every never-styled item look identical to one actually
+    // saved as Boots. saveItem() never trusts this control by itself either
+    // way (see itemStyleTouched there); it only reflects a real choice once
+    // the user actually changes it.
     function renderItemStyleSelect(category, currentValue) {
       const label = document.getElementById('wrItemStyleLabel');
       const sel = document.getElementById('wrItemStyle');
       if (!label || !sel) return;
       const options = STYLE_OPTIONS_BY_CATEGORY[category];
       if (!options) { label.hidden = true; sel.hidden = true; sel.innerHTML = ''; return; }
-      const value = currentValue || options[0].id;
       label.hidden = false; sel.hidden = false;
-      sel.innerHTML = options.map((s) =>
-        '<option value="' + s.id + '"' + (s.id === value ? ' selected' : '') + '>' + s.label + '</option>').join('');
+      const placeholder = currentValue ? '' : '<option value="" disabled selected>Not set</option>';
+      sel.innerHTML = placeholder + options.map((s) =>
+        '<option value="' + s.id + '"' + (s.id === currentValue ? ' selected' : '') + '>' + s.label + '</option>').join('');
     }
 
     function openItem(id) {
@@ -1444,13 +1445,14 @@
       const patch = { category, tags, bottomStyle: null, footwearStyle: null };
       const styleKey = STYLE_KEY_BY_CATEGORY[category];
       if (styleKey) {
-        // renderItemStyleSelect() pre-fills #wrItemStyle with options[0] purely
-        // for display when the item has no style yet (see its own comment) --
-        // reading that value unconditionally here turned "opened the modal,
+        // Reading #wrItemStyle unconditionally here turned "opened the modal,
         // saved for an unrelated reason" into a silent, invented style choice
-        // (Tier 42: an unset footwearStyle became 'boots' on any save). Only
-        // trust the control once the user has actually changed it; otherwise
-        // keep this item's style exactly as it was when the modal opened.
+        // (Tier 42: an unset footwearStyle became 'boots' on any save) --
+        // still a risk even now that the unset state shows an explicit "Not
+        // set" placeholder (see renderItemStyleSelect()), since a user could
+        // still save without touching the control. Only trust the control
+        // once the user has actually changed it; otherwise keep this item's
+        // style exactly as it was when the modal opened.
         patch[styleKey] = itemStyleTouched ? m.querySelector('#wrItemStyle').value : itemOriginalStyle[styleKey];
       }
       Closet.update(openItemId, patch);
