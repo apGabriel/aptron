@@ -59,6 +59,26 @@
   // toward the mannequin's back. A small push here closes most of the
   // rear-seam exposure found during validation; do not negate this sign.
   var TROUSERS_BACK_OFFSET_RATIO = 0.05;
+  // Diagnostic measurement (per-leg radial sampling of the mannequin's own
+  // Skin mesh vs. this prop's geometry, both in world space, 10 height
+  // bands x 12 azimuth bins per leg) found the trousers surface sits closer
+  // to the leg axis than the mannequin's own skin at one leg/band/azimuth
+  // cell (by ~0.019 world units against a ~0.196 skin radius there) -- the
+  // cause of the skin-colored shards reported against real renders. A
+  // per-vertex fix confined to just the thigh band (so cuffs/ankles would
+  // stay untouched) was tried first, but this prop's two legs turned out
+  // not to be quite symmetric about its own local X axis: re-measuring
+  // after each version showed MORE negative-clearance cells than before,
+  // not fewer, because a partial-height edit shifts fitAndPlace's own
+  // whole-object recentering (box.setFromObject() below runs on the
+  // now-asymmetric geometry) in a way a uniform, whole-object scale never
+  // does. This flat multiplier on top of the height-derived scale is the
+  // one that actually measured clean (zero negative cells across all 55
+  // sampled cells, 1.105 was the minimum that did it, this adds a small
+  // buffer) -- it does make the calf/ankle silhouette a bit fuller than
+  // authored, an accepted trade for correctness (see this fix's report for
+  // the section-aware alternative that was tried and rejected).
+  var TROUSERS_XZ_MARGIN_RATIO = 1.12;
 
   var dom = null;          // { bg, modal, viewport, state, notice, closeBtn }
   var runtimePromise = null; // Promise<{THREE, GLTFLoader, OrbitControls}>
@@ -276,7 +296,7 @@
     originals.forEach(function (t) { t.dispose(); });
   }
 
-  function fitAndPlace(THREE, obj, mannequinBox, heightRatio, verticalY) {
+  function fitAndPlace(THREE, obj, mannequinBox, heightRatio, verticalY, xzMarginRatio) {
     var box = new THREE.Box3().setFromObject(obj);
     var size = new THREE.Vector3();
     box.getSize(size);
@@ -284,6 +304,14 @@
     mannequinBox.getSize(mSize);
     var scale = size.y > 0 ? (mSize.y * heightRatio) / size.y : 1;
     obj.scale.setScalar(scale);
+    // Extra, X/Z-only multiplier on top of the uniform height-derived scale
+    // above -- deliberately NOT folded into that single scalar, so callers
+    // without a clearance problem (boots/sneakers/backpack) get the exact
+    // same fit as before. Only trousers passes one, see TROUSERS_XZ_MARGIN_RATIO.
+    if (xzMarginRatio && xzMarginRatio !== 1) {
+      obj.scale.x *= xzMarginRatio;
+      obj.scale.z *= xzMarginRatio;
+    }
 
     box.setFromObject(obj);
     var center = new THREE.Vector3();
@@ -400,7 +428,7 @@
     return matches[0] || null;
   }
 
-  function ensureProp(key, scaleRatio, verticalRatio, backOffset) {
+  function ensureProp(key, scaleRatio, verticalRatio, backOffset, xzMarginRatio) {
     var THREE = viewer.deps.THREE;
     var state = viewer.props[key];
     if (state.root) return Promise.resolve(state);
@@ -417,7 +445,7 @@
       var mCenter = new THREE.Vector3();
       mBox.getCenter(mCenter);
       var verticalY = mBox.min.y + mSize.y * verticalRatio;
-      fitAndPlace(THREE, root, mBox, scaleRatio, verticalY);
+      fitAndPlace(THREE, root, mBox, scaleRatio, verticalY, xzMarginRatio);
       // -Z, not +Z: the mannequin faces +Z (toward the default camera), so
       // subtracting pushes the prop behind the body instead of in front of it.
       if (backOffset) root.position.z -= mSize.z * backOffset;
@@ -503,9 +531,32 @@
     });
   }
 
+  // The mannequin's own hips/thighs are modeled as a separate "Pants"
+  // region (own material, confirmed by inspecting quat-man.glb) underneath
+  // whatever trousers overlay is layered on top -- the same relationship
+  // Socks has to boots/sneakers above. Geometry inspection found the
+  // overlay's own fitted bounding box falls short of the mannequin's Pants
+  // region along one boundary, so the mannequin's own Pants mesh is left
+  // visible (and independently recolored by applyBaseMaterialColor) for as
+  // long as that region stays unhidden. Hidden outright while the trousers
+  // overlay is shown, restored when it isn't -- mirrors setSocksVisible().
+  function setPantsVisible(visible) {
+    var meshes = viewer.meshesByMaterial && viewer.meshesByMaterial.Pants;
+    if (meshes) meshes.forEach(function (m) { m.visible = visible; });
+  }
+
   function updateTrousers(piece) {
+    // Bumped on every call (including the two synchronous early returns
+    // below) so a stale ensureProp('trousers', ...).then()/.catch() from an
+    // earlier selection -- still in flight when the outfit changed again --
+    // can tell it's no longer current and skip applying its (now obsolete)
+    // visibility/color/notice side effects instead of clobbering whatever
+    // the latest selection already set.
+    var mySeq = (viewer.props.trousers.selectionSeq = (viewer.props.trousers.selectionSeq || 0) + 1);
+
     if (!piece) {
       if (viewer.props.trousers.root) viewer.props.trousers.root.visible = false;
+      setPantsVisible(true);
       return;
     }
     // Only an explicit/default 'trousers' bottomStyle has matching geometry.
@@ -516,14 +567,26 @@
     var bottomStyle = piece.bottomStyle || 'trousers';
     if (bottomStyle !== 'trousers') {
       if (viewer.props.trousers.root) viewer.props.trousers.root.visible = false;
+      setPantsVisible(true);
       return;
     }
-    ensureProp('trousers', TROUSERS_HEIGHT_RATIO, TROUSERS_VERTICAL_RATIO, TROUSERS_BACK_OFFSET_RATIO).then(function (state) {
-      state.root.visible = true;
+    ensureProp('trousers', TROUSERS_HEIGHT_RATIO, TROUSERS_VERTICAL_RATIO, TROUSERS_BACK_OFFSET_RATIO, TROUSERS_XZ_MARGIN_RATIO).then(function (state) {
+      // A first-ever load's root defaults to Three.js's own visible:true the
+      // moment ensureProp() adds it to the scene -- so even when this call
+      // is stale, its visibility must be explicitly forced to match the
+      // CURRENT selection, not just skipped, or an in-flight-when-superseded
+      // first load would surface anyway once it finishes (verified by a
+      // race-check script that caught exactly this before this line existed).
+      var isCurrent = viewer.props.trousers.selectionSeq === mySeq;
+      state.root.visible = isCurrent;
+      if (!isCurrent) return; // a newer selection already owns Pants/notice state -- don't touch it
       Object.keys(state.materials).forEach(function (name) {
         safeSetColor(state.materials[name], piece.color);
       });
+      setPantsVisible(false);
     }).catch(function () {
+      if (viewer.props.trousers.selectionSeq !== mySeq) return; // a newer selection has since run
+      setPantsVisible(true);
       setNotice('bottoms', 'Trousers preview couldn’t be loaded — showing the rest of the outfit.');
     });
   }
